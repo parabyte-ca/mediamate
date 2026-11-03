@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, Copy, RefreshCw, Download, Edit2, FolderOpen, Loader2, MinusCircle, Plus, Save, Star, Stethoscope, Trash2, Upload, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Compass, Copy, RefreshCw, Download, Edit2, FolderOpen, Loader2, MinusCircle, Plus, Save, Star, Stethoscope, Trash2, Upload, XCircle } from "lucide-react";
 import { api, SECRET_MASK, type DownloadPath, type FolderSuggestion, type FolderTest, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
 import { PALETTES, useTheme, type Theme } from "../ThemeContext";
 import ImportPanel from "../components/ImportPanel";
+import { startTour } from "../components/Tour";
 import MediaSettings from "../components/MediaSettings";
 import PipelineSettings from "../components/PipelineSettings";
 import PushSettings from "../components/PushSettings";
@@ -251,6 +252,13 @@ function AppearanceSection() {
             </span>
           </button>
         ))}
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-gray-100 dark:border-gray-800 pt-4">
+        <button onClick={startTour}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800">
+          <Compass className="h-4 w-4" />Take the tour
+        </button>
+        <span className="text-xs text-gray-500 dark:text-gray-400">A one-minute look at what each part of ScreenMate does.</span>
       </div>
     </Section>
   );

@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { api, type Journey, type MediaFile, type WatchlistItem } from "../api/client";
 import { PALETTES, useTheme } from "../ThemeContext";
+import { startTour } from "./Tour";
 
 // Ctrl/⌘+K (or "/") opens a palette that finds pages, actions, shows, library
 // files and recent activity. "g" then a letter jumps straight to a page.
@@ -150,6 +151,8 @@ export default function CommandPalette() {
       { id: "theme-dark", group: "Actions", label: "Dark theme", icon: Moon, keywords: "appearance", run: () => setTheme("dark") },
       { id: "theme-light", group: "Actions", label: "Light theme", icon: Sun, keywords: "appearance", run: () => setTheme("light") },
       { id: "theme-system", group: "Actions", label: "Theme: follow the system", icon: Monitor, keywords: "appearance", run: () => setTheme("system") },
+      { id: "tour", group: "Actions", label: "Take the tour", icon: Compass,
+        keywords: "help guide tour getting started welcome how", run: startTour },
       ...PALETTES.map((p) => ({
         id: `palette-${p.id}`, group: "Actions", label: `Colour theme: ${p.name}`, icon: Palette,
         keywords: `appearance colour color theme ${p.note}`, run: () => setPalette(p.id),

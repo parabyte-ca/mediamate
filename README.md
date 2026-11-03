@@ -17,6 +17,7 @@ ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search,
 - **Command palette + PWA:** Ctrl+K for everything, an installable app, and push notifications.
 - **Savings & insights:** GB reclaimed, library codec mix, GPU vs CPU throughput, and a forecast of what encoding the rest would save.
 - **One-click import** of existing AuTorrent and FileSplitter databases.
+- **Guided tour** for new users: a one-minute walk through Search, Watchlist, Calendar, Activity, Library and the rest. It starts once on each new device, and you can replay it from Settings → Appearance or by searching "tour" with Ctrl+K.
 
 ---
 

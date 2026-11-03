@@ -26,6 +26,7 @@ import { PALETTES, useTheme, type Theme } from "../ThemeContext";
 import { authStore } from "../auth";
 import { api } from "../api/client";
 import OnboardingWizard from "./OnboardingWizard";
+import Tour, { TOUR_EVENT, tourSeen } from "./Tour";
 import StatusPill from "./StatusPill";
 import CommandPalette from "./CommandPalette";
 
@@ -88,8 +89,26 @@ export default function Layout() {
   }, []);
   const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
+  // The guided tour: once per device, after the setup wizard if that's showing;
+  // replayed from Settings → Appearance or the command palette.
+  const [touring, setTouring] = useState(false);
+  const [wizardChecked, setWizardChecked] = useState(false);
+
   useEffect(() => {
-    api.onboarding.status().then((s) => setOnboarding(s.needed)).catch(() => {});
+    api.onboarding.status().then((s) => setOnboarding(s.needed)).catch(() => {})
+      .finally(() => setWizardChecked(true));
+  }, []);
+
+  useEffect(() => {
+    if (!wizardChecked || onboarding || tourSeen()) return;
+    const t = setTimeout(() => setTouring(true), 800);
+    return () => clearTimeout(t);
+  }, [wizardChecked, onboarding]);
+
+  useEffect(() => {
+    const start = () => { setMoreOpen(false); setTouring(true); };
+    window.addEventListener(TOUR_EVENT, start);
+    return () => window.removeEventListener(TOUR_EVENT, start);
   }, []);
 
   const [lowSpace, setLowSpace] = useState<{ name: string; free: number }[]>([]);
@@ -132,6 +151,7 @@ export default function Layout() {
     <div className="relative flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
       {onboarding && <OnboardingWizard onClose={() => setOnboarding(false)} />}
       <CommandPalette />
+      <Tour open={touring} onClose={() => setTouring(false)} />
 
       {/* ── Sidebar (md and above) ──────────────────────────────────────────── */}
       <aside
@@ -163,7 +183,7 @@ export default function Layout() {
         </div>
 
         {/* Live status pill */}
-        <div className={collapsed ? "pt-3" : "px-3 pt-3"}>
+        <div className={collapsed ? "pt-3" : "px-3 pt-3"} data-tour="status">
           <StatusPill compact={collapsed} />
         </div>
 
@@ -172,6 +192,7 @@ export default function Layout() {
           <button
             onClick={() => window.dispatchEvent(new Event("screenmate:palette"))}
             title={`Search or jump to… (${isMac ? "⌘" : "Ctrl+"}K)`}
+            data-tour="jump"
             className={`flex w-full items-center rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400 hover:border-blue-300 dark:hover:border-blue-700 ${
               collapsed ? "mx-auto h-8 w-8 justify-center" : "gap-2 px-3 py-1.5"
             }`}
@@ -203,6 +224,7 @@ export default function Layout() {
             <NavLink
               key={to}
               to={to}
+              data-tour={`nav-${to.slice(1)}`}
               title={collapsed ? label : undefined}
               className={({ isActive }) =>
                 `relative flex items-center rounded-lg py-2.5 text-sm font-medium transition-colors ${
@@ -227,6 +249,7 @@ export default function Layout() {
 
         {/* Footer: theme toggle + version */}
         <div
+          data-tour="themes"
           className={`pb-4 ${
             collapsed ? "flex flex-col items-center gap-1.5 px-2" : "px-4"
           }`}
@@ -293,8 +316,8 @@ export default function Layout() {
       {/* + iOS safe area; on md+ resets to zero (see index.css)              */}
       <main className="flex-1 overflow-y-auto main-scroll">
         <div className="sticky top-0 z-30 flex items-center justify-center gap-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/90 px-4 py-2 backdrop-blur md:hidden">
-          <StatusPill />
-          <button aria-label="Search or jump to…" onClick={() => window.dispatchEvent(new Event("screenmate:palette"))}
+          <span data-tour="status"><StatusPill /></span>
+          <button aria-label="Search or jump to…" data-tour="jump" onClick={() => window.dispatchEvent(new Event("screenmate:palette"))}
                   className="rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-1.5 text-gray-500">
             <Command className="h-3.5 w-3.5" />
           </button>
@@ -320,6 +343,7 @@ export default function Layout() {
           <NavLink
             key={to}
             to={to}
+            data-tour={`nav-${to.slice(1)}`}
             className={({ isActive }) =>
               `flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium min-h-[52px] transition-colors ${
                 isActive
@@ -340,6 +364,7 @@ export default function Layout() {
         <button
           type="button"
           onClick={() => setMoreOpen((o) => !o)}
+          data-tour="nav-more"
           aria-expanded={moreOpen}
           aria-controls="more-sheet"
           className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium min-h-[52px] transition-colors ${

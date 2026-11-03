@@ -17,6 +17,7 @@ ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search,
 - **Command palette + PWA:** Ctrl+K for everything, an installable app, and push notifications.
 - **Savings & insights:** GB reclaimed, library codec mix, GPU vs CPU throughput, and a forecast of what encoding the rest would save.
 - **One-click import** of existing AuTorrent and FileSplitter databases.
+- **Rename & organise:** finished files move into your TV and Movies folders with Plex-style names (`Show/Season 01/Show - S01E02.mkv`, `Title (2020)/Title (2020).mkv`), subtitles included. This runs as an Auto pipeline step or from the Library, one file or many at a time.
 - **Guided tour** for new users: a one-minute walk through Search, Watchlist, Calendar, Activity, Library and the rest. It starts once on each new device, and you can replay it from Settings → Appearance or by searching "tour" with Ctrl+K.
 
 ---

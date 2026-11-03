@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-  ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderSearch, Layers, Loader2, MoreHorizontal,
+  ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderInput, FolderSearch, Layers, Loader2, MoreHorizontal,
   Pause, Play, Scissors, SkipForward, Square, Timer, Trash2, X,
 } from "lucide-react";
 import { api, type MediaFile, type MediaJobType, type MediaStats } from "../api/client";
@@ -98,7 +98,8 @@ type Dialog =
   | { kind: "split"; files: MediaFile[] }
   | { kind: "rename"; file: MediaFile }
   | { kind: "delete"; files: MediaFile[] }
-  | { kind: "preview"; file: MediaFile };
+  | { kind: "preview"; file: MediaFile }
+  | { kind: "organise"; files: MediaFile[] };
 
 // ── Row actions menu ──────────────────────────────────────────────────────────
 
@@ -131,6 +132,7 @@ function RowMenu({ f, onAction }: { f: MediaFile; onAction: (a: string) => void 
           </div>
           {item("trim", "Trim intro (3.5 s)", Timer, busy(f))}
           {item("rename", "Rename…", Edit2, busy(f))}
+          {item("organise", "Rename & organise…", FolderInput, busy(f))}
           {item("anthology", f.is_anthology ? "Mark not anthology" : "Mark as anthology", Layers)}
           {f.anthology_override != null && item("anthology-auto", "Anthology: automatic", Layers)}
           {busy(f) ? item("cancel", "Cancel job", Square) : item("skip", "Skip", SkipForward, f.status === "skipped")}
@@ -339,6 +341,7 @@ export default function Library() {
 
   const onRowAction = (f: MediaFile, a: string) => {
     if (a === "preview") return setDialog({ kind: "preview", file: f });
+    if (a === "organise") return setDialog({ kind: "organise", files: [f] });
     if (a === "encode") setDialog({ kind: "encode", files: [f] });
     else if (a === "split") setDialog({ kind: "split", files: [f] });
     else if (a === "trim") queue([f], "trim");
@@ -434,6 +437,7 @@ export default function Library() {
           <button className={btnGhost} onClick={() => setDialog({ kind: "split", files: pickedFiles })}><Scissors className="h-4 w-4" />Split</button>
           <button className={btnGhost} onClick={() => queue(pickedFiles, "trim")}><Timer className="h-4 w-4" />Trim</button>
           <button className={btnGhost} onClick={() => run(async () => { const r = await api.media.bulk("skip", [...picked]); setPicked(new Set()); return `Skipped ${r.done}`; })}><SkipForward className="h-4 w-4" />Skip</button>
+          <button className={btnGhost} onClick={() => setDialog({ kind: "organise", files: files.filter((x) => picked.has(x.id)) })}><FolderInput className="h-4 w-4" />Organise</button>
           <button className={`${btnGhost} text-red-600 dark:text-red-400`} onClick={() => setDialog({ kind: "delete", files: pickedFiles })}><Trash2 className="h-4 w-4" />Delete</button>
           <button className="ml-auto text-sm text-blue-700 dark:text-blue-300 hover:underline" onClick={() => setPicked(new Set())}>Clear selection</button>
         </div>
@@ -548,7 +552,61 @@ export default function Library() {
         </Modal>
       )}
       {dialog?.kind === "preview" && <PreviewDialog file={dialog.file} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "organise" && <OrganiseDialog files={dialog.files} onClose={() => setDialog(null)}
+                                                      onDone={(m) => { setPicked(new Set()); say(m); load(); }} />}
     </div>
+  );
+}
+
+/** Rename & organise: show where each file would go, then move them. */
+function OrganiseDialog({ files, onClose, onDone }: { files: MediaFile[]; onClose: () => void; onDone: (msg: string) => void }) {
+  const [plans, setPlans] = useState<Record<number, { ok: boolean; target?: string; already?: boolean; msg?: string }>>({});
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    files.slice(0, 50).forEach((f) =>
+      api.media.organisePreview(f.id).then((r) => setPlans((p) => ({ ...p, [f.id]: r })))
+        .catch((e) => setPlans((p) => ({ ...p, [f.id]: { ok: false, msg: String(e.message ?? e) } }))));
+  }, [files]);
+  const movable = files.filter((f) => plans[f.id]?.ok && !plans[f.id]?.already);
+  const go = async () => {
+    setBusy(true);
+    try {
+      const r = await api.media.bulk("organise", movable.map((f) => f.id));
+      onClose();
+      onDone(`Organised ${r.done}${r.skipped ? ` (${r.skipped} busy, left alone)` : ""}${r.errors.length ? ` — ${r.errors[0]}` : ""}`);
+    } catch (e) {
+      onClose();
+      onDone((e as Error).message);
+    }
+  };
+  return (
+    <Modal title={files.length === 1 ? `Rename & organise ${files[0].filename}` : `Rename & organise ${files.length} files`} onClose={onClose} wide>
+      <ul className="max-h-[50vh] space-y-2 overflow-y-auto text-xs">
+        {files.slice(0, 50).map((f) => {
+          const p = plans[f.id];
+          return (
+            <li key={f.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-2">
+              <p className="truncate font-medium text-gray-900 dark:text-gray-100" title={f.path}>{f.filename}</p>
+              {!p ? <p className="text-gray-400">Working it out…</p>
+                : p.ok ? <p className="break-all text-gray-600 dark:text-gray-300">{p.already ? "Already in place" : <>→ <span className="font-mono">{p.target}</span></>}</p>
+                : <p className="text-amber-700 dark:text-amber-400">{p.msg}</p>}
+            </li>
+          );
+        })}
+      </ul>
+      {files.length > 50 && <p className="mt-2 text-xs text-gray-500">Showing the first 50.</p>}
+      <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+        Files move with Plex-style names, along with matching subtitles. Nothing is overwritten.
+        Folders and naming are in Settings → Auto pipeline.
+      </p>
+      <div className="mt-4 flex justify-end gap-2">
+        <button className={btnGhost} onClick={onClose}>Cancel</button>
+        <button className={btnPrimary} onClick={go} disabled={busy || !movable.length}>
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderInput className="h-4 w-4" />}
+          Move {movable.length || ""}
+        </button>
+      </div>
+    </Modal>
   );
 }
 

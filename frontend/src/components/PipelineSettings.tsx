@@ -4,7 +4,7 @@ import {
 } from "lucide-react";
 import {
   api,
-  type PathMappingRow, type PathTestResult, type PipelineAction, type PipelineActionType,
+  type OrganiseSettings, type PathMappingRow, type PathTestResult, type PipelineAction, type PipelineActionType,
   type PipelineMatch, type PipelinePreview, type PipelineRule, type PipelineRuleInput,
   type PipelineSettings as PSettings, type PipelineTemplate,
 } from "../api/client";
@@ -12,8 +12,10 @@ import { fmtSize } from "../utils";
 
 // Settings → Auto pipeline: what happens to a file after it downloads.
 
-const STEP_ORDER: PipelineActionType[] = ["trim", "encode", "split"];
-const STEP_LABEL: Record<PipelineActionType, string> = { trim: "Trim intro", encode: "Encode to x265", split: "Split scenes" };
+const STEP_ORDER: PipelineActionType[] = ["trim", "encode", "split", "organise"];
+const STEP_LABEL: Record<PipelineActionType, string> = {
+  trim: "Trim intro", encode: "Encode to x265", split: "Split scenes", organise: "Rename & organise",
+};
 const RESOLUTIONS = ["original", "480p", "720p", "1080p", "1440p", "2160p"];
 
 const input = "w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:border-blue-500 focus:outline-none";
@@ -54,7 +56,7 @@ function RuleModal({ initial, onClose, onSaved }: {
   const [name, setName] = useState(initial.name);
   const [m, setM] = useState<PipelineMatch>(initial.match);
   const [steps, setSteps] = useState<Record<PipelineActionType, PipelineAction | null>>(() => {
-    const s: Record<PipelineActionType, PipelineAction | null> = { trim: null, encode: null, split: null };
+    const s: Record<PipelineActionType, PipelineAction | null> = { trim: null, encode: null, split: null, organise: null };
     for (const a of initial.actions) s[a.type] = a;
     return s;
   });
@@ -151,6 +153,8 @@ function RuleModal({ initial, onClose, onSaved }: {
                   <span className="w-4 text-xs text-gray-400">{i + 1}</span>
                   <label className="flex flex-1 items-center gap-2">
                     <input type="checkbox" checked={!!steps[t]}
+                           disabled={(t === "split" && !!steps.organise) || (t === "organise" && !!steps.split)}
+                           title={t === "split" || t === "organise" ? "Split and Rename & organise can't be in the same rule" : undefined}
                            onChange={(e) => { setSteps((s) => ({ ...s, [t]: e.target.checked ? { type: t } : null })); setPreview(null); }} />
                     <span className="text-gray-800 dark:text-gray-200">{STEP_LABEL[t]}</span>
                   </label>
@@ -164,7 +168,8 @@ function RuleModal({ initial, onClose, onSaved }: {
                 </div>
               ))}
             </div>
-            <p className="mt-2 text-xs text-gray-500">Encode quality and speed use the global encoder settings. Trim cuts the first 3.5 s.</p>
+            <p className="mt-2 text-xs text-gray-500">Encode quality and speed use the global encoder settings. Trim cuts the first 3.5 s.
+              Rename &amp; organise moves the file into your TV or Movies folder with a Plex-style name (set up below the rules).</p>
           </fieldset>
 
           {preview && (
@@ -182,6 +187,85 @@ function RuleModal({ initial, onClose, onSaved }: {
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}Save rule
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Rename & organise ─────────────────────────────────────────────────────────
+
+function OrganiseSection() {
+  const [s, setS] = useState<OrganiseSettings | null>(null);
+  const [sample, setSample] = useState("The.Bear.S03E01.1080p.WEB.h264-GROUP.mkv");
+  const [example, setExample] = useState<{ ok: boolean; target?: string; error?: string } | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [advanced, setAdvanced] = useState(false);
+
+  useEffect(() => { api.pipeline.organise().then(setS).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!s) return;
+    const t = setTimeout(() => {
+      const { warnings: _w, ...unsaved } = s;
+      api.pipeline.organiseExample(sample, unsaved).then(setExample).catch(() => setExample(null));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [s, sample]);
+
+  if (!s) return null;
+  const set = (k: keyof OrganiseSettings, v: string) => { setS({ ...s, [k]: v }); setSaved(null); };
+  const save = async () => {
+    const { warnings: _w, ...data } = s;
+    setS(await api.pipeline.saveOrganise(data));
+    setSaved("Saved");
+  };
+  const field = (k: "organise_tv_dir" | "organise_movie_dir", label: string, ph: string) => (
+    <label className="block">
+      <span className="mb-1 block text-xs text-gray-500">{label}</span>
+      <input className={input} value={s[k]} placeholder={ph} onChange={(e) => set(k, e.target.value)} />
+      {s.warnings?.[k] && <span className="mt-1 block text-xs text-amber-700 dark:text-amber-400">{s.warnings[k]}</span>}
+    </label>
+  );
+
+  return (
+    <div>
+      <h3 className="mb-1 text-sm font-semibold text-gray-900 dark:text-gray-100">Rename &amp; organise</h3>
+      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+        Used by the <b>Rename &amp; organise</b> rule step and the Library's <b>Rename &amp; organise</b> action.
+        Files get Plex-style names in these folders (paths as ScreenMate sees them). Downloads are removed from
+        qBittorrent first (stops seeding, keeps the file). Matching subtitles move too; nothing is ever overwritten.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {field("organise_tv_dir", "TV folder", "/mnt/video/TV Shows")}
+        {field("organise_movie_dir", "Movies folder", "/mnt/video/Movies")}
+      </div>
+      <button className="mt-2 text-xs text-blue-600 hover:underline dark:text-blue-400" onClick={() => setAdvanced((a) => !a)}>
+        {advanced ? "Hide" : "Change"} naming templates
+      </button>
+      {advanced && (
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          <label className="block"><span className="mb-1 block text-xs text-gray-500">TV template</span>
+            <input className={`${input} font-mono text-xs`} value={s.organise_tv_template}
+                   onChange={(e) => set("organise_tv_template", e.target.value)} /></label>
+          <label className="block"><span className="mb-1 block text-xs text-gray-500">Movie template</span>
+            <input className={`${input} font-mono text-xs`} value={s.organise_movie_template}
+                   onChange={(e) => set("organise_movie_template", e.target.value)} /></label>
+          <p className="text-xs text-gray-500 sm:col-span-2">
+            Fields: <code>{"{show}"}</code> <code>{"{season:02d}"}</code> <code>{"{episode:02d}"}</code> <code>{"{title}"}</code> <code>{"{year}"}</code> <code>{"{ext}"}</code>. Use / for folders.
+          </p>
+        </div>
+      )}
+      <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+        <label className="block"><span className="mb-1 block text-xs text-gray-500">Try a file name</span>
+          <input className={input} value={sample} onChange={(e) => setSample(e.target.value)} /></label>
+        {example && (
+          <p className={`mt-2 break-all text-xs ${example.ok ? "text-green-700 dark:text-green-400" : "text-amber-700 dark:text-amber-400"}`}>
+            {example.ok ? <>→ <span className="font-mono">{example.target}</span></> : example.error}
+          </p>
+        )}
+      </div>
+      <div className="mt-3 flex items-center gap-3">
+        <button className={btnPrimary} onClick={save}><Save className="h-4 w-4" />Save</button>
+        {saved && <span className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400"><CheckCircle2 className="h-3.5 w-3.5" />{saved}</span>}
       </div>
     </div>
   );
@@ -376,6 +460,8 @@ export default function PipelineSettings() {
         )}
         {showPreview && <LibraryPreview onClose={() => setShowPreview(false)} />}
       </div>
+
+      <OrganiseSection />
 
       {/* Path mappings */}
       <div>

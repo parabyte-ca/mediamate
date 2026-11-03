@@ -1,5 +1,6 @@
 """/api/pipeline — auto-pipeline rules, path mappings, settings, dry-run and apply."""
 import json
+import os
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -55,6 +56,58 @@ def put_settings(body: dict = Body(...), db: Session = Depends(get_db)):
         db.merge(row)
     db.commit()
     return get_settings(db)
+
+
+# ── Rename & organise ─────────────────────────────────────────────────────────
+
+def _organise_status(db: Session, values: dict) -> dict:
+    """The settings plus a warning per folder that won't work."""
+    from ..services import folders, organise
+    roots = folders.scan_roots(db)
+    warnings = {}
+    for key, label in (("organise_tv_dir", "TV"), ("organise_movie_dir", "Movies")):
+        path = (values.get(key) or "").strip()
+        if not path:
+            continue
+        if not os.path.isdir(path):
+            warnings[key] = f"{path} doesn't exist in ScreenMate's container. Mount it, or check Settings → Folders → Test."
+        elif not any(path == r or path.startswith(r.rstrip("/") + "/") for r in roots):
+            warnings[key] = (f"{path} isn't inside a folder with Scan & encode on, so the Library would lose "
+                             f"track of organised {label.lower()} files. Add it in Settings → Folders.")
+    return {**{k: values.get(k, v) for k, v in organise.SETTINGS_DEFAULTS.items()}, "warnings": warnings}
+
+
+@router.get("/organise")
+def get_organise(db: Session = Depends(get_db)):
+    from ..services import organise
+    return _organise_status(db, organise.get_settings(db))
+
+
+@router.put("/organise")
+def put_organise(body: dict = Body(...), db: Session = Depends(get_db)):
+    from ..services import organise
+    for key in organise.SETTINGS_DEFAULTS:
+        if key in body and isinstance(body[key], str):
+            row = db.get(Setting, key) or Setting(key=key)
+            row.value = body[key].strip()
+            db.merge(row)
+    db.commit()
+    return _organise_status(db, organise.get_settings(db))
+
+
+@router.post("/organise/example")
+def organise_example(body: dict = Body(...), db: Session = Depends(get_db)):
+    """Where a file name would go with these (possibly unsaved) settings."""
+    from ..services import organise
+    settings = organise.get_settings(db)
+    settings.update({k: v for k, v in body.items() if k in organise.SETTINGS_DEFAULTS and isinstance(v, str) and v})
+    name = str(body.get("filename") or "")
+    try:
+        dest, parsed = organise.target_for(settings, "/x/" + os.path.basename(name), body.get("show") or None)
+        return {"ok": True, "target": dest, "kind": parsed.kind}
+    except (organise.OrganiseError, KeyError, ValueError, IndexError) as exc:
+        msg = str(exc) if isinstance(exc, organise.OrganiseError) else f"The template has a problem: {exc}"
+        return {"ok": False, "error": msg}
 
 
 # ── Rules ─────────────────────────────────────────────────────────────────────

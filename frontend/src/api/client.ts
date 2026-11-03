@@ -87,7 +87,22 @@ export interface WatchlistItem {
   metadata_checked_at?: string | null;
   /** Rename & organise folder: null = from the age rating. */
   audience?: "general" | "mature" | null;
+  /** "tv" follows episodes; "movie" waits for its release and downloads once. */
+  kind?: "tv" | "movie";
+  tmdb_id?: number | null;
+  year?: number | null;
+  /** When good releases appear (YYYY-MM-DD); release_kind says how we know. */
+  release_date?: string | null;
+  release_kind?: "digital" | "physical" | "estimated" | null;
+  completed_at?: string | null;
+  /** Movies: stay on the watchlist after downloading. */
+  keep?: boolean;
+  movie_state?: MovieState | null;
+  /** When a finished movie leaves the watchlist; null = kept or not finished. */
+  removes_at?: string | null;
 }
+
+export type MovieState = "waiting" | "looking" | "downloading" | "downloaded" | "paused";
 
 export interface QualityProfile {
   id: number;
@@ -128,6 +143,10 @@ export interface WatchlistCreate {
   audience?: "general" | "mature" | "auto" | null;
   /** Picked from the suggestions, so the show isn't guessed from the name. */
   tvmaze_id?: number | null;
+  kind?: "tv" | "movie";
+  keep?: boolean;
+  /** Movies picked from the suggestions (added through TMDB, never guessed). */
+  tmdb_id?: number | null;
 }
 
 /** A TVMaze show a watchlist item could be (Change match). */
@@ -301,6 +320,8 @@ export interface BrowseMovie {
   votes: number;
   in_library: boolean;
   certification: string | null;
+  on_watchlist?: boolean;
+  watchlist_id?: number | null;
 }
 
 export interface BrowseShow {
@@ -778,6 +799,10 @@ export const api = {
         `/watchlist/${id}/matches${q ? `?q=${encodeURIComponent(q)}` : ""}`),
     setMatch: (id: number, tvmaze_id: number) =>
       req<WatchlistItem>(`/watchlist/${id}/match`, { method: "POST", body: JSON.stringify({ tvmaze_id }) }),
+    addFromTmdb: (data: { tmdb_id: number; profile_id?: number | null; audience?: "auto" | "general" | "mature" | null }) =>
+      req<WatchlistItem>("/watchlist/from-tmdb", { method: "POST", body: JSON.stringify(data) }),
+    searchMovie: (id: number) =>
+      req<{ status: string; message: string; title?: string }>(`/watchlist/${id}/search-movie`, { method: "POST" }),
     addFromTvmaze: (data: { tvmaze_id: number; start?: "next" | "beginning" }) =>
       req<WatchlistItem>("/watchlist/from-tvmaze", { method: "POST", body: JSON.stringify(data) }),
     checkShowStatuses: () =>

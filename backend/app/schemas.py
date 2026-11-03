@@ -70,6 +70,7 @@ class WatchlistCreate(BaseModel):
     profile_id: Optional[int] = None
     audience: Optional[Literal["auto", "general", "mature"]] = None   # None/"auto" = from the age rating
     tvmaze_id: Optional[int] = None    # picked from the suggestions: no guessing
+    kind: Literal["tv", "movie"] = "tv"
 
 
 class WatchlistUpdate(BaseModel):
@@ -87,6 +88,7 @@ class WatchlistUpdate(BaseModel):
     profile_id: Optional[int] = None
     # Rename & organise folder: "auto" (from the age rating), "general" or "mature".
     audience: Optional[Literal["auto", "general", "mature"]] = None
+    keep: Optional[bool] = None             # movies: stay on the watchlist after downloading
 
 
 class WatchlistOut(BaseModel):
@@ -116,6 +118,16 @@ class WatchlistOut(BaseModel):
     premiered: Optional[str] = None
     metadata_checked_at: Optional[datetime] = None
     audience: Optional[str] = None
+    kind: Optional[str] = "tv"
+    tmdb_id: Optional[int] = None
+    year: Optional[int] = None
+    release_date: Optional[str] = None
+    release_kind: Optional[str] = None
+    completed_at: Optional[datetime] = None
+    keep: Optional[bool] = False
+    # Movies, filled in by GET /watchlist: waiting | looking | downloading | downloaded | paused
+    movie_state: Optional[str] = None
+    removes_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -179,6 +191,12 @@ class ProfileOut(BaseModel):
     watchlist_count: int = 0
 
     model_config = {"from_attributes": True}
+
+
+class AddFromTmdbRequest(BaseModel):
+    tmdb_id: int
+    profile_id: Optional[int] = None
+    audience: Optional[Literal["auto", "general", "mature"]] = None
 
 
 class AddFromTvmazeRequest(BaseModel):

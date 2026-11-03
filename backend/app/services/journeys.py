@@ -362,6 +362,11 @@ def _after_commit(session: Session) -> None:
         # Journeys are a view; never let them break a download write.
         logger.exception("Journey update after commit failed")
     for dl_id in completed:
+        try:
+            from . import movies
+            movies.on_download_complete(bind, dl_id)
+        except Exception:
+            logger.exception("Marking the watchlist movie finished failed (download %s)", dl_id)
         _start_pipeline(bind, dl_id)
 
 

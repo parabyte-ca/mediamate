@@ -57,6 +57,22 @@ MIGRATIONS: list[tuple[str, str | None]] = [
     ("ALTER TABLE download_paths ADD COLUMN local_path TEXT", None),
     ("ALTER TABLE download_paths ADD COLUMN downloads INTEGER NOT NULL DEFAULT 1", None),
     ("ALTER TABLE download_paths ADD COLUMN scan INTEGER NOT NULL DEFAULT 1", None),
+    # Movies on the watchlist. Items TMDB matched (a TMDB poster, no TVMaze show)
+    # were movies all along.
+    (
+        "ALTER TABLE watchlist ADD COLUMN kind TEXT NOT NULL DEFAULT 'tv'",
+        "UPDATE watchlist SET kind = 'movie' WHERE tvmaze_id IS NULL AND poster_url LIKE '%image.tmdb.org%'",
+    ),
+    ("ALTER TABLE watchlist ADD COLUMN tmdb_id INTEGER", None),
+    (
+        "ALTER TABLE watchlist ADD COLUMN year INTEGER",
+        "UPDATE watchlist SET year = CAST(substr(premiered, 1, 4) AS INTEGER) "
+        "WHERE kind = 'movie' AND premiered GLOB '[12][0-9][0-9][0-9]*'",
+    ),
+    ("ALTER TABLE watchlist ADD COLUMN release_date TEXT", None),
+    ("ALTER TABLE watchlist ADD COLUMN release_kind TEXT", None),
+    ("ALTER TABLE watchlist ADD COLUMN completed_at DATETIME", None),
+    ("ALTER TABLE watchlist ADD COLUMN keep INTEGER NOT NULL DEFAULT 0", None),
 ]
 
 

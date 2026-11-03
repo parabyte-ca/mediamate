@@ -975,6 +975,11 @@ export default function Settings() {
               <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">Only download if a torrent has at least this many seeds.</p>
               <input type="number" min={0} value={settings.min_seeds ?? "3"} onChange={(e) => set("min_seeds", e.target.value)} className={FIELD} />
             </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Remove finished movies after (days)</label>
+              <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">A movie leaves the Watchlist this long after its download finishes, unless you keep it. The file stays in the Library. 0 = never.</p>
+              <input type="number" min={0} value={settings.watchlist_movie_keep_days ?? "30"} onChange={(e) => set("watchlist_movie_keep_days", e.target.value)} className={FIELD} />
+            </div>
           </div>
 
           <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-4">

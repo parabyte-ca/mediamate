@@ -47,6 +47,16 @@ class WatchlistItem(Base):
     # Consecutive lookups that found no poster; drives the retry back-off.
     metadata_attempts = Column(Integer, default=0, server_default="0")
 
+    # Movies: "tv" items follow episodes; "movie" items wait for the release date,
+    # download once, and leave the watchlist some days after (unless kept).
+    kind = Column(String, nullable=False, default="tv", server_default="tv")
+    tmdb_id = Column(Integer, nullable=True)
+    year = Column(Integer, nullable=True)
+    release_date = Column(String, nullable=True)        # YYYY-MM-DD: when good releases appear
+    release_kind = Column(String, nullable=True)        # digital | physical | estimated
+    completed_at = Column(DateTime, nullable=True)      # the movie's download finished
+    keep = Column(Boolean, default=False, server_default="0")
+
     episodes = relationship(
         "WatchlistEpisode",
         back_populates="watchlist_item",

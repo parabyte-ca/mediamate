@@ -68,7 +68,10 @@ async def browse_movies(q: str = "", list: str = "popular", db: Session = Depend
         p = organise.parse(r["path"])
         if p.kind == "movie":
             have.setdefault(ratings._key(p.title), set()).add(p.year)
+    on_list = {w.tmdb_id: w.id for w in db.query(WatchlistItem).filter(WatchlistItem.tmdb_id.isnot(None))}
     for m in movies:
+        m["watchlist_id"] = on_list.get(m["tmdb_id"])
+        m["on_watchlist"] = m["watchlist_id"] is not None
         years = have.get(ratings._key(m["title"]))
         m["in_library"] = bool(years) and (m["year"] is None or m["year"] in years or None in years)
         # Age rating when we already know it (no extra lookups for a whole list).

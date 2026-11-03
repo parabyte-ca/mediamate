@@ -166,6 +166,29 @@ async def enrich_item(item, tmdb_key: str | None = None) -> str:
     TMDB is only asked when ``tmdb_key`` is given and TVMaze has no such show.
     """
     movie = None
+    if getattr(item, "kind", "tv") == "movie":
+        # A movie never goes to TVMaze (a show with the same name would win).
+        if not tmdb_key:
+            return NOT_FOUND
+        try:
+            movie = (await tmdb.movie(tmdb_key, item.tmdb_id) if item.tmdb_id
+                     else await find_movie(tmdb_key, [item.search_query, item.title]))
+        except tmdb.TMDBUnavailable as exc:
+            logger.warning("TMDB unavailable while looking up %r: %s", item.title, exc)
+            return UNAVAILABLE
+        except Exception as exc:
+            logger.warning("Movie lookup failed for %r: %s", item.title, exc)
+            return UNAVAILABLE
+        item.metadata_checked_at = datetime.now(timezone.utc)
+        if movie is not None:
+            apply_movie(item, movie)
+            if not item.tmdb_id and movie.get("id"):
+                item.tmdb_id = movie["id"]
+            released = (movie.get("release_date") or "")[:4]
+            if not item.year and released.isdigit():
+                item.year = int(released)
+        item.metadata_attempts = 0 if item.poster_url else (item.metadata_attempts or 0) + 1
+        return FOUND if movie is not None else NOT_FOUND
     try:
         show = None
         if item.tvmaze_id:

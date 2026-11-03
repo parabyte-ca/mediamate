@@ -29,7 +29,7 @@ const STEPS: Step[] = [
   {
     targets: ["nav-watchlist"],
     title: "Watchlist",
-    body: "Follow a show and new episodes download by themselves as they come out.",
+    body: "Follow a show and new episodes download by themselves as they come out. Add a movie and it downloads once it's released.",
   },
   {
     targets: ["nav-calendar", "nav-more"],

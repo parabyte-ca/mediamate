@@ -25,6 +25,8 @@ DEFAULTS: dict[str, str] = {
     "qbit_category": "screenmate",
     "scan_interval_minutes": "60",
     "min_seeds": "3",
+    # Finished watchlist movies leave the watchlist after this many days (0 = never).
+    "watchlist_movie_keep_days": "30",
     "remove_on_complete": "false",
     "jackett_url": "",
     "jackett_api_key": "",

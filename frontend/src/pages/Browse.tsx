@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { CheckCircle2, Clapperboard, Download, Loader2, Plus, Search, Star, Tv, X } from "lucide-react";
 import { api, type BrowseMovie, type BrowseShow, type MovieList } from "../api/client";
 import Poster from "../components/Poster";
-import { fmtDate } from "../utils";
+import { fmtDate, fmtDay } from "../utils";
 
 function AddDialog({ show, onClose, onAdded }: {
   show: BrowseShow;
@@ -101,6 +101,25 @@ function MovieBrowse() {
   }, [list, query]);
 
   const find = (m: BrowseMovie) => navigate(`/search?q=${encodeURIComponent(`${m.title}${m.year ? ` ${m.year}` : ""}`)}`);
+  const [adding, setAdding] = useState<number | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+  const add = async (m: BrowseMovie) => {
+    setAdding(m.tmdb_id);
+    setAddError(null);
+    try {
+      const w = await api.watchlist.addFromTmdb({ tmdb_id: m.tmdb_id });
+      setMovies((ms) => ms && ms.map((x) => x.tmdb_id === m.tmdb_id ? { ...x, on_watchlist: true, watchlist_id: w.id } : x));
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : "Couldn't add the movie.");
+    } finally {
+      setAdding(null);
+    }
+  };
+  // Coming soon and in cinemas: nothing good to download yet, so only offer the watchlist,
+  // which waits for the digital release. Older movies can be searched for right away too.
+  const today = new Date().toISOString().slice(0, 10);
+  const canFindNow = (m: BrowseMovie) =>
+    list !== "upcoming" && list !== "now_playing" && !!m.release_date && m.release_date <= today;
 
   if (needKey) {
     return (
@@ -145,6 +164,12 @@ function MovieBrowse() {
         </p>
       )}
 
+      {addError && <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">{addError}</p>}
+      {list === "upcoming" && !query && movies !== null && movies.length > 0 && (
+        <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+          Add one to your watchlist and ScreenMate downloads it when it's released digitally.
+        </p>
+      )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {(movies ?? []).map((m) => (
           <div key={m.tmdb_id} className="flex gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-3 shadow-sm">
@@ -159,7 +184,7 @@ function MovieBrowse() {
                 )}
               </div>
               <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-                {m.release_date && <span>{list === "popular" || query ? m.year : fmtDate(m.release_date)}</span>}
+                {m.release_date && <span>{list === "popular" || query ? m.year : fmtDay(m.release_date)}</span>}
                 {m.certification && <span className="rounded border border-gray-300 dark:border-gray-600 px-1 text-[10px] font-medium">{m.certification}</span>}
               </p>
               {m.overview && <p className="mt-1 line-clamp-2 text-xs text-gray-400 dark:text-gray-500">{m.overview}</p>}
@@ -169,10 +194,22 @@ function MovieBrowse() {
                     <CheckCircle2 className="h-3.5 w-3.5" /> In your library
                   </Link>
                 )}
-                {!m.in_library && (
+                {!m.in_library && (m.on_watchlist ? (
+                  <Link to="/watchlist?type=movies" className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> On your watchlist
+                  </Link>
+                ) : (
+                  <button onClick={() => add(m)} disabled={adding !== null}
+                    title={canFindNow(m) ? "Download it automatically" : "Downloads automatically once it's out digitally"}
+                    className="inline-flex min-h-[36px] items-center gap-1 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60">
+                    {adding === m.tmdb_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                    Add to watchlist
+                  </button>
+                ))}
+                {!m.in_library && canFindNow(m) && (
                   <button onClick={() => find(m)}
-                    className="inline-flex min-h-[36px] items-center gap-1 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700">
-                    <Download className="h-3.5 w-3.5" /> Find downloads
+                    className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-gray-300 dark:border-gray-600 px-3 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
+                    <Download className="h-3.5 w-3.5" /> Find now
                   </button>
                 )}
               </div>
@@ -196,7 +233,7 @@ export default function Browse() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Browse</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {type === "tv" ? "Shows airing soon, or search any show, and add it to your watchlist."
-              : "Popular, in-theatre and upcoming movies, or search any movie."}
+              : "Popular, in-theatre and upcoming movies, or search any movie, and add it to your watchlist."}
           </p>
         </div>
         <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5" role="tablist" aria-label="Browse">

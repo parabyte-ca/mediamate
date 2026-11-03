@@ -50,6 +50,16 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
             item.last_checked = datetime.now(timezone.utc)
             db.commit()
 
+            if item.kind == "movie":
+                try:
+                    from . import movies
+                    result = movies.grab(db, item, settings)
+                    if result["status"] == "started":
+                        logger.info("Auto-downloaded movie: %s", result.get("title"))
+                except Exception as e:
+                    logger.error("Error processing watchlist movie %d: %s", item.id, e)
+                continue
+
             try:
                 query = f"{item.search_query} S{item.season:02d}E{item.episode:02d}"
 
@@ -287,7 +297,8 @@ async def _check_statuses_async(db, *, item_id: int | None = None) -> None:
     settings = {s.key: s.value for s in db.query(Setting).all()}
     apprise_url = settings.get("apprise_url", "")
 
-    query = db.query(WatchlistItem).filter(WatchlistItem.enabled == True)
+    query = db.query(WatchlistItem).filter(WatchlistItem.enabled == True,
+                                           WatchlistItem.kind != "movie")
     if item_id is not None:
         query = query.filter(WatchlistItem.id == item_id)
     items = query.all()
@@ -670,6 +681,36 @@ def purge_old_trash() -> None:
         logger.exception("Trash cleanup failed")
 
 
+def run_movie_housekeeping() -> None:
+    """Daily: refresh release dates of movies still waiting, and remove finished ones."""
+    import asyncio
+    from ..database import SessionLocal
+    from ..models import Setting, WatchlistItem
+    from . import movies, watchlist_add
+    from .apprise_notify import notify
+
+    db = SessionLocal()
+    try:
+        waiting = [i for i in db.query(WatchlistItem).filter(WatchlistItem.kind == "movie",
+                                                             WatchlistItem.completed_at.is_(None)).all()
+                   if not movies.released(i)]
+
+        async def refresh_all():
+            for item in waiting:
+                await watchlist_add.refresh_release(db, item)
+        if waiting:
+            asyncio.run(refresh_all())
+        gone = movies.cleanup_finished(db)
+        if gone:
+            row = db.query(Setting).filter(Setting.key == "apprise_url").first()
+            notify(row.value if row else "", title="ScreenMate — Watchlist",
+                   body=f"Removed {len(gone)} finished movie{'s' if len(gone) != 1 else ''}: {', '.join(gone)}")
+    except Exception:
+        logger.exception("Movie housekeeping failed")
+    finally:
+        db.close()
+
+
 def start_scheduler() -> None:
     from .download_events import process_download_events
     from .updater import daily_update_check
@@ -729,6 +770,12 @@ def start_scheduler() -> None:
         trigger=IntervalTrigger(hours=24),
         next_run_time=datetime.now(timezone.utc),  # once at startup, then daily
         id="trash_cleanup",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        run_movie_housekeeping,
+        trigger=CronTrigger(hour=5, minute=11, timezone="UTC"),
+        id="movie_housekeeping",
         replace_existing=True,
     )
     _scheduler.start()

@@ -60,3 +60,72 @@ async def create_from_tvmaze(db, tvmaze_id: int, start: str | None = None,
     db.commit()
     db.refresh(item)
     return item
+
+
+class NoTmdbKey(Exception):
+    """Movies need the user's TMDB key."""
+
+
+def _country(db) -> str:
+    from ..models import Setting
+    from .browse import valid_country
+    row = db.query(Setting).filter(Setting.key == "browse_country").first()
+    return valid_country(row.value if row else None)
+
+
+async def create_from_tmdb(db, tmdb_id: int, profile_id: int | None = None, audience: str | None = None):
+    """Add a movie: it waits for its digital release, then downloads once.
+
+    Raises :class:`NoTmdbKey`, :class:`AlreadyOnWatchlist`, or tmdb.TMDBUnavailable.
+    """
+    from ..models import WatchlistItem
+    from . import tmdb
+
+    key = show_metadata.tmdb_key(db)
+    if not key:
+        raise NoTmdbKey()
+    if db.query(WatchlistItem).filter(WatchlistItem.tmdb_id == tmdb_id).first():
+        raise AlreadyOnWatchlist()
+    movie = await tmdb.movie(key, tmdb_id)
+    released = (movie.get("release_date") or "")[:10]
+    release_date, release_kind = await tmdb.release_info(key, tmdb_id, _country(db), released)
+    title = movie.get("title") or movie.get("original_title") or "Unknown movie"
+    item = WatchlistItem(
+        kind="movie",
+        tmdb_id=tmdb_id,
+        title=title,
+        search_query=show_metadata.search_query_from_name(title),
+        year=int(released[:4]) if released[:4].isdigit() else None,
+        release_date=release_date,
+        release_kind=release_kind,
+        season=1,
+        episode=1,
+        profile_id=profile_id if profile_id is not None else default_profile_id(db),
+        audience=None if audience in (None, "auto") else audience,
+    )
+    show_metadata.apply_movie(item, movie)
+    item.metadata_checked_at = datetime.now(timezone.utc)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+async def refresh_release(db, item) -> bool:
+    """Re-read a movie's release date from TMDB (dates move). True if it changed. Never raises."""
+    from . import tmdb
+    key = show_metadata.tmdb_key(db)
+    if item.kind != "movie" or not item.tmdb_id or not key:
+        return False
+    try:
+        fallback = f"{item.year}-01-01" if item.year and not item.release_date else None
+        date, kind = await tmdb.release_info(key, item.tmdb_id, _country(db), fallback)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).info("Release date refresh for %r skipped: %s", item.title, exc)
+        return False
+    if date and (date, kind) != (item.release_date, item.release_kind):
+        item.release_date, item.release_kind = date, kind
+        db.commit()
+        return True
+    return False

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import QualityProfile, WatchlistEpisode, WatchlistItem
 from ..schemas import (
+    AddFromTmdbRequest,
     AddFromTvmazeRequest,
     MarkEpisodeRequest,
     WatchlistCreate,
@@ -38,7 +39,32 @@ def _require_profile(db: Session, profile_id: int | None) -> None:
 
 @router.get("/watchlist", response_model=list[WatchlistOut])
 def get_watchlist(db: Session = Depends(get_db)):
-    return db.query(WatchlistItem).order_by(WatchlistItem.created_at.desc()).all()
+    from ..services import movies
+    out = []
+    days = movies.keep_days(db)
+    for item in db.query(WatchlistItem).order_by(WatchlistItem.created_at.desc()).all():
+        row = WatchlistOut.model_validate(item)
+        if item.kind == "movie":
+            row.movie_state = movies.state(db, item)
+            row.removes_at = movies.removes_on(db, item, days)
+        out.append(row)
+    return out
+
+
+@router.post("/watchlist/{item_id}/search-movie")
+def search_movie_now(item_id: int, db: Session = Depends(get_db)):
+    """Look for a watchlist movie right now (even before its release date) and download it."""
+    from ..services import movies
+    item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if item.kind != "movie":
+        raise HTTPException(status_code=422, detail="That's a TV show; search for an episode instead.")
+    try:
+        return movies.grab(db, item, force=True)
+    except Exception as exc:
+        logger.error("Movie grab failed for %r: %s", item.title, exc)
+        raise HTTPException(status_code=502, detail=f"Could not start the download: {exc}")
 
 
 @router.post("/watchlist", response_model=WatchlistOut, status_code=201)
@@ -47,6 +73,8 @@ async def create_watchlist_item(item: WatchlistCreate, db: Session = Depends(get
     data = item.model_dump()
     if data.get("audience") == "auto":
         data["audience"] = None
+    if data.get("kind") == "movie":
+        data["tvmaze_id"] = None
     if data.get("tvmaze_id") and db.query(WatchlistItem).filter(WatchlistItem.tvmaze_id == data["tvmaze_id"]).first():
         raise HTTPException(status_code=409, detail="That show is already on your watchlist.")
     db_item = WatchlistItem(**data)
@@ -56,6 +84,8 @@ async def create_watchlist_item(item: WatchlistCreate, db: Session = Depends(get
     try:
         await asyncio.wait_for(show_metadata.enrich_item(db_item, show_metadata.tmdb_key(db)), _ENRICH_TIMEOUT)
         db.commit()
+        if db_item.kind == "movie":
+            await asyncio.wait_for(watchlist_add.refresh_release(db, db_item), _ENRICH_TIMEOUT)
         db.refresh(db_item)
     except Exception as exc:  # timeout or lookup failure: the show is already saved
         db.rollback()
@@ -76,6 +106,22 @@ async def add_from_tvmaze(body: AddFromTvmazeRequest, db: Session = Depends(get_
         raise HTTPException(status_code=409, detail="That show is already on your watchlist.")
     except watchlist_add.ShowNotFound:
         raise HTTPException(status_code=404, detail="TVMaze could not find that show.")
+
+
+@router.post("/watchlist/from-tmdb", response_model=WatchlistOut, status_code=201)
+async def add_from_tmdb(body: AddFromTmdbRequest, db: Session = Depends(get_db)):
+    """Add a movie picked from Browse or the Add form. It waits for its digital release."""
+    from ..services import tmdb
+    if body.profile_id is not None:
+        _require_profile(db, body.profile_id)
+    try:
+        return await watchlist_add.create_from_tmdb(db, body.tmdb_id, body.profile_id, body.audience)
+    except watchlist_add.NoTmdbKey:
+        raise HTTPException(status_code=400, detail="Add your TMDB API key in Settings → Integrations to add movies.")
+    except watchlist_add.AlreadyOnWatchlist:
+        raise HTTPException(status_code=409, detail="That movie is already on your watchlist.")
+    except tmdb.TMDBUnavailable as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach TMDB ({exc}). Try again in a moment.")
 
 
 @router.post("/watchlist/refresh-metadata")

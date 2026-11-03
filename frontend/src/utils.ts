@@ -37,3 +37,11 @@ export function fmtDayHeading(d: Date): string {
 export function fmtTime(s: string): string {
   return new Date(s).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
+
+/** A calendar day ("2026-12-18") as "Dec 18, 2026" in the viewer's locale, with no time-zone shift. */
+export function fmtDay(d?: string | null): string {
+  const m = d?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return d ?? "";
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+    .toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}

@@ -15,8 +15,11 @@ import { fmtSize } from "../utils";
 const PAGE_SIZE = 50;
 const RESOLUTIONS = ["original", "480p", "720p", "1080p", "1440p", "2160p"];
 
+/** Short labels for the row chips; the filter and tiles spell "ok" out in full. */
+const STATUS_LABEL: Record<string, string> = { ok: "on target" };
 const STATUS_STYLE: Record<string, string> = {
   pending: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
+  ok: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400",
   queued: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",
   processing: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400",
   done: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
@@ -400,7 +403,8 @@ export default function Library() {
   };
 
   const tiles: [string, number | string, string][] = stats ? [
-    ["Files", stats.total, ""], ["Pending", stats.pending, "pending"], ["Queued", stats.queued, "queued"],
+    ["Files", stats.total, ""], ["Pending", stats.pending, "pending"], ["In target format", stats.ok ?? 0, "ok"],
+    ["Queued", stats.queued, "queued"],
     ["Processing", stats.processing, "processing"], ["Done", stats.done, "done"], ["Errors", stats.errors, "error"],
   ] : [];
 
@@ -427,7 +431,7 @@ export default function Library() {
       </div>
 
       {stats && (
-        <div className="mb-4 grid grid-cols-3 gap-2 sm:grid-cols-7">
+        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
           {tiles.map(([label, value, status]) => (
             <button key={label} onClick={() => setFilter("status", status === filters.status ? "" : status)}
                     className={`rounded-xl border p-3 text-left transition-colors ${filters.status === status && status ? "border-blue-400 bg-blue-50 dark:bg-blue-950/40" : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-gray-300"}`}>
@@ -450,7 +454,7 @@ export default function Library() {
         </select>
         <select aria-label="Status" className={sel} value={filters.status} onChange={(e) => setFilter("status", e.target.value)}>
           <option value="">All statuses</option>
-          {["pending", "queued", "processing", "done", "error", "skipped"].map((s) => <option key={s} value={s}>{s}</option>)}
+          {["pending", "ok", "queued", "processing", "done", "error", "skipped"].map((s) => <option key={s} value={s}>{s === "ok" ? "in target format" : s}</option>)}
         </select>
         <select aria-label="Codec" className={sel} value={filters.codec} onChange={(e) => setFilter("codec", e.target.value)}>
           <option value="">All codecs</option>{codecs.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -534,9 +538,18 @@ export default function Library() {
                   <td className="hidden whitespace-nowrap px-2 py-2 text-gray-600 dark:text-gray-300 lg:table-cell">{fmtDur(f.duration_sec)}</td>
                   <td className="hidden whitespace-nowrap px-2 py-2 text-gray-600 dark:text-gray-300 sm:table-cell">{fmtSize(f.size_bytes)}</td>
                   <td className="px-2 py-2">
-                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[f.status] ?? STATUS_STYLE.pending}`}>
-                      {f.status === "processing" && <Loader2 className="h-3 w-3 animate-spin" />}{f.status}
+                    <span title={f.status === "ok" ? `Already in target format${f.target ? `: ${f.target}` : ""}` : undefined}
+                          className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLE[f.status] ?? STATUS_STYLE.pending}`}>
+                      {f.status === "processing" && <Loader2 className="h-3 w-3 animate-spin" />}{STATUS_LABEL[f.status] ?? f.status}
                     </span>
+                    {f.target_note && (
+                      <span title={f.target ? `Target: ${f.target}` : undefined}
+                            className={`mt-1 block w-fit whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium ${f.target_note === "above"
+                              ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400"
+                              : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"}`}>
+                        {f.target_note === "above" ? "Above target" : "Below preferred"}
+                      </span>
+                    )}
                   </td>
                   <td className="px-2 py-2">
                     <div className="flex items-center justify-end">
@@ -607,10 +620,20 @@ const DOCTOR_KINDS: { kind: DoctorKind; title: string; hint: string }[] = [
   { kind: "audience", title: "Wrong folder", hint: "Rated for adults in a regular folder, or the other way round." },
   { kind: "missing", title: "Missing files", hint: "Listed in the Library, but the file is gone." },
   { kind: "name", title: "Not named for Plex", hint: "Fixing moves them with Rename & organise." },
+  { kind: "oversize", title: "Larger than target", hint: "Already H.265, but bigger than the folder's target. Fixing re-encodes them smaller." },
+  { kind: "lowres", title: "Lower than preferred", hint: "Can't be improved in place; look for a better copy." },
   { kind: "sample", title: "Sample clips", hint: "Fixed automatically when that's on." },
   { kind: "junk", title: "Leftover files", hint: "Fixed automatically when that's on." },
   { kind: "empty", title: "Empty folders", hint: "Fixed automatically when that's on." },
 ];
+
+/** "Some.Movie.2019.720p.x265.mkv" -> "Some Movie 2019", for a Search link. */
+function searchTitle(path: string): string {
+  const name = path.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
+  const words = name.replace(/[._]+/g, " ").replace(/\[[^\]]*\]/g, " ");
+  const cut = words.search(/\b(2160p|1080p|720p|480p|4k|x26[45]|h\.?26[45]|hevc|web|bluray|hdtv)\b/i);
+  return (cut > 0 ? words.slice(0, cut) : words).replace(/\s+/g, " ").trim();
+}
 
 /** Library doctor: last report, Check now, Fix (one, or all of a kind), and auto-fix. */
 function DoctorDialog({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
@@ -629,7 +652,9 @@ function DoctorDialog({ onClose, onChanged }: { onClose: () => void; onChanged: 
       onChanged();
     } catch (e) { setMsg((e as Error).message); } finally { setBusy(null); }
   };
-  const fix = async (ids: string[], key: string) => {
+  const fix = async (ids: string[], key: string, kind?: DoctorKind) => {
+    if (kind === "oversize" && !confirm(`Re-encode ${ids.length === 1 ? "this file" : `${ids.length} files`} to the folder's target size? `
+        + "It takes a while and replaces the file (the original goes to the 30-day trash).")) return;
     setBusy(key); setMsg(null);
     try {
       const r = await api.doctor.fix(ids);
@@ -674,9 +699,11 @@ function DoctorDialog({ onClose, onChanged }: { onClose: () => void; onChanged: 
                   <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{title} <span className="text-gray-400">({list.length})</span></p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">{hint}</p>
                 </div>
-                <button className={btnGhost} disabled={!!busy} onClick={() => fix(list.map((i) => i.id), kind)}>
-                  {busy === kind ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Fix all
-                </button>
+                {kind !== "lowres" && (
+                  <button className={btnGhost} disabled={!!busy} onClick={() => fix(list.map((i) => i.id), kind, kind)}>
+                    {busy === kind ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{kind === "oversize" ? "Shrink all" : "Fix all"}
+                  </button>
+                )}
               </header>
               <ul className="divide-y divide-gray-100 dark:divide-gray-800">
                 {list.slice(0, 100).map((i) => (
@@ -686,10 +713,17 @@ function DoctorDialog({ onClose, onChanged }: { onClose: () => void; onChanged: 
                       <p className="break-words text-gray-500 dark:text-gray-400">{i.detail}</p>
                       {i.error && <p className="text-red-600 dark:text-red-400">{i.error}</p>}
                     </div>
-                    <button className="shrink-0 rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-                            disabled={!!busy} title={i.fix} onClick={() => fix([i.id], i.id)}>
-                      {busy === i.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Fix"}
-                    </button>
+                    {i.kind === "lowres" ? (
+                      <Link to={`/search?q=${encodeURIComponent(searchTitle(i.path))}`}
+                            className="shrink-0 rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800">
+                        Search
+                      </Link>
+                    ) : (
+                      <button className="shrink-0 rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                              disabled={!!busy} title={i.fix} onClick={() => fix([i.id], i.id, i.kind)}>
+                        {busy === i.id ? <Loader2 className="h-3 w-3 animate-spin" /> : i.kind === "oversize" ? "Shrink" : "Fix"}
+                      </button>
+                    )}
                   </li>
                 ))}
                 {list.length > 100 && <li className="px-3 py-2 text-xs text-gray-500">…and {list.length - 100} more (Fix all includes them).</li>}

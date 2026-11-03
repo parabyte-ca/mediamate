@@ -184,7 +184,15 @@ export interface DownloadPath {
   free_bytes?: number | null;
   total_bytes?: number | null;
   low_space?: boolean;
+  /** Target format for files here (all H.265). */
+  target?: FolderTarget;
+  target_min?: number | null;
+  target_max?: number | null;
+  target_shrink?: boolean;
+  target_summary?: string;
 }
+
+export type FolderTarget = "auto" | "tv" | "movies" | "custom";
 
 export interface FolderInput {
   name: string;
@@ -193,6 +201,10 @@ export interface FolderInput {
   local_path?: string | null;
   downloads?: boolean;
   scan?: boolean;
+  target?: FolderTarget;
+  target_min?: number | null;
+  target_max?: number | null;
+  target_shrink?: boolean;
 }
 
 export type Settings = Record<string, string>;
@@ -481,7 +493,8 @@ export interface ProgressEvent {
 
 export type PipelineActionType = "trim" | "encode" | "split" | "organise";
 
-export type DoctorKind = "sample" | "junk" | "empty" | "broken" | "missing" | "duplicate" | "audience" | "name";
+export type DoctorKind = "sample" | "junk" | "empty" | "broken" | "missing" | "duplicate" | "audience" | "name"
+  | "oversize" | "lowres";
 
 export interface OrganisePlan {
   ok: boolean;
@@ -604,7 +617,7 @@ export interface PathTestResult {
            rule_name?: string | null; actions?: string[]; error?: string }[];
 }
 
-export type MediaStatus = "pending" | "queued" | "processing" | "done" | "error" | "skipped" | "cancelled";
+export type MediaStatus = "pending" | "ok" | "queued" | "processing" | "done" | "error" | "skipped" | "cancelled";
 export type MediaJobType = "encode" | "split" | "trim";
 
 export interface FolderCheck {
@@ -649,11 +662,15 @@ export interface MediaFile {
   error_msg: string | null;
   category: string;
   updated_at: string | null;
+  /** The folder's target, e.g. "H.265, 720p (bellesa)". */
+  target?: string | null;
+  /** "above": H.265 but bigger than the target; "below": lower than preferred. */
+  target_note?: "above" | "below" | null;
 }
 
 export interface MediaStats {
   total: number; done: number; processing: number; queued: number; errors: number;
-  skipped: number; pending: number; total_saved_bytes: number; paused: boolean; scan_running: boolean;
+  skipped: number; pending: number; ok?: number; total_saved_bytes: number; paused: boolean; scan_running: boolean;
 }
 
 export interface MediaSettings {

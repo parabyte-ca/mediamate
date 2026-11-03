@@ -79,9 +79,10 @@ def delete_profile(profile_id: int, db: Session = Depends(get_db)):
         item.prefer_season_packs = p.prefer_season_packs
         item.profile_id = None
 
-    default = db.query(Setting).filter(Setting.key == _DEFAULT_KEY).first()
-    if default and default.value == str(p.id):
-        default.value = ""
+    for key in (_DEFAULT_KEY, "default_movie_profile_id"):
+        default = db.query(Setting).filter(Setting.key == key).first()
+        if default and default.value == str(p.id):
+            default.value = ""
 
     db.delete(p)
     db.commit()

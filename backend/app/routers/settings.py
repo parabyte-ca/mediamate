@@ -44,7 +44,8 @@ DEFAULTS: dict[str, str] = {
     "retry_max_attempts": "3",
     "low_disk_warn_gb": "10",
     "default_indexer": "all",
-    "default_profile_id": "",
+    "default_profile_id": "",          # new TV shows
+    "default_movie_profile_id": "",    # new movies
     "browse_country": "US",
     # Trakt watchlist sync
     "trakt_enabled": "false",

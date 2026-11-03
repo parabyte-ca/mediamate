@@ -33,6 +33,11 @@ def _with_disk_usage(db: Session, dp: DownloadPath, threshold: int = 0) -> dict:
         "free_bytes": None,
         "total_bytes": None,
         "low_space": False,
+        "target": dp.target or "auto",
+        "target_min": dp.target_min,
+        "target_max": dp.target_max,
+        "target_shrink": bool(dp.target_shrink),
+        "target_summary": _target_summary(dp),
     }
     try:
         usage = shutil.disk_usage(local)  # measured here, where ScreenMate sees the folder
@@ -48,6 +53,48 @@ def _with_disk_usage(db: Session, dp: DownloadPath, threshold: int = 0) -> dict:
 def get_paths(db: Session = Depends(get_db)):
     threshold = _threshold(db)
     return [_with_disk_usage(db, dp, threshold) for dp in db.query(DownloadPath).all()]
+
+
+def _target_summary(dp: DownloadPath) -> str:
+    from ..services.media import targets
+    kind = dp.target or "auto"
+    if kind == "auto":
+        return "H.265; TV 720p–1080p, movies 1080p–4K (by file name)"
+    t = targets.folder_target(kind, dp.target_min, dp.target_max, dp.target_shrink, "", dp.name)
+    span = targets.LABEL[t.min] if t.min == t.max else f"{targets.LABEL[t.min]}–{targets.LABEL[t.max]}"
+    return f"H.265, {span}" + (", shrink bigger files when encoding" if t.shrink else "")
+
+
+def _guess_target(name: str) -> dict:
+    n = (name or "").lower()
+    if "bellesa" in n:
+        return {"target": "custom", "target_min": 720, "target_max": 720, "target_shrink": True}
+    if "movie" in n or "film" in n:
+        return {"target": "movies"}
+    if "tv" in n or "show" in n or "series" in n:
+        return {"target": "tv"}
+    return {"target": "auto"}
+
+
+def _clean_target(values: dict) -> dict:
+    from ..services.media import targets
+    for key in ("target_min", "target_max"):
+        if key in values and values[key] is not None and values[key] not in targets.HEIGHTS:
+            raise HTTPException(status_code=400, detail="Pick a resolution from the list")
+    for key in ("target", "target_shrink", "target_min", "target_max"):
+        if key in values and values[key] is None:
+            values.pop(key)
+    return values
+
+
+def _reclassify(db: Session, dp: DownloadPath) -> None:
+    """Targets changed: re-check this folder's pending / in-target files."""
+    try:
+        from ..services.media import targets
+        targets.reclassify(folders.local_of(db, dp))
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Re-checking target formats failed")
 
 
 def _clean(values: dict, current: DownloadPath | None = None) -> dict:
@@ -77,7 +124,9 @@ def path_suggestions(db: Session = Depends(get_db)):
 
 @router.post("/paths", response_model=DownloadPathOut, status_code=201)
 def create_path(path: DownloadPathCreate, db: Session = Depends(get_db)):
-    values = _clean(path.model_dump())
+    values = _clean_target(_clean(path.model_dump()))
+    if "target" not in values:
+        values.update(_guess_target(values.get("name", "")))
     if values.get("is_default"):
         db.query(DownloadPath).update({"is_default": False})
     db_path = DownloadPath(**values)
@@ -85,6 +134,7 @@ def create_path(path: DownloadPathCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_path)
     folders.refresh(db)
+    _reclassify(db, db_path)
     return _with_disk_usage(db, db_path, _threshold(db))
 
 
@@ -93,14 +143,17 @@ def update_path(path_id: int, path: DownloadPathUpdate, db: Session = Depends(ge
     db_path = db.query(DownloadPath).filter(DownloadPath.id == path_id).first()
     if not db_path:
         raise HTTPException(status_code=404, detail="Path not found")
-    updates = _clean(path.model_dump(exclude_unset=True), db_path)
+    updates = _clean_target(_clean(path.model_dump(exclude_unset=True), db_path))
     if updates.get("is_default"):
         db.query(DownloadPath).update({"is_default": False})
+    target_changed = any(k.startswith("target") for k in updates) or "local_path" in updates or "path" in updates
     for field, value in updates.items():
         setattr(db_path, field, value)
     db.commit()
     db.refresh(db_path)
     folders.refresh(db)
+    if target_changed:
+        _reclassify(db, db_path)
     return _with_disk_usage(db, db_path, _threshold(db))
 
 

@@ -408,20 +408,25 @@ function MovieSuggestions({ name, chosen, onPick }: {
   );
 }
 
-function FormModal({ initial, initialKind = "tv", paths, profiles, defaultProfileId, onClose, onSave }: {
+function FormModal({ initial, initialKind = "tv", paths, profiles, defaultProfileId, defaultMovieProfileId = null, onClose, onSave }: {
   initial?: WatchlistItem;
   initialKind?: "tv" | "movie";
   paths: DownloadPath[];
   profiles: QualityProfile[];
   defaultProfileId: number | null;
+  defaultMovieProfileId?: number | null;
   onClose: () => void;
   onSave: (data: WatchlistCreate) => void;
 }) {
   const defaultPath = paths.find((p) => p.is_default);
+  const defaultFor = (kind: "tv" | "movie") => {
+    const id = kind === "movie" && profiles.some((p) => p.id === defaultMovieProfileId) ? defaultMovieProfileId : defaultProfileId;
+    return profiles.some((p) => p.id === id) ? id : null;
+  };
   const [form, setForm] = useState<WatchlistCreate>(
     initial
       ? { title: initial.title, search_query: initial.search_query, quality: initial.quality, codec: initial.codec ?? "x265", season: initial.season, episode: initial.episode, download_path_id: initial.download_path_id, enabled: initial.enabled, max_size_mb: initial.max_size_mb ?? null, preferred_groups: initial.preferred_groups ?? null, prefer_season_packs: initial.prefer_season_packs ?? false, profile_id: initial.profile_id ?? null, audience: initial.audience ?? "auto", kind: initial.kind ?? "tv" }
-      : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: defaultPath?.id, enabled: true, max_size_mb: null, preferred_groups: null, prefer_season_packs: false, profile_id: profiles.some((p) => p.id === defaultProfileId) ? defaultProfileId : null, audience: "auto", kind: initialKind }
+      : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: defaultPath?.id, enabled: true, max_size_mb: null, preferred_groups: null, prefer_season_packs: false, profile_id: defaultFor(initialKind), audience: "auto", kind: initialKind }
   );
   const profile = profiles.find((p) => p.id === form.profile_id);
   const set = (k: keyof WatchlistCreate, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
@@ -439,7 +444,9 @@ function FormModal({ initial, initialKind = "tv", paths, profiles, defaultProfil
             <div className="grid grid-cols-2 gap-1 rounded-lg border border-gray-200 dark:border-gray-700 p-1" role="radiogroup" aria-label="What are you adding?">
               {([["tv", "TV show", Tv], ["movie", "Movie", Clapperboard]] as const).map(([k, label, Icon]) => (
                 <button key={k} type="button" role="radio" aria-checked={form.kind === k}
-                  onClick={() => setForm((f) => ({ ...f, kind: k, tvmaze_id: null, tmdb_id: null }))}
+                  onClick={() => setForm((f) => ({ ...f, kind: k, tvmaze_id: null, tmdb_id: null,
+                    // Switching kind swaps an untouched default profile for the other kind's default.
+                    profile_id: f.profile_id === defaultFor(f.kind ?? "tv") ? defaultFor(k) : f.profile_id }))}
                   className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-sm font-medium ${form.kind === k
                     ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}>
                   <Icon className="h-4 w-4" />{label}
@@ -1031,6 +1038,7 @@ export default function Watchlist() {
   };
   const [profiles,   setProfiles]  = useState<QualityProfile[]>([]);
   const [defaultProfileId, setDefaultProfileId] = useState<number | null>(null);
+  const [defaultMovieProfileId, setDefaultMovieProfileId] = useState<number | null>(null);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -1042,6 +1050,7 @@ export default function Watchlist() {
       ]);
       setItems(w); setPaths(p.filter((x) => x.downloads !== false)); setProfiles(pr);  // only folders downloads can go to
       setDefaultProfileId(st.default_profile_id ? Number(st.default_profile_id) : null);
+      setDefaultMovieProfileId(st.default_movie_profile_id ? Number(st.default_movie_profile_id) : null);
     } finally { setLoading(false); }
   };
 
@@ -1361,7 +1370,7 @@ export default function Watchlist() {
       )}
 
       {modal !== null && (
-        <FormModal initial={modal === true ? undefined : modal} initialKind={tab === "movies" ? "movie" : "tv"} paths={paths} profiles={profiles} defaultProfileId={defaultProfileId} onClose={() => setModal(null)} onSave={handleSave} />
+        <FormModal initial={modal === true ? undefined : modal} initialKind={tab === "movies" ? "movie" : "tv"} paths={paths} profiles={profiles} defaultProfileId={defaultProfileId} defaultMovieProfileId={defaultMovieProfileId} onClose={() => setModal(null)} onSave={handleSave} />
       )}
 
       {toast && (

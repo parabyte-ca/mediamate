@@ -48,8 +48,13 @@ def lib(tmp_path, monkeypatch):
     return Session, media, index
 
 
+# Size against the folder's target is covered in tests/media/test_targets.py; the tiny
+# clips here would all be "lower than preferred", so these tests leave those out.
+SIZE_KINDS = {"lowres", "oversize"}
+
+
 def kinds(report):
-    return sorted((i["kind"], os.path.basename(i["path"])) for i in report["issues"])
+    return sorted((i["kind"], os.path.basename(i["path"])) for i in report["issues"] if i["kind"] not in SIZE_KINDS)
 
 
 def test_finds_each_kind_of_problem(lib):
@@ -72,7 +77,7 @@ def test_finds_each_kind_of_problem(lib):
         ("sample", "sample.mkv"), ("junk", "RARBG.txt"), ("empty", "Empty"),   # one entry per empty tree
         ("broken", "broken.mkv"), ("missing", "gone.mkv"), ("duplicate", "Show.S01E01.720p.mkv"),
     ])
-    assert [i["kind"] for i in r["issues"]][:2] == ["sample", "junk"]       # listed by kind
+    assert [i["kind"] for i in r["issues"] if i["kind"] not in SIZE_KINDS][:2] == ["sample", "junk"]  # by kind
     dup = next(i for i in r["issues"] if i["kind"] == "duplicate")
     assert dup["keep"].endswith("Show.S01E01.1080p.mkv")           # higher resolution is kept
 
@@ -147,11 +152,12 @@ def test_endpoints_run_fix_and_toggle(api):
     assert client.get("/api/doctor").json() == {"auto_fix": True, "report": None}
 
     r = client.post("/api/doctor/run").json()["report"]
-    ids = {i["kind"]: i["id"] for i in r["issues"]}
+    ids = {i["kind"]: i["id"] for i in r["issues"] if i["kind"] not in SIZE_KINDS}
     assert set(ids) == {"missing", "duplicate"}
 
     out = client.post("/api/doctor/fix", json={"ids": list(ids.values())}).json()
-    assert out["done"] == 2 and out["errors"] == [] and out["report"]["issues"] == []
+    assert out["done"] == 2 and out["errors"] == []
+    assert [i for i in out["report"]["issues"] if i["kind"] not in SIZE_KINDS] == []
     assert not (media / "A.S01E01.mkv").exists() and (media / "A.S01E01.HEVC.mkv").exists()
     assert [r["filename"] for r in store.get_all_files()] == ["A.S01E01.HEVC.mkv"]
 

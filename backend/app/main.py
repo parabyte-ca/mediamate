@@ -42,6 +42,12 @@ async def lifespan(app: FastAPI):
         if not db.query(Setting).filter(Setting.key == "session_secret").first():
             db.add(Setting(key="session_secret", value=secrets.token_hex(32)))
             db.commit()
+        try:
+            from .services import watchlist_add
+            watchlist_add.ensure_format_defaults(db)
+        except Exception:
+            db.rollback()
+            logging.getLogger(__name__).exception("Creating the TV/movie quality defaults failed")
     finally:
         db.close()
 

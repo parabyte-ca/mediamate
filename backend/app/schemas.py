@@ -25,6 +25,11 @@ class DownloadPathCreate(BaseModel):
     local_path: Optional[str] = None   # blank: worked out from the path mappings
     downloads: bool = True             # qBittorrent may save here
     scan: bool = True                  # the media engine scans and encodes here
+    # Target format (all H.265); None = guessed from the name.
+    target: Optional[Literal["auto", "tv", "movies", "custom"]] = None
+    target_min: Optional[int] = None
+    target_max: Optional[int] = None
+    target_shrink: Optional[bool] = None
 
 
 class DownloadPathUpdate(BaseModel):
@@ -34,6 +39,10 @@ class DownloadPathUpdate(BaseModel):
     local_path: Optional[str] = None
     downloads: Optional[bool] = None
     scan: Optional[bool] = None
+    target: Optional[Literal["auto", "tv", "movies", "custom"]] = None
+    target_min: Optional[int] = None
+    target_max: Optional[int] = None
+    target_shrink: Optional[bool] = None
 
 
 class DownloadPathOut(BaseModel):
@@ -49,6 +58,11 @@ class DownloadPathOut(BaseModel):
     free_bytes: Optional[int] = None
     total_bytes: Optional[int] = None
     low_space: bool = False
+    target: str = "auto"
+    target_min: Optional[int] = None
+    target_max: Optional[int] = None
+    target_shrink: bool = False
+    target_summary: str = ""           # e.g. "H.265, 720p–1080p"
 
     model_config = {"from_attributes": True}
 

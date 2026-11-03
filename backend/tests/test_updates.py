@@ -778,3 +778,76 @@ def test_status_reports_the_phase_of_a_running_upgrade(tmp_path, monkeypatch):
     assert s["upgrade_state"] == "running" and s["upgrade_phase"] == "downloading"
     assert "upgrade_log" not in s
 
+
+
+# ── upgrade timings (progress estimate) ──────────────────────────────────────
+
+
+class TestUpgradeTimings:
+    def _finish(self, db_session, version, minutes):
+        from app.services import updater
+        at = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        updater._set_json_setting(db_session, "update_pending", {"version": version, "at": at.isoformat()})
+        with patch("app.services.updater.get_current_version", return_value=version):
+            return updater.record_upgrade_finished(db_session)
+
+    def test_request_then_restart_records_the_duration(self, db_session, upgrade_dir):
+        from app.services import updater
+        _seed_cache(db_session, version="2.7.0")
+        _helper_up(upgrade_dir)
+        _request(db_session, upgrade_dir, "2.6.1", "2.7.0")
+        assert updater._get_json_setting(db_session, "update_pending")["version"] == "2.7.0"
+        later = datetime.now(timezone.utc) + timedelta(minutes=9)
+        with patch("app.services.updater.get_current_version", return_value="2.7.0"):
+            took = updater.record_upgrade_finished(db_session, now=later)
+        assert 535 <= took <= 545
+        assert updater.upgrade_durations(db_session) == [took]
+        assert updater._get_json_setting(db_session, "update_pending") is None
+
+    def test_estimate_is_the_median_of_recent_upgrades(self, db_session):
+        from app.services import updater
+        assert updater.upgrade_estimate(db_session) is None
+        for m in (8, 6, 40, 7):           # one slow outlier
+            self._finish(db_session, "2.7.0", m)
+        assert updater.upgrade_estimate(db_session) == 450          # median of 6, 7, 8, 40 min
+        for m in (5, 5, 5):               # only the latest 5 count
+            self._finish(db_session, "2.7.0", m)
+        assert updater.upgrade_estimate(db_session) == 300
+
+    def test_keeps_the_last_ten(self, db_session):
+        from app.services import updater
+        for m in range(1, 13):
+            self._finish(db_session, "2.7.0", m)
+        assert len(updater.upgrade_durations(db_session)) == 10
+        assert updater.upgrade_durations(db_session)[0] == 180
+
+    def test_a_restart_on_another_version_does_not_count(self, db_session):
+        from app.services import updater
+        updater._set_json_setting(db_session, "update_pending",
+                                  {"version": "2.7.0", "at": datetime.now(timezone.utc).isoformat()})
+        with patch("app.services.updater.get_current_version", return_value="2.6.1"):
+            assert updater.record_upgrade_finished(db_session) is None
+        assert updater._get_json_setting(db_session, "update_pending")     # still waiting
+        assert updater.upgrade_durations(db_session) == []
+
+    def test_abandoned_requests_are_forgotten(self, db_session):
+        from app.services import updater
+        updater._set_json_setting(db_session, "update_pending", {"version": "2.7.0", "at": (
+            datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()})
+        with patch("app.services.updater.get_current_version", return_value="2.6.1"):
+            updater.record_upgrade_finished(db_session)
+        assert updater._get_json_setting(db_session, "update_pending") is None
+        assert self._finish(db_session, "2.7.0", 300) is None             # 5 h: not a real timing
+
+    def test_garbage_is_ignored(self, db_session):
+        from app.services import updater
+        updater._set_json_setting(db_session, "update_durations", ["x", -3, 120, 99999])
+        assert updater.upgrade_durations(db_session) == [120]
+        updater._set_json_setting(db_session, "update_pending", {"version": "2.7.0", "at": "nope"})
+        assert updater.record_upgrade_finished(db_session) is None
+
+    def test_status_reports_the_estimate(self, db_session, upgrade_dir):
+        for m in (6, 8):
+            self._finish(db_session, "2.7.0", m)
+        s = _status(db_session, upgrade_dir, "2.7.0")
+        assert s["upgrade_estimate_seconds"] == 420 and s["upgrade_history_count"] == 2

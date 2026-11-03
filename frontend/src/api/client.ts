@@ -392,6 +392,10 @@ export interface UpdateStatus {
   previous_version: string | null;
   can_rollback: boolean;
   helper_install_cmd: string;
+  /** Median seconds of recent upgrades here; null until one has finished. */
+  upgrade_estimate_seconds?: number | null;
+  /** How many recent upgrades the estimate is based on. */
+  upgrade_history_count?: number;
   upgrade_log?: string;
 }
 

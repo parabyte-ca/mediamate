@@ -142,6 +142,83 @@ def _save_previous(db, version: str) -> None:
     db.commit()
 
 
+# ── Upgrade timings (for the progress estimate) ───────────────────────────────
+
+_PENDING_KEY = "update_pending"          # {"version", "at"}: an upgrade asked for and not yet seen
+_DURATIONS_KEY = "update_durations"      # seconds each recent upgrade took, oldest first
+DURATIONS_KEPT = 10
+ESTIMATE_FROM = 5                        # the estimate is the median of this many recent upgrades
+_MAX_UPGRADE_SECONDS = 3 * 3600          # longer than this, it failed or was abandoned
+
+
+def _get_json_setting(db, key: str):
+    from ..models import Setting
+    row = db.query(Setting).filter(Setting.key == key).first()
+    try:
+        return json.loads(row.value) if row and row.value else None
+    except ValueError:
+        return None
+
+
+def _set_json_setting(db, key: str, value) -> None:
+    from ..models import Setting
+    row = db.query(Setting).filter(Setting.key == key).first()
+    if value is None:
+        if row:
+            db.delete(row)
+    elif row:
+        row.value = json.dumps(value)
+    else:
+        db.add(Setting(key=key, value=json.dumps(value)))
+    db.commit()
+
+
+def upgrade_durations(db) -> list[int]:
+    data = _get_json_setting(db, _DURATIONS_KEY)
+    if not isinstance(data, list):
+        return []
+    return [int(x) for x in data if isinstance(x, (int, float)) and 0 < x <= _MAX_UPGRADE_SECONDS]
+
+
+def upgrade_estimate(db) -> Optional[int]:
+    """Seconds the next upgrade will likely take: the median of recent ones.
+
+    The median, not the average, so one slow upgrade (a big download, a helper
+    that was asleep) doesn't skew it; recent ones only, so it follows changes.
+    """
+    recent = sorted(upgrade_durations(db)[-ESTIMATE_FROM:])
+    if not recent:
+        return None
+    mid = len(recent) // 2
+    return recent[mid] if len(recent) % 2 else round((recent[mid - 1] + recent[mid]) / 2)
+
+
+def record_upgrade_finished(db, now: Optional[datetime] = None) -> Optional[int]:
+    """At startup: if this is the version an upgrade asked for, remember how long it took.
+
+    Returns the seconds recorded, or None.
+    """
+    pending = _get_json_setting(db, _PENDING_KEY)
+    if not isinstance(pending, dict):
+        return None
+    at = _parse_ts(pending.get("at"))
+    now = now or datetime.now(timezone.utc)
+    if at is None:
+        _set_json_setting(db, _PENDING_KEY, None)
+        return None
+    took = (now - at).total_seconds()
+    if normalise_version(str(pending.get("version") or "")) != normalise_version(get_current_version()):
+        if took > _MAX_UPGRADE_SECONDS:      # never arrived: forget it
+            _set_json_setting(db, _PENDING_KEY, None)
+        return None
+    _set_json_setting(db, _PENDING_KEY, None)
+    if not 0 < took <= _MAX_UPGRADE_SECONDS:
+        return None
+    seconds = round(took)
+    _set_json_setting(db, _DURATIONS_KEY, (upgrade_durations(db) + [seconds])[-DURATIONS_KEPT:])
+    return seconds
+
+
 def rollback_target(db) -> Optional[str]:
     """The earlier version a rollback would install, or None if there is no older one."""
     prev = _load_previous(db)
@@ -370,6 +447,9 @@ def get_status(db, *, include_log: bool = False) -> dict:
         "previous_version": previous,
         "can_rollback": bool(previous) and helper_connected and not in_progress,
         "helper_install_cmd": "sudo bash scripts/upgrade-agent.sh --install",
+        # How long upgrades take here, for the progress bar (None until one has finished).
+        "upgrade_estimate_seconds": upgrade_estimate(db),
+        "upgrade_history_count": len(upgrade_durations(db)[-ESTIMATE_FROM:]),
     }
 
     log = _read_log_tail(folder) if upgrade_state == "running" or include_log else ""
@@ -527,6 +607,10 @@ def request_upgrade(db, version: str, requested_by: str, rollback: bool = False)
             f"Could not write to upgrade folder {folder!r}. "
             f"Run: sudo bash scripts/upgrade-agent.sh --install\n({exc})"
         ) from exc
+
+    # Time it: recorded when this version first starts (record_upgrade_finished).
+    _set_json_setting(db, _PENDING_KEY, {"version": normalise_version(version),
+                                         "at": request_data["requested_at"]})
 
     # Remember where we came from, so the upgrade can be undone from the UI.
     # (A rollback keeps the older recorded version, so it is not offered again.)

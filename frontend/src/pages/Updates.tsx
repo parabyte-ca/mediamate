@@ -63,14 +63,43 @@ function readLastMs(): number | null {
 function writeLastMs(ms: number) {
   try { localStorage.setItem(LAST_KEY, String(Math.round(ms))); } catch { /* not remembered */ }
 }
+/** The server's typical upgrade time, kept here too: while ScreenMate restarts the
+ *  page can't ask for it, and that's when the bar needs it most. */
+const TYPICAL_KEY = "sm-upgrade-typical";
+function readTypical(): { sec: number; n: number } | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(TYPICAL_KEY) || "null");
+    return v && v.sec > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function writeTypical(sec?: number | null, n?: number) {
+  try {
+    if (sec && sec > 0) localStorage.setItem(TYPICAL_KEY, JSON.stringify({ sec, n: n ?? 1 }));
+  } catch { /* not remembered */ }
+}
 
 /** What an upgrade started here is doing: steps, an estimated bar and a timer. */
-function UpgradeProgress({ pending, everyMinutes, now }: { pending: Pending; everyMinutes: number; now: number }) {
+function UpgradeProgress({ pending, everyMinutes, now, typicalSec, basedOn }: {
+  pending: Pending; everyMinutes: number; now: number; typicalSec?: number | null; basedOn?: number;
+}) {
   const elapsed = now - pending.at;
   const current = stepIndex(pending.phase);
-  const last = readLastMs();
-  // Without history: on average the helper waits half its interval, then ~3 min of work.
-  const estimate = last ?? (everyMinutes / 2 + 3) * 60_000;
+  if (!typicalSec) {
+    const kept = readTypical();
+    if (kept) { typicalSec = kept.sec; basedOn = kept.n; }
+  }
+  // Best: the typical (median) time of recent upgrades, kept by the server. Then the
+  // last one timed on this device. Without either: on average the helper waits half
+  // its interval, then ~3 min of work.
+  const last = typicalSec ? null : readLastMs();
+  const estimate = typicalSec ? typicalSec * 1000 : last ?? (everyMinutes / 2 + 3) * 60_000;
+  const basis = typicalSec
+    ? (basedOn ?? 0) > 1
+      ? `upgrades usually take ${elapsedText(estimate)} (last ${basedOn})`
+      : `last upgrade took ${elapsedText(estimate)}`
+    : last ? `last upgrade took ${elapsedText(last)}` : "first-time estimate";
   const pct = Math.min(elapsed / estimate, 0.95);
   const leftMin = Math.ceil((estimate - elapsed) / 60_000);
   return (
@@ -110,9 +139,9 @@ function UpgradeProgress({ pending, everyMinutes, now }: { pending: Pending; eve
         <p className="text-xs opacity-80">
           {elapsed < estimate
             ? `About ${leftMin} min left`
-            : "Taking a little longer than last time…"}
+            : "Taking a little longer than usual…"}
           {" · "}
-          {last ? `last upgrade took ${elapsedText(last)}` : "first-time estimate"}
+          {basis}
         </p>
       </div>
 
@@ -178,6 +207,7 @@ export default function Updates() {
     try {
       const s = await api.updates.status();
       setStatus(s);
+      writeTypical(s.upgrade_estimate_seconds, s.upgrade_history_count);
       setError(null);
       const p = readPending();
       if (p) {
@@ -335,7 +365,8 @@ export default function Updates() {
 
       {pending && (
         <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-4 text-sm text-blue-700 dark:text-blue-300">
-          <UpgradeProgress pending={pending} everyMinutes={everyMinutes} now={now} />
+          <UpgradeProgress pending={pending} everyMinutes={everyMinutes} now={now}
+                           typicalSec={status?.upgrade_estimate_seconds} basedOn={status?.upgrade_history_count} />
         </div>
       )}
 

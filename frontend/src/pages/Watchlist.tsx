@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
@@ -11,6 +11,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  X,
   Trash2,
   Tv,
   XCircle,
@@ -20,6 +21,7 @@ import {
   type DownloadPath,
   type MarkEpisodeRequest,
   type QualityProfile,
+  type ShowMatch,
   type WatchlistCreate,
   type WatchlistEpisode,
   type WatchlistItem,
@@ -76,6 +78,136 @@ function profileSummary(p: QualityProfile): string {
   return parts.join(" · ");
 }
 
+const year = (d?: string | null) => (d ? d.slice(0, 4) : "");
+/** TVMaze adds "(US)" or "(2017)" to tell remakes apart; release names don't. */
+const plainName = (n: string) => n.replace(/\s*\((?:US|UK|AU|CA|NZ|\d{4})\)\s*$/i, "").trim() || n;
+
+function ShowOption({ show, current, chosen, onPick }: {
+  show: ShowMatch; current?: boolean; chosen?: boolean; onPick: () => void;
+}) {
+  return (
+    <button type="button" onClick={onPick}
+      className={`flex w-full items-start gap-3 rounded-lg border p-2 text-left transition-colors ${chosen || current
+        ? "border-blue-500 bg-blue-50 dark:bg-blue-950/40"
+        : "border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800"}`}>
+      <Poster url={show.poster_url} title={show.name} className="h-14 w-10" zoomable={false} />
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-1.5">
+          <span className="font-medium text-gray-900 dark:text-gray-100 [overflow-wrap:anywhere]">{show.name}</span>
+          {current && <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">Current</span>}
+        </span>
+        <span className="block text-xs text-gray-500 dark:text-gray-400">
+          {[year(show.premiered), show.network, show.status].filter(Boolean).join(" · ") || "No details"}
+        </span>
+        {show.summary && <span className="mt-0.5 line-clamp-2 block text-xs text-gray-400 dark:text-gray-500">{show.summary}</span>}
+      </span>
+    </button>
+  );
+}
+
+/** "Wrong show?": pick the right TVMaze show for a watchlist item. */
+function MatchDialog({ item, onClose, onSaved }: {
+  item: WatchlistItem; onClose: () => void; onSaved: (msg: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [shows, setShows] = useState<ShowMatch[] | null>(null);
+  const [current, setCurrent] = useState<number | null>(item.tvmaze_id ?? null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState<number | null>(null);
+
+  const search = async (query?: string) => {
+    setShows(null); setError(null);
+    try {
+      const r = await api.watchlist.matches(item.id, query);
+      setShows(r.shows); setCurrent(r.current);
+      if (query === undefined) setQ(r.query);
+    } catch (e) {
+      setShows([]); setError(e instanceof Error ? e.message : "Couldn't search TVMaze");
+    }
+  };
+  useEffect(() => { search(); }, [item.id]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const pick = async (show: ShowMatch) => {
+    if (show.tvmaze_id === current) { onClose(); return; }
+    setSaving(show.tvmaze_id); setError(null);
+    try {
+      await api.watchlist.setMatch(item.id, show.tvmaze_id);
+      onSaved(`Now matched to ${show.name}${show.premiered ? ` (${year(show.premiered)})` : ""}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't change the match");
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-labelledby="match-title" onClick={(e) => e.stopPropagation()}
+        className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-xl">
+        <div className="mb-1 flex items-start gap-2">
+          <h2 id="match-title" className="flex-1 text-lg font-semibold text-gray-900 dark:text-gray-100">Which show is it?</h2>
+          <button onClick={onClose} aria-label="Close" className="rounded-md p-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"><X className="h-4 w-4" /></button>
+        </div>
+        <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
+          Pick the right one for <strong className="text-gray-700 dark:text-gray-300">{item.title}</strong>. The poster, episode guide and status follow it.
+        </p>
+        <form className="mb-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); search(q.trim() || undefined); }}>
+          <input value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search TVMaze" placeholder="Show name" className={FIELD} />
+          <button type="submit" className="flex items-center gap-1 rounded-lg border border-gray-300 dark:border-gray-600 px-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
+            <Search className="h-4 w-4" /><span className="hidden sm:inline">Search</span>
+          </button>
+        </form>
+        {error && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        <div className="-mx-1 min-h-0 flex-1 space-y-2 overflow-y-auto px-1">
+          {shows === null && <div className="flex items-center gap-2 py-6 text-sm text-gray-400"><Loader2 className="h-4 w-4 animate-spin" />Searching TVMaze…</div>}
+          {shows?.length === 0 && !error && <p className="py-6 text-center text-sm text-gray-400">No shows found. Try another name.</p>}
+          {shows?.map((s) => (
+            <div key={s.tvmaze_id} className="relative">
+              <ShowOption show={s} current={s.tvmaze_id === current} onPick={() => pick(s)} />
+              {saving === s.tvmaze_id && <Loader2 className="absolute right-3 top-3 h-4 w-4 animate-spin text-blue-500" />}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** While adding a show: the TVMaze shows the name could mean, so nothing is guessed. */
+function ShowSuggestions({ name, chosen, onPick }: {
+  name: string; chosen: number | null | undefined; onPick: (s: ShowMatch | null) => void;
+}) {
+  const [shows, setShows] = useState<ShowMatch[]>([]);
+  const seq = useRef(0);
+  useEffect(() => {
+    const q = name.trim();
+    if (q.length < 2 || chosen) { if (!chosen) setShows([]); return; }
+    const n = ++seq.current;
+    const t = window.setTimeout(async () => {
+      const r = await api.browse.get(q).catch(() => null);
+      if (n === seq.current) setShows((r?.shows ?? []).slice(0, 3));
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [name, chosen]);
+  if (!shows.length) return null;
+  return (
+    <div className="mt-2 space-y-1.5">
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        {chosen ? "Matched to:" : "Is it one of these? Picking one makes sure the right show is used."}
+      </p>
+      {shows.filter((s) => !chosen || s.tvmaze_id === chosen).map((s) => (
+        <ShowOption key={s.tvmaze_id} show={s} chosen={s.tvmaze_id === chosen}
+          onPick={() => onPick(s.tvmaze_id === chosen ? null : s)} />
+      ))}
+    </div>
+  );
+}
+
 function FormModal({ initial, paths, profiles, defaultProfileId, onClose, onSave }: {
   initial?: WatchlistItem;
   paths: DownloadPath[];
@@ -96,14 +228,20 @@ function FormModal({ initial, paths, profiles, defaultProfileId, onClose, onSave
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-6 shadow-xl">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-6 shadow-xl">
         <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
           {initial ? "Edit watchlist item" : "Add to watchlist"}
         </h2>
         <div className="space-y-3">
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Show title</label>
-            <input value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Breaking Bad" className={FIELD} />
+            <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value, tvmaze_id: null }))} placeholder="e.g. Breaking Bad" className={FIELD} />
+            {!initial && (
+              <ShowSuggestions name={form.title} chosen={form.tvmaze_id}
+                onPick={(sh) => setForm((f) => sh
+                  ? { ...f, title: sh.name, search_query: plainName(sh.name), tvmaze_id: sh.tvmaze_id }
+                  : { ...f, tvmaze_id: null })} />
+            )}
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -242,7 +380,7 @@ function FormModal({ initial, paths, profiles, defaultProfileId, onClose, onSave
 
 // ── Watchlist card with episode tracking ──────────────────────────────────────
 
-function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSelect, onToggle, onScan, onEdit, onDelete, onRefresh }: {
+function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSelect, onToggle, onScan, onEdit, onDelete, onRefresh, onToast }: {
   item: WatchlistItem;
   paths: DownloadPath[];
   profiles: QualityProfile[];
@@ -254,6 +392,7 @@ function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSele
   onEdit: () => void;
   onDelete: () => void;
   onRefresh: () => void;
+  onToast?: (msg: string) => void;
 }) {
   const [expanded,       setExpanded]       = useState(false);
   const [episodes,       setEpisodes]       = useState<WatchlistEpisode[] | null>(null);
@@ -264,6 +403,7 @@ function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSele
   const [markMsg,        setMarkMsg]        = useState<{ ok: boolean; text: string } | null>(null);
   const [resetConfirm,   setResetConfirm]   = useState(false);
   const [checkingStatus, setCheckingStatus] = useState(false);
+  const [matchOpen,      setMatchOpen]      = useState(false);
 
   const pathName = (id?: number) => paths.find((p) => p.id === id)?.name ?? "Default";
   // When a profile is assigned it overrides the item's own preference fields.
@@ -354,6 +494,10 @@ function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSele
     <div
       className={`min-w-0 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 shadow-sm transition-opacity ${item.enabled ? "" : "opacity-60"}`}
     >
+      {matchOpen && (
+        <MatchDialog item={item} onClose={() => setMatchOpen(false)}
+          onSaved={(msg) => { setMatchOpen(false); setEpisodes(null); setExpanded(false); onRefresh(); onToast?.(msg); }} />
+      )}
       {/* Ended alert banner */}
       {item.show_status === "Ended" && !item.enabled && (
         <div className="mb-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2.5 text-xs">
@@ -397,6 +541,10 @@ function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSele
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
               Looking for: {epLabel(item.season, item.episode)}
               {item.network ? ` · ${item.network}` : ""}
+              {" · "}
+              <button onClick={() => setMatchOpen(true)} className="text-blue-600 dark:text-blue-400 hover:underline">
+                {item.tvmaze_id ? "Wrong show?" : "Find the show"}
+              </button>
             </p>
             {item.summary && (
               <p className="mt-1 line-clamp-2 text-xs text-gray-400 dark:text-gray-500 [overflow-wrap:anywhere]">{item.summary}</p>
@@ -690,7 +838,10 @@ export default function Watchlist() {
   }, [loading]);
 
   const handleSave = async (data: WatchlistCreate) => {
-    if (modal === true) { await api.watchlist.create(data); showToast("Added!"); }
+    if (modal === true) {
+      try { await api.watchlist.create(data); showToast("Added!"); }
+      catch (e) { showToast(e instanceof Error ? e.message : "Couldn't add the show"); return; }
+    }
     else if (modal && typeof modal === "object") { await api.watchlist.update(modal.id, data); showToast("Updated!"); }
     setModal(null); load();
   };
@@ -911,6 +1062,7 @@ export default function Watchlist() {
                 onEdit={() => setModal(item)}
                 onDelete={() => handleDelete(item.id)}
                 onRefresh={load}
+                onToast={showToast}
               />
             ))}
           </div>

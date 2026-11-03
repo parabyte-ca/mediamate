@@ -336,6 +336,7 @@ export default function Layout() {
 
       {/* ── Bottom tab bar (mobile only, hidden on md+) ─────────────────────── */}
       <nav
+        data-mobile-tabs
         className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-[0_-1px_3px_rgba(0,0,0,0.08)]"
         style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" } as React.CSSProperties}
       >

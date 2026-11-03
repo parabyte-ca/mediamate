@@ -13,7 +13,7 @@ Status as of v0.8.1: **every item is present**. One FileSplitter bug was found a
 | Search: NYAA, TPB, EZTV, YTS, TorrentGalaxy, 1337x | Search page, "All sources" or one source | `test_sources_packs_profiles.py` (TPB), `test_parity_gaps.py` (NYAA, EZTV, YTS, TorrentGalaxy, 1337x parsing) |
 | Jackett / Prowlarr | Settings → Indexers, Test button | `test_sources_packs_profiles.py`, `test_secret_settings.py` (test with the saved key) |
 | Adult filter, quality and codec filters | Search page filters | `test_sources_packs_profiles.py` |
-| Watchlist: episodes, guide, scan, override | Watchlist page | `test_watchlist_episodes.py`, `test_tvmaze_features.py` |
+| Watchlist: episodes, guide, scan, override, change match | Watchlist page | `test_watchlist_episodes.py`, `test_tvmaze_features.py`, `test_tvmaze_matching.py` |
 | TVMaze show-ended detection | Watchlist status chips | `test_tvmaze_features.py` |
 | Quality profiles (incl. season packs) | Settings → Quality profiles | `test_sources_packs_profiles.py` |
 | Trakt watchlist sync | Settings → Trakt | `test_trakt_onboarding.py` |

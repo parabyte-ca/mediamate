@@ -109,11 +109,6 @@ def parse_title(text: str) -> tuple[str, int | None]:
     return (name or text.strip()), year
 
 
-def _year_matches(show: dict, year: int) -> bool:
-    premiered = (show.get("premiered") or "")[:4]
-    return premiered.isdigit() and abs(int(premiered) - year) <= 1
-
-
 async def find_show(texts: list[str | None]) -> dict | None:
     """Find a show from candidate titles (tried in order). Raises tvmaze.TVMazeUnavailable.
 
@@ -131,9 +126,9 @@ async def find_show(texts: list[str | None]) -> dict | None:
             continue
         tried.add(key)
         if year is not None:
-            for show in await tvmaze.lookup_many(name):
-                if _year_matches(show, year):
-                    return show
+            show = tvmaze.pick_best(await tvmaze.lookup_many(name), name, year)
+            if show:
+                return show
             continue
         show = await tvmaze.lookup_by_name(name)
         if show:

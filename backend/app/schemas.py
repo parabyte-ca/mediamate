@@ -69,6 +69,7 @@ class WatchlistCreate(BaseModel):
     prefer_season_packs: bool = False
     profile_id: Optional[int] = None
     audience: Optional[Literal["auto", "general", "mature"]] = None   # None/"auto" = from the age rating
+    tvmaze_id: Optional[int] = None    # picked from the suggestions: no guessing
 
 
 class WatchlistUpdate(BaseModel):

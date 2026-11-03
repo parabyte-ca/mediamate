@@ -4,6 +4,7 @@ import threading
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -18,7 +19,7 @@ from ..schemas import (
     WatchlistUpdate,
 )
 
-from ..services import show_metadata, watchlist_add
+from ..services import show_metadata, tvmaze, watchlist_add
 from ..services.calendar_view import build_guide
 from ..services.grab import grab_episode
 
@@ -46,6 +47,8 @@ async def create_watchlist_item(item: WatchlistCreate, db: Session = Depends(get
     data = item.model_dump()
     if data.get("audience") == "auto":
         data["audience"] = None
+    if data.get("tvmaze_id") and db.query(WatchlistItem).filter(WatchlistItem.tvmaze_id == data["tvmaze_id"]).first():
+        raise HTTPException(status_code=409, detail="That show is already on your watchlist.")
     db_item = WatchlistItem(**data)
     db.add(db_item)
     db.commit()
@@ -129,6 +132,59 @@ def delete_watchlist_item(item_id: int, db: Session = Depends(get_db)):
     db.delete(db_item)
     db.commit()
     return {"ok": True}
+
+
+class MatchRequest(BaseModel):
+    tvmaze_id: int
+
+
+@router.get("/watchlist/{item_id}/matches")
+async def list_matches(item_id: int, q: str | None = None, db: Session = Depends(get_db)):
+    """TVMaze shows this item could be, best guess first, for "Change match"."""
+    from ..services import browse
+    item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    query = (q or "").strip() or show_metadata.parse_title(item.search_query or item.title)[0]
+    try:
+        shows = await tvmaze.lookup_many(query)
+    except tvmaze.TVMazeUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"TVMaze is unavailable right now ({exc})")
+    best = tvmaze.pick_best(shows, query)
+    if best is not None:                      # our pick first, then TVMaze's order
+        shows = [best] + [s for s in shows if s is not best]
+    return {"query": query, "current": item.tvmaze_id,
+            "shows": [browse.show_card(s) for s in shows[:10]]}
+
+
+@router.post("/watchlist/{item_id}/match", response_model=WatchlistOut)
+async def set_match(item_id: int, body: MatchRequest, db: Session = Depends(get_db)):
+    """Point this item at a different TVMaze show (title, poster, guide and status follow)."""
+    item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    other = db.query(WatchlistItem).filter(WatchlistItem.tvmaze_id == body.tvmaze_id,
+                                           WatchlistItem.id != item_id).first()
+    if other:
+        raise HTTPException(status_code=409, detail=f"That show is already on your watchlist as {other.title}.")
+    try:
+        show = await tvmaze.fetch_show(body.tvmaze_id)
+    except tvmaze.TVMazeUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"TVMaze is unavailable right now ({exc})")
+    if show is None:
+        raise HTTPException(status_code=404, detail="TVMaze could not find that show.")
+    name = show.get("name") or item.title
+    if show_metadata.parse_title(item.title)[0].lower() != name.lower():
+        item.title = name
+        item.search_query = show_metadata.search_query_from_name(name)
+    # Start clean so nothing from the wrong show lingers.
+    item.poster_url = item.summary = item.network = item.premiered = None
+    item.show_status = item.show_status_checked_at = None
+    show_metadata.apply_show(item, show)
+    item.metadata_checked_at, item.metadata_attempts = datetime.now(timezone.utc), 0
+    db.commit()
+    db.refresh(item)
+    return item
 
 
 @router.post("/watchlist/check-show-statuses")

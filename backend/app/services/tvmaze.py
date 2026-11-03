@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -53,10 +54,64 @@ async def _strict_get(path: str, params: dict | None = None, timeout: float = 10
         raise TVMazeUnavailable(str(exc) or type(exc).__name__) from exc
 
 
-async def lookup_by_name(title: str) -> dict | None:
-    """Best fuzzy match for a title; None only if TVMaze has no match. Raises TVMazeUnavailable."""
-    data = await _strict_get("/singlesearch/shows", {"q": title})
-    return data if isinstance(data, dict) and data.get("id") else None
+_SUFFIX = re.compile(r"\s*\((?:US|UK|AU|CA|NZ|\d{4})\)\s*$", re.IGNORECASE)
+
+
+def norm_name(name: str) -> str:
+    """Compare-friendly name: "The Office (US)" -> "office", "Law & Order" -> "lawandorder"."""
+    n = _SUFFIX.sub("", name or "").lower().replace("&", " and ")
+    n = re.sub(r"^the\s+", "", n.strip())
+    return re.sub(r"[^a-z0-9]", "", n)
+
+
+def _words(name: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", _SUFFIX.sub("", name or "").lower().replace("'", ""))
+
+
+def _premiere_year(show: dict) -> int | None:
+    y = (show.get("premiered") or "")[:4]
+    return int(y) if y.isdigit() else None
+
+
+def pick_best(shows: list[dict], query: str, year: int | None = None) -> dict | None:
+    """The show a person most likely means by ``query``, from TVMaze's results (best first).
+
+    TVMaze's own top hit is fuzzy: "Gone" can come back as "I'll Be Gone in the Dark".
+    So an exact name wins, then a name that starts with the query's words, then one
+    containing them all, then TVMaze's order. Ties go to the year hint, then English.
+    With a year, only shows that premiered within a year of it are considered.
+    """
+    q, qwords = norm_name(query), _words(query)
+    if year is not None:
+        shows = [s for s in shows if (y := _premiere_year(s)) is not None and abs(y - year) <= 1]
+    if not shows or not q:
+        return shows[0] if shows else None
+
+    def tier(show: dict) -> int:
+        names = [show.get("name") or ""]
+        if norm_name(names[0]) == q:
+            return 0
+        words = _words(names[0])
+        if qwords and words[:len(qwords)] == qwords:
+            return 1
+        if qwords and all(w in words for w in qwords):
+            return 2
+        return 3
+
+    def key(pair: tuple[int, dict]) -> tuple:
+        pos, show = pair
+        y = _premiere_year(show)
+        return (tier(show),
+                0 if (year is None or (y is not None and y == year)) else 1,
+                0 if (show.get("language") or "English") == "English" else 1,
+                pos)
+
+    return min(enumerate(shows), key=key)[1]
+
+
+async def lookup_by_name(title: str, year: int | None = None) -> dict | None:
+    """The best match for a title; None only if TVMaze has no match. Raises TVMazeUnavailable."""
+    return pick_best(await lookup_many(title), title, year)
 
 
 async def lookup_many(title: str) -> list[dict]:

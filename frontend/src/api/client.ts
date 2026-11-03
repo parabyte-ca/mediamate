@@ -126,7 +126,12 @@ export interface WatchlistCreate {
   prefer_season_packs?: boolean;
   profile_id?: number | null;
   audience?: "general" | "mature" | "auto" | null;
+  /** Picked from the suggestions, so the show isn't guessed from the name. */
+  tvmaze_id?: number | null;
 }
+
+/** A TVMaze show a watchlist item could be (Change match). */
+export type ShowMatch = Omit<BrowseShow, "on_watchlist" | "watchlist_id">;
 
 export interface Download {
   id: number;
@@ -764,6 +769,11 @@ export const api = {
       req<EpisodeSearchResult>(`/watchlist/${id}/episodes/${season}/${episode}/search`, { method: "POST" }),
     refreshMetadata: () =>
       req<{ checked: number; matched: number; remaining: number; unavailable: boolean }>("/watchlist/refresh-metadata", { method: "POST" }),
+    matches: (id: number, q?: string) =>
+      req<{ query: string; current: number | null; shows: ShowMatch[] }>(
+        `/watchlist/${id}/matches${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+    setMatch: (id: number, tvmaze_id: number) =>
+      req<WatchlistItem>(`/watchlist/${id}/match`, { method: "POST", body: JSON.stringify({ tvmaze_id }) }),
     addFromTvmaze: (data: { tvmaze_id: number; start?: "next" | "beginning" }) =>
       req<WatchlistItem>("/watchlist/from-tvmaze", { method: "POST", body: JSON.stringify(data) }),
     checkShowStatuses: () =>

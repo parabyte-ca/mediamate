@@ -22,6 +22,7 @@ ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search,
 - **Browse movies:** Browse has a TV shows / Movies switch. Movies come from TMDB (Popular, In theatres and Coming soon, or a search) and show the age rating when it's known. Ones already in your library are marked, and **Find downloads** opens Search for any other.
 - **Track clean-up:** encodes keep English plus the original-language audio, and English and forced subtitles, and drop the rest. This often saves another 10–20%. The languages are set in Settings → Media engine.
 - **Library doctor:** a weekly check (Library → Library doctor, or Check now) for sample clips, leftover files, empty folders, unplayable files, missing files, duplicates (the best copy is kept) and files not named for Plex. The first three are fixed automatically. The rest get Fix buttons. Removed files go to the 30-day trash.
+- **Better show matching:** an exact name wins over TVMaze's fuzzy guess (so "Gone" no longer becomes "I'll Be Gone in the Dark"). When you add a show, pick it from the suggestions so nothing is guessed. If a show is still wrong, click **Wrong show?** on its Watchlist card and choose the right one; the poster, episode guide and status follow it.
 - **Guided tour** for new users: a one-minute walk through Search, Watchlist, Calendar, Activity, Library and the rest. It starts once on each new device, and you can replay it from Settings → Appearance or by searching "tour" with Ctrl+K.
 
 ---

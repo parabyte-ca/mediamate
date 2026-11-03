@@ -302,7 +302,8 @@ async def _check_statuses_async(db, *, item_id: int | None = None) -> None:
 
             if status != "Unknown":
                 item.show_status = status
-            if tvmaze_id is not None:
+            if tvmaze_id is not None and item.tvmaze_id is None:
+                # Never replace a known match (it may have been picked by hand).
                 item.tvmaze_id = tvmaze_id
 
             if status == "Ended" and not item.show_status_override:

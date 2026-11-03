@@ -168,7 +168,8 @@ class TestStrictLookups:
             return asyncio.run(fn(*args))
 
     def test_found(self):
-        out = self._get(lambda r: httpx.Response(200, json=show(1, "X")), tvmaze.lookup_by_name, "X")
+        out = self._get(lambda r: httpx.Response(200, json=[{"score": 1, "show": show(1, "X")}]),
+                        tvmaze.lookup_by_name, "X")
         assert out["id"] == 1
 
     def test_genuine_404_is_none(self):
@@ -196,7 +197,7 @@ class TestStrictLookups:
         def handler(req):
             calls.append(1)
             return httpx.Response(429, headers={"retry-after": "2"}) if len(calls) == 1 \
-                else httpx.Response(200, json=show(1, "X"))
+                else httpx.Response(200, json=[{"score": 1, "show": show(1, "X")}])
         with mock_async_httpx(handler), patch("app.services.tvmaze.asyncio.sleep", new=AsyncMock()) as sleep:
             out = asyncio.run(tvmaze.lookup_by_name("X"))
         assert out["id"] == 1 and len(calls) == 2

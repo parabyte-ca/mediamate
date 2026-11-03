@@ -107,6 +107,9 @@ async def search(query: str, limit: int = 30) -> list[dict] | None:
     shows = await tvmaze.search_shows(query)
     if shows is None:
         return None
+    best = tvmaze.pick_best(shows, query)
+    if best is not None:            # an exact name first, e.g. "Gone" before "I'll Be Gone in the Dark"
+        shows = [best] + [s for s in shows if s is not best]
     return [show_card(s) for s in shows[:limit]]
 
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderInput, FolderSearch, Layers, Loader2, MoreHorizontal,
@@ -106,12 +106,48 @@ type Dialog =
 
 function RowMenu({ f, onAction }: { f: MediaFile; onAction: (a: string) => void }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<React.CSSProperties | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const shut = () => setOpen(false);
+    // Close once the row has really moved away, not on the settle after a tap.
+    const top0 = btnRef.current?.getBoundingClientRect().top ?? 0;
+    const onScroll = (e: Event) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      const top = btnRef.current?.getBoundingClientRect().top ?? top0;
+      if (Math.abs(top - top0) > 24) setOpen(false);
+    };
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    window.addEventListener("resize", shut);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      window.removeEventListener("resize", shut);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open]);
+  // The menu floats over the page (fixed), so the table can't clip it, and opens
+  // upwards when there isn't room below (the last rows, the phone tab bar).
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    const b = btnRef.current?.getBoundingClientRect();
+    const h = menuRef.current?.offsetHeight ?? 0;
+    if (!b) return;
+    const vh = window.innerHeight;
+    const tabBar = document.querySelector<HTMLElement>("[data-mobile-tabs]")?.getBoundingClientRect();
+    const bottomEdge = (tabBar && tabBar.height > 0 ? tabBar.top : vh) - 8;
+    const below = bottomEdge - b.bottom - 4;
+    const above = b.top - 8 - 4;
+    const right = Math.max(8, window.innerWidth - b.right);
+    if (h <= below || below >= above) {
+      setPos({ top: b.bottom + 4, right, maxHeight: below });
+    } else {
+      setPos({ top: Math.max(8, b.top - 4 - Math.min(h, above)), right, maxHeight: above });
+    }
   }, [open]);
   const item = (a: string, label: string, Icon: typeof Film, disabled = false, danger = false) => (
     <button disabled={disabled} onClick={() => { setOpen(false); onAction(a); }}
@@ -121,11 +157,13 @@ function RowMenu({ f, onAction }: { f: MediaFile; onAction: (a: string) => void 
   );
   return (
     <div className="relative" ref={ref}>
-      <button onClick={() => setOpen((v) => !v)} aria-label={`More actions for ${f.filename}`} className={iconBtn}>
+      <button ref={btnRef} onClick={() => setOpen((v) => !v)} aria-label={`More actions for ${f.filename}`}
+              aria-haspopup="menu" aria-expanded={open} className={iconBtn}>
         <MoreHorizontal className="h-4 w-4" />
       </button>
       {open && (
-        <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg">
+        <div ref={menuRef} role="menu" style={pos ?? { top: 0, right: 0, visibility: "hidden" }}
+             className="fixed z-40 w-48 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg">
           {item("preview", "Preview", Eye)}
           <div className="sm:hidden">
             {item("encode", "Encode…", Film, busy(f))}

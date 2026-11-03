@@ -405,6 +405,8 @@ def empty_trash():
 def get_settings():
     out = {key: getattr(config, attr) for key, (attr, _cast) in config.SETTINGS_MAP.items()}
     out["split_keywords"] = ",".join(config.SPLIT_KEYWORDS)
+    out["keep_audio_langs"] = ",".join(config.KEEP_AUDIO_LANGS)
+    out["keep_sub_langs"] = ",".join(config.KEEP_SUB_LANGS)
     out["tpdb_api_key_set"] = bool(config.TPDB_API_KEY)
     out.pop("tpdb_api_key")  # never echo the secret back
     out.update({

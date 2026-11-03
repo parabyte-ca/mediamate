@@ -589,6 +589,9 @@ export interface MediaSettings {
   split_min_duration: number;
   split_min_size: number;
   split_keywords: string;
+  track_cleanup: string;
+  keep_audio_langs: string;
+  keep_sub_langs: string;
   split_scene_method: string;
   split_min_episode_gap: number;
   split_black_min_duration: number;

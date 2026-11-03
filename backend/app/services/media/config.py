@@ -112,6 +112,11 @@ TPDB_API_KEY: str = os.environ.get("TPDB_API_KEY", "")
 # ── Runtime settings ──────────────────────────────────────────────────────────
 # Settings that can be changed from the UI and are persisted in ScreenMate's
 # `settings` table. Keys match FileSplitter's, so imported databases carry over.
+# Track clean-up (services/media/tracks.py): which audio/subtitle languages an encode keeps.
+TRACK_CLEANUP: str = os.environ.get("TRACK_CLEANUP", "true").lower()
+KEEP_AUDIO_LANGS: list[str] = _parse_paths(os.environ.get("KEEP_AUDIO_LANGS", "eng"))
+KEEP_SUB_LANGS: list[str] = _parse_paths(os.environ.get("KEEP_SUB_LANGS", "eng"))
+
 SETTINGS_MAP: dict[str, tuple[str, type]] = {
     "media_paths":               ("MEDIA_PATHS",               list),
     "scene_threshold":           ("SCENE_THRESHOLD",           float),
@@ -134,6 +139,9 @@ SETTINGS_MAP: dict[str, tuple[str, type]] = {
     "split_freeze_min_duration": ("SPLIT_FREEZE_MIN_DURATION", float),
     "split_episode_count":       ("SPLIT_EPISODE_COUNT",       int),
     "tpdb_api_key":              ("TPDB_API_KEY",              str),
+    "track_cleanup":             ("TRACK_CLEANUP",             str),
+    "keep_audio_langs":          ("KEEP_AUDIO_LANGS",          list),
+    "keep_sub_langs":            ("KEEP_SUB_LANGS",            list),
 }
 
 

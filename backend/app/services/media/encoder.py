@@ -202,9 +202,17 @@ def encode_to_x265(
     codec_args = _build_codec_args(backend, crf, preset)
     scale_args = _scale_filter(target_resolution)
 
+    # Which audio/subtitle tracks to keep (track clean-up); None = ffmpeg's defaults.
+    from . import tracks
+    selection = tracks.selection_for(input_path)
+    track_args = (selection.maps + selection.sub_codec) if selection else []
+    if selection:
+        logger.info("Tracks for %s: %s", input_path, selection.summary())
+
     cmd = [
         "ffmpeg", "-y",
         "-i", input_path,
+        *track_args,
         *codec_args,
         *scale_args,
         "-c:a", "copy",

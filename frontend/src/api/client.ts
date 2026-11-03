@@ -283,6 +283,21 @@ export interface CalendarResponse {
   unmatched: number;
 }
 
+export type MovieList = "popular" | "now_playing" | "upcoming";
+
+export interface BrowseMovie {
+  tmdb_id: number;
+  title: string;
+  year: number | null;
+  release_date: string | null;
+  poster_url: string | null;
+  overview: string | null;
+  rating: number | null;
+  votes: number;
+  in_library: boolean;
+  certification: string | null;
+}
+
 export interface BrowseShow {
   tvmaze_id: number;
   name: string;
@@ -965,6 +980,9 @@ export const api = {
 
   browse: {
     get: (q = "") => req<BrowseResponse>(`/browse${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+    movies: (list: MovieList = "popular", q = "") =>
+      req<{ need_key: boolean; movies: BrowseMovie[]; list: string; country?: string }>(
+        `/browse/movies?list=${list}${q ? `&q=${encodeURIComponent(q)}` : ""}`),
   },
 
   profiles: {

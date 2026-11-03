@@ -65,7 +65,8 @@ def _organise_status(db: Session, values: dict) -> dict:
     from ..services import folders, organise
     roots = folders.scan_roots(db)
     warnings = {}
-    for key, label in (("organise_tv_dir", "TV"), ("organise_movie_dir", "Movies")):
+    for key, label in (("organise_tv_dir", "TV"), ("organise_movie_dir", "Movies"),
+                       ("organise_tv_mature_dir", "Mature TV"), ("organise_movie_mature_dir", "Mature movie")):
         path = (values.get(key) or "").strip()
         if not path:
             continue
@@ -74,7 +75,17 @@ def _organise_status(db: Session, values: dict) -> dict:
         elif not any(path == r or path.startswith(r.rstrip("/") + "/") for r in roots):
             warnings[key] = (f"{path} isn't inside a folder with Scan & encode on, so the Library would lose "
                              f"track of organised {label.lower()} files. Add it in Settings → Folders.")
-    return {**{k: values.get(k, v) for k, v in organise.SETTINGS_DEFAULTS.items()}, "warnings": warnings}
+    for kind in ("tv", "movie"):
+        reg = (values.get(f"organise_{kind}_dir") or "").strip().rstrip("/")
+        mat = (values.get(f"organise_{kind}_mature_dir") or "").strip().rstrip("/")
+        if reg and mat and (reg == mat or mat.startswith(reg + "/") or reg.startswith(mat + "/")):
+            warnings[f"organise_{kind}_mature_dir"] = (
+                "Use a separate folder (not the same one, or one inside the other), so Plex can show it "
+                "to adults only.")
+    from ..services.show_metadata import tmdb_key
+    no_key = organise.mature_folders_set(values) and not tmdb_key(db)
+    return {**{k: values.get(k, v) for k, v in organise.SETTINGS_DEFAULTS.items()}, "warnings": warnings,
+            "ratings_need_key": no_key}
 
 
 @router.get("/organise")
@@ -103,8 +114,12 @@ def organise_example(body: dict = Body(...), db: Session = Depends(get_db)):
     settings.update({k: v for k, v in body.items() if k in organise.SETTINGS_DEFAULTS and isinstance(v, str) and v})
     name = str(body.get("filename") or "")
     try:
-        dest, parsed = organise.target_for(settings, "/x/" + os.path.basename(name), body.get("show") or None)
-        return {"ok": True, "target": dest, "kind": parsed.kind}
+        from ..services import ratings
+        parsed = organise.parse("/x/" + os.path.basename(name))
+        aud, why = (ratings.audience(db, parsed.kind, body.get("show") or parsed.title, parsed.year)
+                    if organise.mature_folders_set(settings) else (ratings.GENERAL, ""))
+        dest, parsed = organise.target_for(settings, "/x/" + os.path.basename(name), body.get("show") or None, aud)
+        return {"ok": True, "target": dest, "kind": parsed.kind, "audience": aud, "reason": why}
     except (organise.OrganiseError, KeyError, ValueError, IndexError) as exc:
         msg = str(exc) if isinstance(exc, organise.OrganiseError) else f"The template has a problem: {exc}"
         return {"ok": False, "error": msg}

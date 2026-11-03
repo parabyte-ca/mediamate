@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderInput, FolderSearch, Layers, Loader2, MoreHorizontal,
   CheckCircle2, Pause, Play, Scissors, SkipForward, Square, Stethoscope, Timer, Trash2, X,
 } from "lucide-react";
-import { api, type DoctorKind, type DoctorState, type MediaFile, type MediaJobType, type MediaStats } from "../api/client";
+import { api, type DoctorKind, type DoctorState, type MediaFile, type MediaJobType, type MediaStats, type OrganisePlan } from "../api/client";
 import { useEvent } from "../events";
 import { fmtSize } from "../utils";
 
@@ -566,6 +566,7 @@ export default function Library() {
 const DOCTOR_KINDS: { kind: DoctorKind; title: string; hint: string }[] = [
   { kind: "broken", title: "Can't be played", hint: "Damaged or incomplete files." },
   { kind: "duplicate", title: "Duplicates", hint: "The best copy (resolution, then HEVC, then size) is kept." },
+  { kind: "audience", title: "Wrong folder", hint: "Rated for adults in a regular folder, or the other way round." },
   { kind: "missing", title: "Missing files", hint: "Listed in the Library, but the file is gone." },
   { kind: "name", title: "Not named for Plex", hint: "Fixing moves them with Rename & organise." },
   { kind: "sample", title: "Sample clips", hint: "Fixed automatically when that's on." },
@@ -673,18 +674,20 @@ function DoctorDialog({ onClose, onChanged }: { onClose: () => void; onChanged: 
 
 /** Rename & organise: show where each file would go, then move them. */
 function OrganiseDialog({ files, onClose, onDone }: { files: MediaFile[]; onClose: () => void; onDone: (msg: string) => void }) {
-  const [plans, setPlans] = useState<Record<number, { ok: boolean; target?: string; already?: boolean; msg?: string }>>({});
+  const [plans, setPlans] = useState<Record<number, OrganisePlan>>({});
+  const [chosen, setChosen] = useState<Record<number, "general" | "mature">>({});
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    files.slice(0, 50).forEach((f) =>
-      api.media.organisePreview(f.id).then((r) => setPlans((p) => ({ ...p, [f.id]: r })))
-        .catch((e) => setPlans((p) => ({ ...p, [f.id]: { ok: false, msg: String(e.message ?? e) } }))));
-  }, [files]);
+  const preview = (id: number, audience?: "general" | "mature") =>
+    api.media.organisePreview(id, audience).then((r) => setPlans((p) => ({ ...p, [id]: r })))
+      .catch((e) => setPlans((p) => ({ ...p, [id]: { ok: false, msg: String(e.message ?? e) } })));
+  useEffect(() => { files.slice(0, 50).forEach((f) => preview(f.id)); }, [files]);
+  const choose = (id: number, a: "general" | "mature") => { setChosen((c) => ({ ...c, [id]: a })); preview(id, a); };
   const movable = files.filter((f) => plans[f.id]?.ok && !plans[f.id]?.already);
   const go = async () => {
     setBusy(true);
     try {
-      const r = await api.media.bulk("organise", movable.map((f) => f.id));
+      const audiences = Object.fromEntries(movable.map((f) => [f.id, chosen[f.id] ?? plans[f.id]?.audience ?? "mature"]));
+      const r = await api.media.bulk("organise", movable.map((f) => f.id), audiences);
       onClose();
       onDone(`Organised ${r.done}${r.skipped ? ` (${r.skipped} busy, left alone)` : ""}${r.errors.length ? ` — ${r.errors[0]}` : ""}`);
     } catch (e) {
@@ -701,7 +704,22 @@ function OrganiseDialog({ files, onClose, onDone }: { files: MediaFile[]; onClos
             <li key={f.id} className="rounded-lg border border-gray-200 dark:border-gray-700 p-2">
               <p className="truncate font-medium text-gray-900 dark:text-gray-100" title={f.path}>{f.filename}</p>
               {!p ? <p className="text-gray-400">Working it out…</p>
-                : p.ok ? <p className="break-all text-gray-600 dark:text-gray-300">{p.already ? "Already in place" : <>→ <span className="font-mono">{p.target}</span></>}</p>
+                : p.ok ? <>
+                    <p className="break-all text-gray-600 dark:text-gray-300">{p.already ? "Already in place" : <>→ <span className="font-mono">{p.target}</span></>}</p>
+                    {p.mature_folders && (
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <div className="inline-flex rounded-md border border-gray-300 dark:border-gray-600 p-0.5" role="radiogroup" aria-label={`Folder for ${f.filename}`}>
+                          {(["general", "mature"] as const).map((a) => (
+                            <button key={a} type="button" role="radio" aria-checked={p.audience === a} onClick={() => choose(f.id, a)}
+                                    className={`rounded px-2 py-0.5 ${p.audience === a ? (a === "mature" ? "bg-rose-600 text-white" : "bg-blue-600 text-white") : "text-gray-600 dark:text-gray-300"}`}>
+                              {a === "mature" ? "Mature" : "Regular"}
+                            </button>
+                          ))}
+                        </div>
+                        {p.reason && <span className="text-gray-500 dark:text-gray-400">{p.reason}</span>}
+                      </div>
+                    )}
+                  </>
                 : <p className="text-amber-700 dark:text-amber-400">{p.msg}</p>}
             </li>
           );

@@ -388,13 +388,14 @@ def advance(bind, plan_id: int) -> None:
         elif actions[plan.next_index]["type"] == "organise":
             # Runs here, not as an ffmpeg job: a move is quick (a rename on the same disk).
             from . import organise
-            settings = organise.get_settings(db)
-            hint = organise.show_hint_for_download(db, plan.download_id)
             plan.next_index += 1
             plan.status = "running"
-            db.commit()             # release the write lock before the Library row is updated
             try:
-                dest = organise.organise_file(settings, plan.file_id, hint)
+                # Decided before moving: may look up the age rating (regular vs Mature folder).
+                where = organise.plan(db, row["path"], plan.download_id)
+                db.commit()         # release the write lock before the Library row is updated
+                dest = organise.organise_file(where["settings"], plan.file_id, where["show_hint"],
+                                              where["audience"])
                 plan.organise_status, plan.organised_to = "done", dest
             except (organise.OrganiseError, OSError) as exc:
                 plan.organise_status = "failed"

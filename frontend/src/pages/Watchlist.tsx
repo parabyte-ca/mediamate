@@ -87,8 +87,8 @@ function FormModal({ initial, paths, profiles, defaultProfileId, onClose, onSave
   const defaultPath = paths.find((p) => p.is_default);
   const [form, setForm] = useState<WatchlistCreate>(
     initial
-      ? { title: initial.title, search_query: initial.search_query, quality: initial.quality, codec: initial.codec ?? "x265", season: initial.season, episode: initial.episode, download_path_id: initial.download_path_id, enabled: initial.enabled, max_size_mb: initial.max_size_mb ?? null, preferred_groups: initial.preferred_groups ?? null, prefer_season_packs: initial.prefer_season_packs ?? false, profile_id: initial.profile_id ?? null }
-      : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: defaultPath?.id, enabled: true, max_size_mb: null, preferred_groups: null, prefer_season_packs: false, profile_id: profiles.some((p) => p.id === defaultProfileId) ? defaultProfileId : null }
+      ? { title: initial.title, search_query: initial.search_query, quality: initial.quality, codec: initial.codec ?? "x265", season: initial.season, episode: initial.episode, download_path_id: initial.download_path_id, enabled: initial.enabled, max_size_mb: initial.max_size_mb ?? null, preferred_groups: initial.preferred_groups ?? null, prefer_season_packs: initial.prefer_season_packs ?? false, profile_id: initial.profile_id ?? null, audience: initial.audience ?? "auto" }
+      : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: defaultPath?.id, enabled: true, max_size_mb: null, preferred_groups: null, prefer_season_packs: false, profile_id: profiles.some((p) => p.id === defaultProfileId) ? defaultProfileId : null, audience: "auto" }
   );
   const profile = profiles.find((p) => p.id === form.profile_id);
   const set = (k: keyof WatchlistCreate, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
@@ -167,6 +167,16 @@ function FormModal({ initial, paths, profiles, defaultProfileId, onClose, onSave
               </select>
             </div>
           )}
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Who it's for</label>
+            <select value={form.audience ?? "auto"} onChange={(e) => set("audience", e.target.value as "auto" | "general" | "mature")} className={FIELD}>
+              <option value="auto">Decide from the age rating</option>
+              <option value="general">Everyone (regular folders)</option>
+              <option value="mature">Mature (Mature folders)</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Used by Rename &amp; organise when Mature folders are set.</p>
+          </div>
 
           {/* Advanced options (a profile supplies these instead) */}
           {!profile && (

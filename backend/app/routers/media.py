@@ -60,35 +60,46 @@ def _servable(file_id: int):
     return row
 
 
-@router.get("/files/{file_id}/organise")
-def organise_preview(file_id: int):
-    """Where Rename & organise would put this file."""
+def _organise_plan(path: str, override: str | None = None) -> dict:
+    """Where a file would go (regular or Mature folder, and why). Raises OrganiseError."""
     from ..database import SessionLocal
+    from ..services import organise
+    with SessionLocal() as s:
+        return organise.plan(s, path, override=override)
+
+
+def _organise(row, override: str | None = None) -> str:
+    from ..services import organise
+    where = _organise_plan(row["path"], override)
+    return organise.organise_file(where["settings"], row["id"], where["show_hint"], where["audience"])
+
+
+@router.get("/files/{file_id}/organise")
+def organise_preview(file_id: int, audience: str | None = None):
+    """Where Rename & organise would put this file (optionally for a chosen audience)."""
     from ..services import organise
     row = _servable(file_id)
     if row is None:
         return _err("File not found", 404)
-    with SessionLocal() as s:
-        try:
-            dest, parsed = organise.target_for(organise.get_settings(s), row["path"])
-        except organise.OrganiseError as exc:
-            return {"ok": False, "msg": str(exc)}
-    return {"ok": True, "target": dest, "kind": parsed.kind, "already": os.path.abspath(dest) == os.path.abspath(row["path"])}
+    try:
+        p = _organise_plan(row["path"], audience)
+    except organise.OrganiseError as exc:
+        return {"ok": False, "msg": str(exc)}
+    return {"ok": True, "target": p["target"], "kind": p["kind"], "audience": p["audience"],
+            "reason": p["reason"], "mature_folders": organise.mature_folders_set(p["settings"]),
+            "already": os.path.abspath(p["target"]) == os.path.abspath(row["path"])}
 
 
 @router.post("/files/{file_id}/organise")
-def organise_one(file_id: int):
-    from ..database import SessionLocal
+def organise_one(file_id: int, body: dict = Body(default={})):
     from ..services import organise
     row = db.get_file(file_id)
     if row is None:
         return _err("File not found", 404)
     if db.get_active_job_for_file(file_id) is not None or row["status"] in ("queued", "processing"):
         return _err("This file is being processed; try again when it's done", 409)
-    with SessionLocal() as s:
-        settings = organise.get_settings(s)
     try:
-        dest = organise.organise_file(settings, file_id)
+        dest = _organise(row, body.get("audience"))
     except (organise.OrganiseError, OSError) as exc:
         return _err(str(exc), 400)
     return {"ok": True, "msg": f"Moved to {dest}", "path": dest}
@@ -320,12 +331,9 @@ def files_bulk(body: dict = Body(default={})):
         if action == "skip":
             db.set_file_status(row["id"], "skipped")
         elif action == "organise":
-            from ..database import SessionLocal
             from ..services import organise
-            with SessionLocal() as s:
-                settings = organise.get_settings(s)
             try:
-                organise.organise_file(settings, row["id"])
+                _organise(row, (body.get("audiences") or {}).get(str(row["id"])))
             except (organise.OrganiseError, OSError) as exc:
                 errors.append(f"{row['filename']}: {exc}")
                 continue

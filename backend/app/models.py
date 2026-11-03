@@ -159,6 +159,11 @@ class DownloadPath(Base):
     local_path = Column(String, nullable=True)
     downloads = Column(Boolean, nullable=False, default=True, server_default=text("1"))
     scan = Column(Boolean, nullable=False, default=True, server_default=text("1"))
+    # Target format for files here (services/media/targets.py): auto | tv | movies | custom.
+    target = Column(String, nullable=False, default="auto", server_default="auto")
+    target_min = Column(Integer, nullable=True)        # custom only: heights, e.g. 720
+    target_max = Column(Integer, nullable=True)
+    target_shrink = Column(Boolean, nullable=False, default=False, server_default=text("0"))
 
 
 class Setting(Base):

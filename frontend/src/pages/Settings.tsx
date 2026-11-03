@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Compass, Copy, RefreshCw, Download, Edit2, FolderOpen, Loader2, MinusCircle, Plus, Save, Star, Stethoscope, Trash2, Upload, XCircle } from "lucide-react";
-import { api, SECRET_MASK, type DownloadPath, type FolderSuggestion, type FolderTest, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
+import { api, SECRET_MASK, type DownloadPath, type FolderTarget, type FolderSuggestion, type FolderTest, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
 import { PALETTES, useTheme, type Theme } from "../ThemeContext";
 import ImportPanel from "../components/ImportPanel";
@@ -83,7 +83,16 @@ function CheckRow({ label, hint, checked, onChange }: {
 
 export type FolderForm = {
   name: string; path: string; local_path: string; is_default: boolean; downloads: boolean; scan: boolean;
+  target?: FolderTarget; target_min?: number | null; target_max?: number | null; target_shrink?: boolean;
 };
+
+const TARGET_HEIGHTS: [number, string][] = [[480, "480p"], [720, "720p"], [1080, "1080p"], [1440, "1440p"], [2160, "4K"]];
+const TARGET_KINDS: [FolderTarget, string, string][] = [
+  ["auto", "Auto", "TV (S01E02 names) 720p–1080p, other files as movies 1080p–4K"],
+  ["tv", "TV shows", "H.265, 720p–1080p"],
+  ["movies", "Movies", "H.265, 1080p–4K"],
+  ["custom", "Custom", "H.265 at the sizes you choose"],
+];
 
 const CHECK_ICON = {
   ok:   <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-600 dark:text-green-400" aria-label="Passed" />,
@@ -147,6 +156,11 @@ function PathModal({ initial, onClose, onSave }: {
     is_default: initial?.is_default ?? false,
     downloads: initial?.downloads ?? true,
     scan: initial?.scan ?? true,
+    // New folders: guessed from the name on the server unless you pick one here.
+    target: initial?.target,
+    target_min: initial?.target_min ?? 720,
+    target_max: initial?.target_max ?? 720,
+    target_shrink: initial?.target_shrink ?? true,
   });
   const valid = form.name.trim() && form.path.trim() && (form.downloads || form.scan);
   const set = <K extends keyof FolderForm>(k: K, v: FolderForm[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -154,7 +168,7 @@ function PathModal({ initial, onClose, onSave }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div role="dialog" aria-modal="true" aria-labelledby="folder-dialog-title"
-           className="w-full max-w-md rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-6 shadow-xl">
+           className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-6 shadow-xl">
         <h2 id="folder-dialog-title" className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
           {initial ? "Edit folder" : "Add folder"}
         </h2>
@@ -200,6 +214,38 @@ function PathModal({ initial, onClose, onSave }: {
               <input type="checkbox" checked={form.is_default} onChange={(e) => set("is_default", e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600" />
               <span className="text-sm text-gray-700 dark:text-gray-300">Default download folder</span>
             </label>
+          )}
+          {form.scan && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Target format</label>
+              <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">
+                Files already in it show as “in target format” instead of pending.
+              </p>
+              <select value={form.target ?? ""} onChange={(e) => set("target", (e.target.value || undefined) as FolderTarget | undefined)} className={FIELD}>
+                {!initial && <option value="">Guess from the name</option>}
+                {TARGET_KINDS.map(([k, label, hint]) => <option key={k} value={k}>{label} — {hint}</option>)}
+              </select>
+              {form.target === "custom" && (
+                <div className="mt-2 space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                  <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <span>H.265 from</span>
+                    <select aria-label="Smallest" value={form.target_min ?? 720} onChange={(e) => set("target_min", Number(e.target.value))} className={`${FIELD} w-auto`}>
+                      {TARGET_HEIGHTS.map(([h, l]) => <option key={h} value={h}>{l}</option>)}
+                    </select>
+                    <span>to</span>
+                    <select aria-label="Largest" value={form.target_max ?? 720} onChange={(e) => set("target_max", Number(e.target.value))} className={`${FIELD} w-auto`}>
+                      {TARGET_HEIGHTS.map(([h, l]) => <option key={h} value={h}>{l}</option>)}
+                    </select>
+                  </div>
+                  <label className="flex cursor-pointer items-start gap-2">
+                    <input type="checkbox" checked={!!form.target_shrink} onChange={(e) => set("target_shrink", e.target.checked)}
+                           className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300">Shrink bigger files when encoding
+                      <span className="block text-xs text-gray-500">A file that isn't H.265 yet is encoded down to the largest size. H.265 files are only shrunk when you ask (Library doctor).</span></span>
+                  </label>
+                </div>
+              )}
+            </div>
           )}
           {!form.downloads && !form.scan && (
             <p className="text-xs text-amber-700 dark:text-amber-400">Tick at least one: downloads, or scan &amp; encode.</p>
@@ -383,9 +429,11 @@ function ProfileModal({ initial, onClose, onSave }: {
   );
 }
 
-function ProfilesSection({ defaultId, onDefaultChange }: {
+function ProfilesSection({ defaultId, onDefaultChange, movieDefaultId, onMovieDefaultChange }: {
   defaultId: string;
   onDefaultChange: (id: string) => void;
+  movieDefaultId: string;
+  onMovieDefaultChange: (id: string) => void;
 }) {
   const [profiles, setProfiles] = useState<QualityProfile[] | null>(null);
   const [modal, setModal] = useState<QualityProfile | true | null>(null);
@@ -409,6 +457,7 @@ function ProfilesSection({ defaultId, onDefaultChange }: {
     try {
       await api.profiles.delete(p.id);
       if (String(p.id) === defaultId) onDefaultChange("");
+      if (String(p.id) === movieDefaultId) onMovieDefaultChange("");
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete profile.");
@@ -419,13 +468,20 @@ function ProfilesSection({ defaultId, onDefaultChange }: {
     <>
       <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
         Reusable download preferences — for example "4K, fall back to 1080p after a day" — that you can assign to
-        any show. Editing a profile updates every show using it.
+        any show or movie. Editing a profile updates everything using it.
       </p>
-      <div className="mb-3 flex items-end justify-between gap-3">
-        <div className="min-w-0 flex-1 sm:max-w-xs">
-          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Default for new shows</label>
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-48 sm:max-w-xs">
+          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Default for new TV shows</label>
           <select value={defaultId} onChange={(e) => onDefaultChange(e.target.value)} className={FIELD}>
             <option value="">None (custom settings)</option>
+            {(profiles ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="min-w-0 flex-1 basis-48 sm:max-w-xs">
+          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Default for new movies</label>
+          <select value={movieDefaultId} onChange={(e) => onMovieDefaultChange(e.target.value)} className={FIELD}>
+            <option value="">Same as TV shows</option>
             {(profiles ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </div>
@@ -924,6 +980,9 @@ export default function Settings() {
                     {p.local && p.local !== p.path && (
                       <p className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate" title="Where ScreenMate sees it">here: {p.local}</p>
                     )}
+                    {p.scan && p.target_summary && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Target: {p.target_summary}</p>
+                    )}
                     {p.free_bytes != null && (
                       <p className={`text-xs ${p.low_space ? "font-medium text-amber-600 dark:text-amber-400" : "text-gray-400 dark:text-gray-500"}`}>
                         {(p.free_bytes / 1e9).toFixed(1)} GB free{p.low_space ? " — low space" : ""}
@@ -1073,6 +1132,8 @@ export default function Settings() {
           <ProfilesSection
             defaultId={settings.default_profile_id ?? ""}
             onDefaultChange={(id) => set("default_profile_id", id)}
+            movieDefaultId={settings.default_movie_profile_id ?? ""}
+            onMovieDefaultChange={(id) => set("default_movie_profile_id", id)}
           />
         </Section>
 

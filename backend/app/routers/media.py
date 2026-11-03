@@ -27,10 +27,25 @@ def _err(msg: str, status: int) -> JSONResponse:
 
 @router.get("/files")
 def list_files():
+    from ..services.media import targets
+    try:
+        tfolders = targets.load_folders()
+    except Exception:
+        tfolders = None
     result = []
     for r in db.get_all_files():
         d = dict(r)
         d["category"] = config.categorize(d["path"])
+        # Compared with its folder's target: "above" (bigger, H.265) / "below" (lower than preferred).
+        d["target_note"] = None
+        d["target"] = None
+        if tfolders is not None:
+            c = targets.check(r, tfolders)
+            d["target"] = c.target.describe()
+            if c.meets and c.above:
+                d["target_note"] = "above"
+            elif c.below:
+                d["target_note"] = "below"
         result.append(d)
     return result
 

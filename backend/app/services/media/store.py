@@ -186,7 +186,8 @@ def get_stats() -> dict:
                 SUM(CASE WHEN status='queued' THEN 1 ELSE 0 END) as queued,
                 SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) as errors,
                 SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END) as skipped,
-                SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) as pending
+                SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) as pending,
+                SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) as ok
             FROM media_files
         """))
         saved_row = _one(conn.execute("SELECT value FROM settings WHERE key='total_saved_bytes'"))
@@ -200,6 +201,15 @@ def get_stats() -> dict:
 def create_job(file_id: int, job_type: str, target_resolution: str = "original",
                episode_count: int = 0, journey_id: int | None = None,
                reason: str | None = None) -> int:
+    if job_type == "encode" and (target_resolution or "original") == "original":
+        # Folders with "shrink" on (e.g. Bellesa, 720p) encode bigger files down to their target.
+        try:
+            from . import targets
+            row = get_file(file_id)
+            if row is not None:
+                target_resolution = targets.check(row).shrink_to
+        except Exception:
+            target_resolution = "original"
     if journey_id is None:
         journey_id = journeys.on_media_job_created(_engine(), file_id)
     with connect() as conn:

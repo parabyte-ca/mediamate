@@ -41,6 +41,7 @@ MAX_ISSUES = 1000
 LABEL = {
     "sample": "Sample clip", "junk": "Leftover file", "empty": "Empty folder", "broken": "Can't be played",
     "missing": "File is gone", "duplicate": "Duplicate", "audience": "Wrong folder", "name": "Not named for Plex",
+    "oversize": "Larger than target", "lowres": "Lower than preferred",
 }
 MAX_RATING_LOOKUPS = 200     # new TMDB lookups per check; the rest use the cache and catch up next week
 
@@ -213,6 +214,27 @@ def check(db: Session) -> dict:
                 issues.append(_issue("name", path, f"Would become {dest}", "Rename & organise",
                                      file_id=row["id"], target=dest, audience=where["audience"]))
 
+    # Size against the folder's target: bigger (shrink only when asked) or below the preferred range.
+    try:
+        from .media import targets
+        tfolders = targets.load_folders(db)
+        seen = {i["path"] for i in issues if i["kind"] in ("duplicate", "missing")}
+        for path, row in rows.items():
+            if path in seen or row["status"] in ("queued", "processing") or not row["height"]:
+                continue
+            c = targets.check(row, tfolders)
+            res = targets.LABEL.get(c.resolution, "?")
+            if c.above and c.meets:
+                to = targets.RES_KEY[c.target.max]
+                issues.append(_issue("oversize", path,
+                                     f"{res}; the target is {c.target.describe()}",
+                                     f"Shrink to {targets.LABEL[c.target.max]}", file_id=row["id"], resolution=to))
+            elif c.below:
+                issues.append(_issue("lowres", path, f"{res}; {c.target.describe()} is preferred",
+                                     "Find a better copy", file_id=row["id"], fixable=False))
+    except Exception:
+        logger.exception("Target-size check failed")
+
     order = {k: i for i, k in enumerate(LABEL)}
     issues.sort(key=lambda i: (order[i["kind"]], i["path"]))
     return {"checked_at": _now(), "roots": roots, "issues": issues[:MAX_ISSUES],
@@ -248,7 +270,23 @@ def fix(db: Session, issue: dict) -> str:
         where = organise.plan(db, path, override=issue.get("audience"))
         dest = organise.organise_file(where["settings"], row["id"], where["show_hint"], where["audience"])
         return f"Moved to {dest}"
+    if kind == "oversize":
+        if row is None:
+            raise ValueError("No longer in the Library")
+        res = issue.get("resolution")
+        if res not in config_resolutions():
+            raise ValueError("Unknown target size")
+        store.create_job(row["id"], "encode", res, reason="Library doctor: shrink to the folder's target")
+        store.set_file_status(row["id"], "queued")
+        return f"Queued: shrink to {res}"
+    if kind == "lowres":
+        raise ValueError("Find a better copy with Search; there's nothing to fix in place")
     raise ValueError(f"Unknown problem type {kind}")
+
+
+def config_resolutions() -> set[str]:
+    from .media import config
+    return set(config.RESOLUTION_MAP)
 
 
 def run(db: Session, auto_fix: bool | None = None) -> dict:

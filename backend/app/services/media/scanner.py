@@ -5,6 +5,7 @@ import logging
 from . import config
 from . import store as db
 from . import codec_detector
+from . import targets
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,11 @@ def scan_all() -> dict:
     """Scan all configured MEDIA_PATHS and upsert file records. Returns summary."""
     found = skipped = errors = 0
     new_ids: list[int] = []
+    try:
+        folders = targets.load_folders()
+    except Exception as exc:          # targets are a nicety: never stop a scan for them
+        logger.warning("Couldn't load folder targets: %s", exc)
+        folders = []
 
     for media_path in config.MEDIA_PATHS:
         if not os.path.isdir(media_path):
@@ -50,7 +56,7 @@ def scan_all() -> dict:
                     # Skip probing files already finished — avoids re-scanning
                     # large completed libraries on every scan.
                     existing = db.get_file_by_path(full_path)
-                    if existing and existing["status"] in ("done", "skipped"):
+                    if existing and existing["status"] in ("done", "skipped", "ok"):
                         skipped += 1
                         continue
 
@@ -76,6 +82,11 @@ def scan_all() -> dict:
                         height=info.height,
                     )
                     found += 1
+                    # Already H.265 (its folder's target)? Then it's "In target format", not pending.
+                    try:
+                        targets.classify(file_id, folders)
+                    except Exception as exc:
+                        logger.warning("Target check failed for %s: %s", full_path, exc)
                     if existing is None:
                         new_ids.append(file_id)
                     logger.info(

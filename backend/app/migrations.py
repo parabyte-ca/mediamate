@@ -73,6 +73,21 @@ MIGRATIONS: list[tuple[str, str | None]] = [
     ("ALTER TABLE watchlist ADD COLUMN release_kind TEXT", None),
     ("ALTER TABLE watchlist ADD COLUMN completed_at DATETIME", None),
     ("ALTER TABLE watchlist ADD COLUMN keep INTEGER NOT NULL DEFAULT 0", None),
+    # Target formats per folder. Guess from the name: TV / Movies / Bellesa (720p).
+    (
+        "ALTER TABLE download_paths ADD COLUMN target TEXT NOT NULL DEFAULT 'auto'",
+        "UPDATE download_paths SET target = CASE "
+        "WHEN lower(name) LIKE '%bellesa%' THEN 'custom' "
+        "WHEN lower(name) LIKE '%movie%' OR lower(name) LIKE '%film%' THEN 'movies' "
+        "WHEN lower(name) LIKE '%tv%' OR lower(name) LIKE '%show%' OR lower(name) LIKE '%series%' THEN 'tv' "
+        "ELSE 'auto' END",
+    ),
+    ("ALTER TABLE download_paths ADD COLUMN target_min INTEGER",
+     "UPDATE download_paths SET target_min = 720 WHERE target = 'custom'"),
+    ("ALTER TABLE download_paths ADD COLUMN target_max INTEGER",
+     "UPDATE download_paths SET target_max = 720 WHERE target = 'custom'"),
+    ("ALTER TABLE download_paths ADD COLUMN target_shrink INTEGER NOT NULL DEFAULT 0",
+     "UPDATE download_paths SET target_shrink = 1 WHERE target = 'custom'"),
 ]
 
 

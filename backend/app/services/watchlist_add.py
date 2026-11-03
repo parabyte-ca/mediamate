@@ -12,10 +12,45 @@ class AlreadyOnWatchlist(Exception):
     """A watchlist entry for this TVMaze show already exists."""
 
 
-def default_profile_id(db) -> int | None:
-    """The configured default quality profile, ignoring one that was deleted."""
+TV_PROFILE = {"name": "TV: 1080p (720p fallback)", "quality": "1080p", "codec": "x265",
+              "fallback_quality": "720p", "fallback_after_hours": 24}
+MOVIE_PROFILE = {"name": "Movies: 4K (1080p fallback)", "quality": "4K", "codec": "x265",
+                 "fallback_quality": "1080p", "fallback_after_hours": 24}
+_DEFAULTS_DONE = "format_defaults_v1"
+
+
+def ensure_format_defaults(db) -> None:
+    """Once: create the TV and movie quality profiles and make them the defaults for
+    new watchlist items, unless defaults were already chosen. Existing items keep theirs."""
     from ..models import QualityProfile, Setting
 
+    if db.query(Setting).filter(Setting.key == _DEFAULTS_DONE).first():
+        return
+    for spec, key in ((TV_PROFILE, "default_profile_id"), (MOVIE_PROFILE, "default_movie_profile_id")):
+        prof = db.query(QualityProfile).filter(QualityProfile.name == spec["name"]).first()
+        if prof is None:
+            prof = QualityProfile(**spec)
+            db.add(prof)
+            db.flush()
+        row = db.query(Setting).filter(Setting.key == key).first()
+        if row is None:
+            db.add(Setting(key=key, value=str(prof.id)))
+        elif not (row.value or "").strip():
+            row.value = str(prof.id)
+    db.add(Setting(key=_DEFAULTS_DONE, value="1"))
+    db.commit()
+
+
+def default_profile_id(db, kind: str = "tv") -> int | None:
+    """The default quality profile for new TV shows or movies, ignoring a deleted one.
+    Movies fall back to the TV default when no movie default is set."""
+    from ..models import QualityProfile, Setting
+
+    if kind == "movie":
+        row = db.query(Setting).filter(Setting.key == "default_movie_profile_id").first()
+        if row and row.value and row.value.isdigit() and \
+                db.query(QualityProfile).filter(QualityProfile.id == int(row.value)).first():
+            return int(row.value)
     row = db.query(Setting).filter(Setting.key == "default_profile_id").first()
     if row and row.value and row.value.isdigit():
         if db.query(QualityProfile).filter(QualityProfile.id == int(row.value)).first():
@@ -100,7 +135,7 @@ async def create_from_tmdb(db, tmdb_id: int, profile_id: int | None = None, audi
         release_kind=release_kind,
         season=1,
         episode=1,
-        profile_id=profile_id if profile_id is not None else default_profile_id(db),
+        profile_id=profile_id if profile_id is not None else default_profile_id(db, "movie"),
         audience=None if audience in (None, "auto") else audience,
     )
     show_metadata.apply_movie(item, movie)

@@ -380,6 +380,20 @@ def advance(bind, plan_id: int) -> None:
             journeys.refresh(db, plan.journey_id)
             return
 
+        # An encode to the folder's target is pointless when the file is already H.265.
+        while (plan.next_index < len(actions) and actions[plan.next_index]["type"] == "encode"
+               and actions[plan.next_index].get("resolution", "original") == "original"):
+            try:
+                from .media import targets
+                done_already = targets.check(row).meets
+            except Exception:
+                done_already = False
+            if not done_already:
+                break
+            plan.next_index += 1
+            plan.detail = "Encode skipped: already in target format (H.265)"
+            db.commit()
+
         if plan.next_index >= len(actions):
             plan.status = "done"
             plan.finished_at = _utcnow()
@@ -552,7 +566,7 @@ def preview(db: Session, rules: list[dict] | None = None, limit: int = 500) -> d
     items, total_size, total_saved = [], 0, 0
     for row in store.get_all_files():
         info = dict(row)
-        if info["status"] in ("done", "skipped") or info["id"] in planned_or_busy:
+        if info["status"] in ("done", "skipped", "ok") or info["id"] in planned_or_busy:
             continue
         rule = choose_rule(rules, info, "scan")
         if rule is None:

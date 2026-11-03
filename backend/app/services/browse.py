@@ -108,3 +108,43 @@ async def search(query: str, limit: int = 30) -> list[dict] | None:
     if shows is None:
         return None
     return [show_card(s) for s in shows[:limit]]
+
+
+# ── Movies (TMDB) ─────────────────────────────────────────────────────────────
+
+MOVIE_LISTS = {"popular": "/movie/popular", "now_playing": "/movie/now_playing", "upcoming": "/movie/upcoming"}
+_movie_cache: dict[tuple, tuple[float, list[dict]]] = {}
+MOVIE_TTL = 30 * 60
+
+
+def movie_card(m: dict) -> dict:
+    from . import tmdb
+    released = (m.get("release_date") or "")[:10]
+    return {
+        "tmdb_id": m.get("id"),
+        "title": m.get("title") or m.get("original_title") or "",
+        "year": int(released[:4]) if released[:4].isdigit() else None,
+        "release_date": released or None,
+        "poster_url": tmdb.poster_url(m),
+        "overview": (m.get("overview") or "")[:400] or None,
+        "rating": round(float(m["vote_average"]), 1) if m.get("vote_average") else None,
+        "votes": m.get("vote_count") or 0,
+    }
+
+
+async def movies(key: str, kind: str = "popular", query: str = "", country: str = "US", limit: int = 30) -> list[dict]:
+    """A TMDB movie list (popular, now_playing, upcoming) or a search. Raises tmdb.TMDBUnavailable."""
+    from . import tmdb
+    cache_key = (kind, query.lower(), country)
+    hit = _movie_cache.get(cache_key)
+    if hit and time.monotonic() - hit[0] < MOVIE_TTL:
+        return hit[1][:limit]
+    if query:
+        data = await tmdb._get(key, "/search/movie", {"query": query, "include_adult": "false"})
+    else:
+        data = await tmdb._get(key, MOVIE_LISTS.get(kind, MOVIE_LISTS["popular"]), {"region": country})
+    cards = [movie_card(m) for m in (data.get("results") or []) if isinstance(m, dict) and m.get("id")]
+    if not query:
+        cards = [c for c in cards if c["poster_url"]]       # lists: only ones that look right
+    _movie_cache[cache_key] = (time.monotonic(), cards)
+    return cards[:limit]

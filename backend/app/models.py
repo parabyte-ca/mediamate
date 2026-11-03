@@ -29,6 +29,8 @@ class WatchlistItem(Base):
     max_size_mb = Column(Integer, nullable=True)          # reject results larger than this
     preferred_groups = Column(String, nullable=True)      # comma-separated release groups, ranked
     prefer_season_packs = Column(Boolean, default=False, server_default="0")
+    # Rename & organise: "general" or "mature" folders; None = decide from the age rating.
+    audience = Column(String, nullable=True)
 
     # Optional reusable quality profile; when set it overrides the per-item
     # quality / codec / size / groups / season-pack fields above.
@@ -325,6 +327,19 @@ class PipelinePlan(Base):
     notify_status = Column(String, nullable=True)   # done | skipped
     created_at = Column(DateTime, server_default=func.now())
     finished_at = Column(DateTime, nullable=True)
+
+
+class ContentRating(Base):
+    """Cached age rating for a show or movie (from TMDB); cert "" = none found."""
+    __tablename__ = "content_ratings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    kind = Column(String, nullable=False)          # tv | movie
+    title_key = Column(String, nullable=False, index=True)
+    year = Column(Integer, nullable=False, default=0)
+    title = Column(String, nullable=True)
+    cert = Column(String, nullable=True)
+    checked_at = Column(DateTime, nullable=True)
 
 
 class PushSubscription(Base):

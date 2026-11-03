@@ -25,7 +25,7 @@ export const GO_KEYS: Record<string, { to: string; label: string; icon: LucideIc
   s: { to: "/search", label: "Search", icon: Search },
   w: { to: "/watchlist", label: "Watchlist", icon: Tv },
   c: { to: "/calendar", label: "Calendar", icon: CalendarDays },
-  b: { to: "/browse", label: "Browse shows", icon: Compass },
+  b: { to: "/browse", label: "Browse shows & movies", icon: Compass },
   a: { to: "/activity", label: "Activity", icon: Activity },
   l: { to: "/library", label: "Library", icon: Film },
   i: { to: "/insights", label: "Insights", icon: TrendingUp },

@@ -43,7 +43,10 @@ def get_watchlist(db: Session = Depends(get_db)):
 @router.post("/watchlist", response_model=WatchlistOut, status_code=201)
 async def create_watchlist_item(item: WatchlistCreate, db: Session = Depends(get_db)):
     _require_profile(db, item.profile_id)
-    db_item = WatchlistItem(**item.model_dump())
+    data = item.model_dump()
+    if data.get("audience") == "auto":
+        data["audience"] = None
+    db_item = WatchlistItem(**data)
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
@@ -110,6 +113,8 @@ def update_watchlist_item(
         raise HTTPException(status_code=404, detail="Item not found")
     _require_profile(db, item.profile_id)
     for field, value in item.model_dump(exclude_unset=True).items():
+        if field == "audience":
+            value = None if value in (None, "auto") else value
         setattr(db_item, field, value)
     db.commit()
     db.refresh(db_item)

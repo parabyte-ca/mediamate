@@ -85,6 +85,8 @@ export interface WatchlistItem {
   network?: string | null;
   premiered?: string | null;
   metadata_checked_at?: string | null;
+  /** Rename & organise folder: null = from the age rating. */
+  audience?: "general" | "mature" | null;
 }
 
 export interface QualityProfile {
@@ -123,6 +125,7 @@ export interface WatchlistCreate {
   preferred_groups?: string | null;
   prefer_season_packs?: boolean;
   profile_id?: number | null;
+  audience?: "general" | "mature" | "auto" | null;
 }
 
 export interface Download {
@@ -280,6 +283,21 @@ export interface CalendarResponse {
   unmatched: number;
 }
 
+export type MovieList = "popular" | "now_playing" | "upcoming";
+
+export interface BrowseMovie {
+  tmdb_id: number;
+  title: string;
+  year: number | null;
+  release_date: string | null;
+  poster_url: string | null;
+  overview: string | null;
+  rating: number | null;
+  votes: number;
+  in_library: boolean;
+  certification: string | null;
+}
+
 export interface BrowseShow {
   tvmaze_id: number;
   name: string;
@@ -433,7 +451,18 @@ export interface ProgressEvent {
 
 export type PipelineActionType = "trim" | "encode" | "split" | "organise";
 
-export type DoctorKind = "sample" | "junk" | "empty" | "broken" | "missing" | "duplicate" | "name";
+export type DoctorKind = "sample" | "junk" | "empty" | "broken" | "missing" | "duplicate" | "audience" | "name";
+
+export interface OrganisePlan {
+  ok: boolean;
+  target?: string;
+  kind?: string;
+  already?: boolean;
+  msg?: string;
+  audience?: "general" | "mature";
+  reason?: string;
+  mature_folders?: boolean;
+}
 
 export interface DoctorIssue {
   id: string;
@@ -457,9 +486,12 @@ export interface DoctorState {
 export interface OrganiseSettings {
   organise_tv_dir: string;
   organise_movie_dir: string;
+  organise_tv_mature_dir: string;
+  organise_movie_mature_dir: string;
+  ratings_need_key?: boolean;
   organise_tv_template: string;
   organise_movie_template: string;
-  warnings?: Partial<Record<"organise_tv_dir" | "organise_movie_dir", string>>;
+  warnings?: Partial<Record<"organise_tv_dir" | "organise_movie_dir" | "organise_tv_mature_dir" | "organise_movie_mature_dir", string>>;
 }
 
 export interface PipelineAction {
@@ -778,13 +810,13 @@ export const api = {
         body: JSON.stringify({ file_ids: fileIds, job_type: jobType, target_resolution: targetResolution, episode_count: episodeCount }),
       }),
     /** Where Rename & organise would put a file (no changes). */
-    organisePreview: (id: number) =>
-      req<{ ok: boolean; target?: string; kind?: string; already?: boolean; msg?: string }>(`/media/files/${id}/organise`),
+    organisePreview: (id: number, audience?: "general" | "mature") =>
+      req<OrganisePlan>(`/media/files/${id}/organise${audience ? `?audience=${audience}` : ""}`),
     organise: (id: number) =>
       req<{ ok: boolean; msg: string; path: string }>(`/media/files/${id}/organise`, { method: "POST" }),
-    bulk: (action: "skip" | "delete" | "organise", fileIds: number[]) =>
+    bulk: (action: "skip" | "delete" | "organise", fileIds: number[], audiences?: Record<number, "general" | "mature">) =>
       req<{ ok: boolean; done: number; skipped: number; errors: string[] }>("/media/files/bulk", {
-        method: "POST", body: JSON.stringify({ action, file_ids: fileIds }),
+        method: "POST", body: JSON.stringify({ action, file_ids: fileIds, audiences }),
       }),
     rename: (id: number, newName: string) =>
       req<MediaResult & { filename?: string }>(`/media/files/${id}/rename`, { method: "POST", body: JSON.stringify({ new_name: newName }) }),
@@ -890,7 +922,7 @@ export const api = {
     saveOrganise: (data: Partial<OrganiseSettings>) =>
       req<OrganiseSettings>("/pipeline/organise", { method: "PUT", body: JSON.stringify(data) }),
     organiseExample: (filename: string, unsaved: Partial<OrganiseSettings> = {}) =>
-      req<{ ok: boolean; target?: string; error?: string }>("/pipeline/organise/example", {
+      req<{ ok: boolean; target?: string; error?: string; audience?: "general" | "mature"; reason?: string }>("/pipeline/organise/example", {
         method: "POST", body: JSON.stringify({ ...unsaved, filename }),
       }),
     apply: (fileIds: number[], ruleId?: number | null) =>
@@ -948,6 +980,9 @@ export const api = {
 
   browse: {
     get: (q = "") => req<BrowseResponse>(`/browse${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+    movies: (list: MovieList = "popular", q = "") =>
+      req<{ need_key: boolean; movies: BrowseMovie[]; list: string; country?: string }>(
+        `/browse/movies?list=${list}${q ? `&q=${encodeURIComponent(q)}` : ""}`),
   },
 
   profiles: {

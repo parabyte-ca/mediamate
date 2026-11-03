@@ -7,6 +7,8 @@ Checks:
   broken      video files that can't be read (never indexed by a scan)
   missing     Library entries whose file is gone
   duplicate   the same episode or movie more than once; the best copy is kept
+  audience    in the regular folder but rated for adults, or the other way round
+              (only when Mature folders are set; uses the age rating or your choice)
   name        files that aren't named the Plex way (only when Rename & organise
               has folders set; fixing moves them there)
 
@@ -38,8 +40,20 @@ MAX_ISSUES = 1000
 
 LABEL = {
     "sample": "Sample clip", "junk": "Leftover file", "empty": "Empty folder", "broken": "Can't be played",
-    "missing": "File is gone", "duplicate": "Duplicate", "name": "Not named for Plex",
+    "missing": "File is gone", "duplicate": "Duplicate", "audience": "Wrong folder", "name": "Not named for Plex",
 }
+MAX_RATING_LOOKUPS = 200     # new TMDB lookups per check; the rest use the cache and catch up next week
+
+
+def _audience_of(settings: dict, path: str) -> str | None:
+    """Which organise folder a file is in now: general, mature, or None (neither)."""
+    p = os.path.abspath(path)
+    for key, aud in (("organise_tv_mature_dir", "mature"), ("organise_movie_mature_dir", "mature"),
+                     ("organise_tv_dir", "general"), ("organise_movie_dir", "general")):
+        root = (settings.get(key) or "").strip()
+        if root and p.startswith(os.path.abspath(root).rstrip("/") + "/"):
+            return aud
+    return None
 _lock = threading.Lock()
 
 
@@ -109,6 +123,7 @@ def check(db: Session) -> dict:
     roots = folders.scan_roots(db)
     rows = {r["path"]: r for r in store.get_all_files()}
     issues: list[dict] = []
+    lookups = [0]
 
     for root in roots:
         if not os.path.isdir(root):
@@ -171,7 +186,8 @@ def check(db: Session) -> dict:
                                  f"{(best['codec'] or '?').upper()}). This one: {res}, {(row['codec'] or '?').upper()}",
                                  "Move this copy to trash", file_id=row["id"], keep=best["path"]))
 
-    # Names: only when Rename & organise knows where files belong.
+    # Names and folders: only when Rename & organise knows where files belong. A file
+    # rated for adults in a regular folder (or the reverse) shows up as a wrong folder.
     settings = organise.get_settings(db)
     if settings.get("organise_tv_dir") or settings.get("organise_movie_dir"):
         dup_paths = {i["path"] for i in issues if i["kind"] == "duplicate"}
@@ -179,12 +195,23 @@ def check(db: Session) -> dict:
             if path in dup_paths or not os.path.exists(path):
                 continue
             try:
-                dest, _ = organise.target_for(settings, path)
+                where = organise.plan(db, path, lookup=lookups[0] < MAX_RATING_LOOKUPS)
             except organise.OrganiseError:
                 continue
-            if os.path.abspath(dest) != os.path.abspath(path):
+            lookups[0] += 1
+            dest = where["target"]
+            if os.path.abspath(dest) == os.path.abspath(path):
+                continue
+            now_in = _audience_of(settings, path)
+            wrong_audience = (organise.mature_folders_set(settings) and now_in is not None
+                              and now_in != where["audience"])
+            if wrong_audience:
+                which = "Mature" if where["audience"] == "mature" else "regular"
+                issues.append(_issue("audience", path, f"Belongs in the {which} folder ({where['reason']}): {dest}",
+                                     "Move it", file_id=row["id"], target=dest, audience=where["audience"]))
+            else:
                 issues.append(_issue("name", path, f"Would become {dest}", "Rename & organise",
-                                     file_id=row["id"], target=dest))
+                                     file_id=row["id"], target=dest, audience=where["audience"]))
 
     order = {k: i for i, k in enumerate(LABEL)}
     issues.sort(key=lambda i: (order[i["kind"]], i["path"]))
@@ -215,10 +242,11 @@ def fix(db: Session, issue: dict) -> str:
         if row is not None:
             store.delete_file(row["id"])
         return "Removed from the Library"
-    if kind == "name":
+    if kind in ("name", "audience"):
         if row is None:
             raise ValueError("No longer in the Library")
-        dest = organise.organise_file(organise.get_settings(db), row["id"])
+        where = organise.plan(db, path, override=issue.get("audience"))
+        dest = organise.organise_file(where["settings"], row["id"], where["show_hint"], where["audience"])
         return f"Moved to {dest}"
     raise ValueError(f"Unknown problem type {kind}")
 

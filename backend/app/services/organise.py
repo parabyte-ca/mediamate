@@ -23,6 +23,8 @@ from ..models import Setting
 SETTINGS_DEFAULTS = {
     "organise_tv_dir": "",
     "organise_movie_dir": "",
+    "organise_tv_mature_dir": "",       # optional: Mature TV Shows (see services/ratings.py)
+    "organise_movie_mature_dir": "",    # optional: Mature Movies
     "organise_tv_template": "{show}/Season {season:02d}/{show} - S{season:02d}E{episode:02d}{ext}",
     "organise_movie_template": "{title} ({year})/{title} ({year}){ext}",
 }
@@ -94,12 +96,27 @@ class OrganiseError(Exception):
     """A user-facing reason the file wasn't organised."""
 
 
-def target_for(settings: dict, path: str, show_hint: str | None = None) -> tuple[str, Parsed]:
+def _root(settings: dict, kind: str, audience: str) -> str:
+    """The folder for this kind and audience. Mature files use the Mature folder when one
+    is set; without one, everything shares the regular folder (as before)."""
+    base = "organise_tv" if kind == "episode" else "organise_movie"
+    if audience == "mature" and settings.get(f"{base}_mature_dir", "").strip():
+        return settings[f"{base}_mature_dir"].strip()
+    return settings.get(f"{base}_dir", "").strip()
+
+
+def mature_folders_set(settings: dict) -> bool:
+    return bool(settings.get("organise_tv_mature_dir", "").strip()
+                or settings.get("organise_movie_mature_dir", "").strip())
+
+
+def target_for(settings: dict, path: str, show_hint: str | None = None,
+               audience: str = "general") -> tuple[str, Parsed]:
     """Where `path` belongs. Raises OrganiseError when it can't be worked out."""
     p = parse(path)
     ext = os.path.splitext(path)[1].lower()
     if p.kind == "episode":
-        root = settings.get("organise_tv_dir", "").strip()
+        root = _root(settings, "episode", audience)
         if not root:
             raise OrganiseError("Set a TV folder in Settings → Auto pipeline → Rename & organise")
         show = safe(show_hint or p.title)
@@ -111,7 +128,7 @@ def target_for(settings: dict, path: str, show_hint: str | None = None) -> tuple
             stem, e = os.path.splitext(rel)
             rel = f"{stem}-E{p.episode_end:02d}{e}"
     elif p.kind == "movie":
-        root = settings.get("organise_movie_dir", "").strip()
+        root = _root(settings, "movie", audience)
         if not root:
             raise OrganiseError("Set a Movies folder in Settings → Auto pipeline → Rename & organise")
         title = safe(p.title)
@@ -177,7 +194,8 @@ def _prune_empty(folder: str) -> None:
         pass
 
 
-def organise_file(settings: dict, file_id: int, show_hint: str | None = None) -> str:
+def organise_file(settings: dict, file_id: int, show_hint: str | None = None,
+                  audience: str = "general") -> str:
     """Move a library file into place and update the Library. Returns the new path.
     Takes the settings rather than a session, so no database transaction is held
     open while the Library row is updated."""
@@ -187,19 +205,57 @@ def organise_file(settings: dict, file_id: int, show_hint: str | None = None) ->
         raise OrganiseError("The file is no longer in the library")
     if not os.path.isfile(row["path"]):
         raise OrganiseError(f"{row['path']} isn't there any more")
-    dest, _ = target_for(settings, row["path"], show_hint)
+    dest, _ = target_for(settings, row["path"], show_hint, audience)
     move(row["path"], dest)
     store.rename_file(file_id, dest, os.path.basename(dest))
     return dest
 
 
-def show_hint_for_download(db: Session, download_id: int | None) -> str | None:
-    """The watchlist's show name for a download, when it came from the watchlist."""
+def watchlist_for_download(db: Session, download_id: int | None):
+    """The watchlist item a download came from, if any."""
     if not download_id:
         return None
     from ..models import Download, WatchlistItem
     dl = db.get(Download, download_id)
     if dl is None or not dl.watchlist_id:
         return None
-    item = db.get(WatchlistItem, dl.watchlist_id)
+    return db.get(WatchlistItem, dl.watchlist_id)
+
+
+def show_hint_for_download(db: Session, download_id: int | None) -> str | None:
+    """The watchlist's show name for a download, when it came from the watchlist."""
+    item = watchlist_for_download(db, download_id)
     return item.title if item else None
+
+
+def _watchlist_by_title(db: Session, title: str):
+    from ..models import WatchlistItem
+    from .ratings import _key
+    k = _key(title)
+    return next((w for w in db.query(WatchlistItem).all() if _key(w.title) == k), None) if k else None
+
+
+def plan(db: Session, path: str, download_id: int | None = None, override: str | None = None,
+         lookup: bool = True) -> dict:
+    """Where a file would go and why: {target, kind, audience, reason, show_hint, settings}.
+    Raises OrganiseError.
+
+    The audience is the override if given, else the watchlist show's setting (the show the
+    download came from, or one with the same name), else the age rating (services/ratings)."""
+    from . import ratings
+    settings = get_settings(db)
+    item = watchlist_for_download(db, download_id)
+    parsed = parse(path)
+    if item is None and parsed.kind == "episode":
+        item = _watchlist_by_title(db, parsed.title)
+    hint = item.title if item is not None else None
+    if override in (ratings.GENERAL, ratings.MATURE):
+        aud, why = override, "chosen by you"
+    elif not mature_folders_set(settings):
+        aud, why = ratings.GENERAL, ""
+    else:
+        aud, why = ratings.audience(db, parsed.kind, hint or parsed.title, parsed.year,
+                                    watchlist_item=item, lookup=lookup)
+    dest, p = target_for(settings, path, hint, aud)
+    return {"target": dest, "kind": p.kind, "audience": aud, "reason": why, "show_hint": hint,
+            "settings": settings}

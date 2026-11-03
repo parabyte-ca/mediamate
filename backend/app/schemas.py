@@ -68,6 +68,7 @@ class WatchlistCreate(BaseModel):
     preferred_groups: Optional[str] = None
     prefer_season_packs: bool = False
     profile_id: Optional[int] = None
+    audience: Optional[Literal["auto", "general", "mature"]] = None   # None/"auto" = from the age rating
 
 
 class WatchlistUpdate(BaseModel):
@@ -83,6 +84,8 @@ class WatchlistUpdate(BaseModel):
     preferred_groups: Optional[str] = None
     prefer_season_packs: Optional[bool] = None
     profile_id: Optional[int] = None
+    # Rename & organise folder: "auto" (from the age rating), "general" or "mature".
+    audience: Optional[Literal["auto", "general", "mature"]] = None
 
 
 class WatchlistOut(BaseModel):
@@ -111,6 +114,7 @@ class WatchlistOut(BaseModel):
     network: Optional[str] = None
     premiered: Optional[str] = None
     metadata_checked_at: Optional[datetime] = None
+    audience: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

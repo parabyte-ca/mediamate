@@ -197,7 +197,7 @@ function RuleModal({ initial, onClose, onSaved }: {
 function OrganiseSection() {
   const [s, setS] = useState<OrganiseSettings | null>(null);
   const [sample, setSample] = useState("The.Bear.S03E01.1080p.WEB.h264-GROUP.mkv");
-  const [example, setExample] = useState<{ ok: boolean; target?: string; error?: string } | null>(null);
+  const [example, setExample] = useState<{ ok: boolean; target?: string; error?: string; audience?: "general" | "mature"; reason?: string } | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState(false);
 
@@ -218,7 +218,7 @@ function OrganiseSection() {
     setS(await api.pipeline.saveOrganise(data));
     setSaved("Saved");
   };
-  const field = (k: "organise_tv_dir" | "organise_movie_dir", label: string, ph: string) => (
+  const field = (k: "organise_tv_dir" | "organise_movie_dir" | "organise_tv_mature_dir" | "organise_movie_mature_dir", label: string, ph: string) => (
     <label className="block">
       <span className="mb-1 block text-xs text-gray-500">{label}</span>
       <input className={input} value={s[k]} placeholder={ph} onChange={(e) => set(k, e.target.value)} />
@@ -237,7 +237,21 @@ function OrganiseSection() {
       <div className="grid gap-3 sm:grid-cols-2">
         {field("organise_tv_dir", "TV folder", "/mnt/video/TV Shows")}
         {field("organise_movie_dir", "Movies folder", "/mnt/video/Movies")}
+        {field("organise_tv_mature_dir", "Mature TV folder (optional)", "/mnt/video/Mature TV Shows")}
+        {field("organise_movie_mature_dir", "Mature movies folder (optional)", "/mnt/video/Mature Movies")}
       </div>
+      <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+        With Mature folders set, each show or movie goes by its age rating (from TMDB):
+        up to <b>PG-13 / TV-14</b> in the regular folders; <b>R, TV-MA</b> and anything unrated in the Mature ones.
+        A show's <b>Who it's for</b> on the Watchlist overrides this. In Plex, share only the regular libraries
+        with the kids' accounts.
+      </p>
+      {s.ratings_need_key && (
+        <p className="mt-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+          Ratings need a TMDB API key (Settings → Integrations). Until one is added, everything without a
+          Watchlist choice goes to the Mature folders.
+        </p>
+      )}
       <button className="mt-2 text-xs text-blue-600 hover:underline dark:text-blue-400" onClick={() => setAdvanced((a) => !a)}>
         {advanced ? "Hide" : "Change"} naming templates
       </button>
@@ -259,7 +273,8 @@ function OrganiseSection() {
           <input className={input} value={sample} onChange={(e) => setSample(e.target.value)} /></label>
         {example && (
           <p className={`mt-2 break-all text-xs ${example.ok ? "text-green-700 dark:text-green-400" : "text-amber-700 dark:text-amber-400"}`}>
-            {example.ok ? <>→ <span className="font-mono">{example.target}</span></> : example.error}
+            {example.ok ? <>→ <span className="font-mono">{example.target}</span>
+              {example.reason && <span className="ml-1 text-gray-500 dark:text-gray-400">({example.audience === "mature" ? "Mature" : "regular"}: {example.reason})</span>}</> : example.error}
           </p>
         )}
       </div>

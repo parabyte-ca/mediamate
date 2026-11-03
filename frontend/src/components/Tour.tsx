@@ -7,6 +7,8 @@ import { ArrowLeft, ArrowRight, X } from "lucide-react";
 // when one isn't on screen (a phone has no sidebar), the step is shown in the middle.
 
 export const TOUR_KEY = "sm-tour";
+/** Bump when the tour changes enough that everyone should see it again. */
+export const TOUR_VERSION = "2";
 export const TOUR_EVENT = "screenmate:tour";
 
 type Step = {
@@ -29,12 +31,17 @@ const STEPS: Step[] = [
   {
     targets: ["nav-watchlist"],
     title: "Watchlist",
-    body: "Follow a show and new episodes download by themselves as they come out. Add a movie and it downloads once it's released.",
+    body: "Follow a show and new episodes download by themselves. Add a movie and it downloads once it's out. TV shows and Movies have their own tabs.",
+  },
+  {
+    targets: ["nav-browse", "nav-more"],
+    title: "Browse",
+    body: "See what's airing and what's coming to cinemas. Add a show, or a movie that isn't out yet: it downloads when it's released digitally. On a phone, it's under More.",
   },
   {
     targets: ["nav-calendar", "nav-more"],
     title: "Calendar",
-    body: "See what's airing and what's coming up. On a phone, Calendar, Insights and History are under More.",
+    body: "See what's airing and what's coming up. On a phone, Calendar, Browse, Insights and History are under More.",
   },
   {
     targets: ["nav-activity"],
@@ -68,11 +75,11 @@ const STEPS: Step[] = [
 ];
 
 export function tourSeen(): boolean {
-  try { return localStorage.getItem(TOUR_KEY) === "1"; } catch { return true; }
+  try { return localStorage.getItem(TOUR_KEY) === TOUR_VERSION; } catch { return true; }
 }
 
 function markSeen() {
-  try { localStorage.setItem(TOUR_KEY, "1"); } catch { /* private mode: it may show again */ }
+  try { localStorage.setItem(TOUR_KEY, TOUR_VERSION); } catch { /* private mode: it may show again */ }
 }
 
 /** Ask the tour to start (Settings button, command palette). */

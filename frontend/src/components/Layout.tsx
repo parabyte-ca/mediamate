@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clock,
   Command,
+  Compass,
   Film,
   LogOut,
   MoreHorizontal,
@@ -34,6 +35,7 @@ const nav = [
   // mobile: a tab in the phone's bottom bar; the rest live under its "More" tab.
   { to: "/search",    label: "Search",    icon: Search,        mobile: true  },
   { to: "/watchlist", label: "Watchlist", icon: Tv,            mobile: true  },
+  { to: "/browse",    label: "Browse",    icon: Compass,       mobile: false },
   { to: "/calendar",  label: "Calendar",  icon: CalendarDays,  mobile: false },
   { to: "/activity",  label: "Activity",  icon: Activity,      mobile: true  },
   { to: "/library",   label: "Library",   icon: Film,          mobile: true  },

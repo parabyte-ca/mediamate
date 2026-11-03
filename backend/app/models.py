@@ -319,6 +319,8 @@ class PipelinePlan(Base):
     status = Column(String, default="waiting", index=True)
     detail = Column(String, nullable=True)
     source_path = Column(String, nullable=True)
+    organise_status = Column(String, nullable=True)  # done | failed (Rename & organise step)
+    organised_to = Column(String, nullable=True)
     library_status = Column(String, nullable=True)  # done | skipped
     notify_status = Column(String, nullable=True)   # done | skipped
     created_at = Column(DateTime, server_default=func.now())

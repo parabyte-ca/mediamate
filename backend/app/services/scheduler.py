@@ -653,6 +653,12 @@ def run_pipeline_tick() -> None:
         logger.exception("Pipeline tick failed")
 
 
+def run_library_doctor() -> None:
+    """Weekly Library doctor: fix the safe problems, list the rest."""
+    from .doctor import scheduled_run
+    scheduled_run()
+
+
 def purge_old_trash() -> None:
     """Permanently remove media .trash entries older than 30 days."""
     from .media import trash
@@ -709,6 +715,12 @@ def start_scheduler() -> None:
         run_pipeline_tick,
         trigger=IntervalTrigger(minutes=2),
         id="pipeline_tick",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        run_library_doctor,
+        trigger=CronTrigger(day_of_week="sat", hour=4, minute=23, timezone="UTC"),
+        id="library_doctor",
         replace_existing=True,
     )
     _scheduler.add_job(

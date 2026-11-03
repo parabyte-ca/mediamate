@@ -431,7 +431,36 @@ export interface ProgressEvent {
   log?: string | null;
 }
 
-export type PipelineActionType = "trim" | "encode" | "split";
+export type PipelineActionType = "trim" | "encode" | "split" | "organise";
+
+export type DoctorKind = "sample" | "junk" | "empty" | "broken" | "missing" | "duplicate" | "name";
+
+export interface DoctorIssue {
+  id: string;
+  kind: DoctorKind;
+  label: string;
+  path: string;
+  detail: string;
+  fix: string;
+  safe: boolean;
+  keep?: string;
+  target?: string;
+  result?: string;
+  error?: string;
+}
+
+export interface DoctorState {
+  auto_fix: boolean;
+  report: { checked_at: string; issues: DoctorIssue[]; total: number; fixed: DoctorIssue[] } | null;
+}
+
+export interface OrganiseSettings {
+  organise_tv_dir: string;
+  organise_movie_dir: string;
+  organise_tv_template: string;
+  organise_movie_template: string;
+  warnings?: Partial<Record<"organise_tv_dir" | "organise_movie_dir", string>>;
+}
 
 export interface PipelineAction {
   type: PipelineActionType;
@@ -581,6 +610,9 @@ export interface MediaSettings {
   split_min_duration: number;
   split_min_size: number;
   split_keywords: string;
+  track_cleanup: string;
+  keep_audio_langs: string;
+  keep_sub_langs: string;
   split_scene_method: string;
   split_min_episode_gap: number;
   split_black_min_duration: number;
@@ -745,7 +777,12 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ file_ids: fileIds, job_type: jobType, target_resolution: targetResolution, episode_count: episodeCount }),
       }),
-    bulk: (action: "skip" | "delete", fileIds: number[]) =>
+    /** Where Rename & organise would put a file (no changes). */
+    organisePreview: (id: number) =>
+      req<{ ok: boolean; target?: string; kind?: string; already?: boolean; msg?: string }>(`/media/files/${id}/organise`),
+    organise: (id: number) =>
+      req<{ ok: boolean; msg: string; path: string }>(`/media/files/${id}/organise`, { method: "POST" }),
+    bulk: (action: "skip" | "delete" | "organise", fileIds: number[]) =>
       req<{ ok: boolean; done: number; skipped: number; errors: string[] }>("/media/files/bulk", {
         method: "POST", body: JSON.stringify({ action, file_ids: fileIds }),
       }),
@@ -849,10 +886,26 @@ export const api = {
       req<PathTestResult>("/pipeline/test-path", { method: "POST", body: JSON.stringify({ path }) }),
     preview: (rule?: Partial<PipelineRuleInput>) =>
       req<PipelinePreview>("/pipeline/preview", { method: "POST", body: JSON.stringify(rule ? { rule } : {}) }),
+    organise: () => req<OrganiseSettings>("/pipeline/organise"),
+    saveOrganise: (data: Partial<OrganiseSettings>) =>
+      req<OrganiseSettings>("/pipeline/organise", { method: "PUT", body: JSON.stringify(data) }),
+    organiseExample: (filename: string, unsaved: Partial<OrganiseSettings> = {}) =>
+      req<{ ok: boolean; target?: string; error?: string }>("/pipeline/organise/example", {
+        method: "POST", body: JSON.stringify({ ...unsaved, filename }),
+      }),
     apply: (fileIds: number[], ruleId?: number | null) =>
       req<{ ok: boolean; queued: number }>("/pipeline/apply", {
         method: "POST", body: JSON.stringify({ file_ids: fileIds, rule_id: ruleId ?? undefined }),
       }),
+  },
+
+  doctor: {
+    get: () => req<DoctorState>("/doctor"),
+    run: () => req<DoctorState>("/doctor/run", { method: "POST" }),
+    fix: (ids: string[]) =>
+      req<DoctorState & { done: number; errors: string[] }>("/doctor/fix", { method: "POST", body: JSON.stringify({ ids }) }),
+    setAutoFix: (on: boolean) =>
+      req<DoctorState>("/doctor/settings", { method: "PUT", body: JSON.stringify({ auto_fix: on }) }),
   },
 
   history: {

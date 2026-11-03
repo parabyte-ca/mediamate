@@ -28,8 +28,8 @@ from .media import codec_detector, config as media_config, scanner, store
 
 logger = logging.getLogger(__name__)
 
-ACTION_TYPES = ("trim", "encode", "split")
-ACTION_LABEL = {"trim": "Trim", "encode": "Encode", "split": "Split"}
+ACTION_TYPES = ("trim", "encode", "split", "organise")
+ACTION_LABEL = {"trim": "Trim", "encode": "Encode", "split": "Split", "organise": "Rename & organise"}
 SETTINGS_DEFAULTS = {
     "pipeline_enabled": "true",
     "pipeline_on_scan": "false",        # off by default: a first scan shouldn't queue a whole library
@@ -69,8 +69,12 @@ def validate(match: dict, actions: list) -> str | None:
         return f"Steps must be one of {', '.join(ACTION_TYPES)}"
     if len(set(types)) != len(types):
         return "Each step can appear once"
+    if "split" in types and "organise" in types:
+        return "Split and Rename & organise can't be in the same rule (split makes several new files)"
     if "split" in types and types[-1] != "split":
         return "Split must be the last step (it replaces the file with several new ones)"
+    if "organise" in types and types[-1] != "organise":
+        return "Rename & organise must be the last step (it moves the file into the library)"
     for a in actions:
         if a["type"] == "encode":
             res = a.get("resolution", "original")
@@ -381,6 +385,30 @@ def advance(bind, plan_id: int) -> None:
             plan.finished_at = _utcnow()
             db.commit()
             finalize_id = plan.id
+        elif actions[plan.next_index]["type"] == "organise":
+            # Runs here, not as an ffmpeg job: a move is quick (a rename on the same disk).
+            from . import organise
+            settings = organise.get_settings(db)
+            hint = organise.show_hint_for_download(db, plan.download_id)
+            plan.next_index += 1
+            plan.status = "running"
+            db.commit()             # release the write lock before the Library row is updated
+            try:
+                dest = organise.organise_file(settings, plan.file_id, hint)
+                plan.organise_status, plan.organised_to = "done", dest
+            except (organise.OrganiseError, OSError) as exc:
+                plan.organise_status = "failed"
+                plan.organised_to = None
+                plan.status = "failed"
+                plan.detail = f"Rename & organise: {exc}"
+                plan.finished_at = _utcnow()
+                db.commit()
+                journeys.refresh(db, plan.journey_id)
+                return
+            plan.status = "done"
+            plan.finished_at = _utcnow()
+            db.commit()
+            finalize_id = plan.id
         else:
             action = actions[plan.next_index]
             if action["type"] in ("encode", "trim"):
@@ -483,6 +511,9 @@ def plan_steps(db: Session, journey_id: int) -> list[dict]:
         elif plan.status == "failed" and plan.detail:
             steps.append({"kind": "pipeline", "label": "Pipeline", "status": "failed",
                           "detail": plan.detail, "ref": ref})
+        if plan.organise_status == "done":
+            steps.append({"kind": "organise", "label": ACTION_LABEL["organise"], "status": "done",
+                          "detail": f"Moved to {plan.organised_to}", "ref": ref})
         for action in actions[plan.next_index:]:
             steps.append({"kind": action["type"], "label": ACTION_LABEL[action["type"]],
                           "status": "skipped" if stopped else "pending",

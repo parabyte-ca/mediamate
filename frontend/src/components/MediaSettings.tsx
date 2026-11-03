@@ -17,7 +17,10 @@ const NUMERIC = [
   "black_pix_th", "split_min_duration", "split_min_size", "split_min_episode_gap", "split_black_min_duration",
   "split_freeze_min_duration", "split_episode_count",
 ] as const;
-const TEXT = ["x265_preset", "target_resolution", "encoder_backend", "scene_method", "split_scene_method", "split_keywords"] as const;
+const TEXT = [
+  "x265_preset", "target_resolution", "encoder_backend", "scene_method", "split_scene_method", "split_keywords",
+  "track_cleanup", "keep_audio_langs", "keep_sub_langs",
+] as const;
 
 type Form = Record<string, string>;
 
@@ -152,6 +155,30 @@ export default function MediaSettings() {
                 options={s.resolutions.map((r) => [r, r === "original" ? "Keep original" : r])} />
           <Num label="Simultaneous jobs" k="max_workers" form={form} set={set} hint="ffmpeg jobs running at once. Applies immediately." />
           <Num label="ffprobe timeout (seconds)" k="ffprobe_timeout" form={form} set={set} hint="Raise this for slow network storage." />
+        </div>
+      </div>
+
+      {/* Track clean-up */}
+      <div>
+        <h3 className="mb-1 text-sm font-semibold text-gray-900 dark:text-gray-100">Audio &amp; subtitle tracks</h3>
+        <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+          When encoding, keep only the languages you watch. The original-language audio (the file's main track) is always
+          kept, and so are forced subtitles and tracks with no language label. Often saves another 10–20 %.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Pick label="Clean up tracks when encoding" k="track_cleanup" form={form} set={set}
+                options={[["true", "Yes: keep the languages below"], ["false", "No: keep every track"]]} />
+          <div className="hidden sm:block" />
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Audio languages to keep</span>
+            <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Plus the original language. Codes or names: eng, fre, jpn…</span>
+            <input className={input} value={form.keep_audio_langs ?? ""} onChange={(e) => set("keep_audio_langs", e.target.value)} placeholder="eng" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Subtitle languages to keep</span>
+            <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Plus forced subtitles (foreign-language parts).</span>
+            <input className={input} value={form.keep_sub_langs ?? ""} onChange={(e) => set("keep_sub_langs", e.target.value)} placeholder="eng" />
+          </label>
         </div>
       </div>
 

@@ -60,6 +60,40 @@ def _servable(file_id: int):
     return row
 
 
+@router.get("/files/{file_id}/organise")
+def organise_preview(file_id: int):
+    """Where Rename & organise would put this file."""
+    from ..database import SessionLocal
+    from ..services import organise
+    row = _servable(file_id)
+    if row is None:
+        return _err("File not found", 404)
+    with SessionLocal() as s:
+        try:
+            dest, parsed = organise.target_for(organise.get_settings(s), row["path"])
+        except organise.OrganiseError as exc:
+            return {"ok": False, "msg": str(exc)}
+    return {"ok": True, "target": dest, "kind": parsed.kind, "already": os.path.abspath(dest) == os.path.abspath(row["path"])}
+
+
+@router.post("/files/{file_id}/organise")
+def organise_one(file_id: int):
+    from ..database import SessionLocal
+    from ..services import organise
+    row = db.get_file(file_id)
+    if row is None:
+        return _err("File not found", 404)
+    if db.get_active_job_for_file(file_id) is not None or row["status"] in ("queued", "processing"):
+        return _err("This file is being processed; try again when it's done", 409)
+    with SessionLocal() as s:
+        settings = organise.get_settings(s)
+    try:
+        dest = organise.organise_file(settings, file_id)
+    except (organise.OrganiseError, OSError) as exc:
+        return _err(str(exc), 400)
+    return {"ok": True, "msg": f"Moved to {dest}", "path": dest}
+
+
 @router.get("/files/{file_id}/thumb")
 def file_thumbnail(file_id: int):
     """A still frame from about 10% into the file (JPEG, cached)."""
@@ -271,10 +305,10 @@ def queue_bulk(body: dict = Body(default={})):
 
 @router.post("/files/bulk")
 def files_bulk(body: dict = Body(default={})):
-    """Skip or delete (to .trash) many files; busy files are left alone."""
+    """Skip, delete (to .trash) or rename & organise many files; busy files are left alone."""
     action = body.get("action")
     ids = body.get("file_ids") or []
-    if action not in ("skip", "delete") or not ids:
+    if action not in ("skip", "delete", "organise") or not ids:
         return _err("Invalid parameters", 400)
     done, skipped, errors = 0, 0, []
     for fid in ids:
@@ -285,6 +319,16 @@ def files_bulk(body: dict = Body(default={})):
             continue
         if action == "skip":
             db.set_file_status(row["id"], "skipped")
+        elif action == "organise":
+            from ..database import SessionLocal
+            from ..services import organise
+            with SessionLocal() as s:
+                settings = organise.get_settings(s)
+            try:
+                organise.organise_file(settings, row["id"])
+            except (organise.OrganiseError, OSError) as exc:
+                errors.append(f"{row['filename']}: {exc}")
+                continue
         else:
             if os.path.exists(row["path"]):
                 try:
@@ -361,6 +405,8 @@ def empty_trash():
 def get_settings():
     out = {key: getattr(config, attr) for key, (attr, _cast) in config.SETTINGS_MAP.items()}
     out["split_keywords"] = ",".join(config.SPLIT_KEYWORDS)
+    out["keep_audio_langs"] = ",".join(config.KEEP_AUDIO_LANGS)
+    out["keep_sub_langs"] = ",".join(config.KEEP_SUB_LANGS)
     out["tpdb_api_key_set"] = bool(config.TPDB_API_KEY)
     out.pop("tpdb_api_key")  # never echo the secret back
     out.update({

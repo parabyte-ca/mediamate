@@ -1,5 +1,5 @@
 import {
-  Bell, CheckCircle2, Circle, Download, Film, Hourglass, Library, Loader2, MinusCircle, Scissors, Search,
+  Bell, CheckCircle2, Circle, Download, Film, FolderInput, Hourglass, Library, Loader2, MinusCircle, Scissors, Search,
   Timer, Workflow, XCircle,
 } from "lucide-react";
 import type { Journey, JourneyStep, ProgressEvent, StepStatus } from "../api/client";
@@ -27,7 +27,7 @@ export function fmtDuration(a?: string | null, b?: string | null) {
 }
 
 const KIND_ICON: Record<string, typeof Search> = {
-  found: Search, download: Download, encode: Film, split: Scissors, trim: Timer,
+  found: Search, download: Download, encode: Film, split: Scissors, trim: Timer, organise: FolderInput,
   library: Library, notify: Bell, waiting: Hourglass, pipeline: Workflow,
 };
 

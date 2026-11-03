@@ -47,6 +47,17 @@ async def lifespan(app: FastAPI):
 
     db = SessionLocal()
     try:
+        from .services import updater
+        took = updater.record_upgrade_finished(db)
+        if took:
+            logging.getLogger(__name__).info("Upgrade finished in %d s", took)
+    except Exception:
+        logging.getLogger(__name__).exception("Recording the upgrade time failed")
+    finally:
+        db.close()
+
+    db = SessionLocal()
+    try:
         journeys.backfill(db)
     except Exception:
         logging.getLogger(__name__).exception("Journey backfill failed")

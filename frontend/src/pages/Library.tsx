@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderInput, FolderSearch, Layers, Loader2, MoreHorizontal,
-  Pause, Play, Scissors, SkipForward, Square, Timer, Trash2, X,
+  CheckCircle2, Pause, Play, Scissors, SkipForward, Square, Stethoscope, Timer, Trash2, X,
 } from "lucide-react";
-import { api, type MediaFile, type MediaJobType, type MediaStats } from "../api/client";
+import { api, type DoctorKind, type DoctorState, type MediaFile, type MediaJobType, type MediaStats } from "../api/client";
 import { useEvent } from "../events";
 import { fmtSize } from "../utils";
 
@@ -99,7 +99,8 @@ type Dialog =
   | { kind: "rename"; file: MediaFile }
   | { kind: "delete"; files: MediaFile[] }
   | { kind: "preview"; file: MediaFile }
-  | { kind: "organise"; files: MediaFile[] };
+  | { kind: "organise"; files: MediaFile[] }
+  | { kind: "doctor" };
 
 // ── Row actions menu ──────────────────────────────────────────────────────────
 
@@ -378,6 +379,9 @@ export default function Library() {
         </button>
         <button className={btnGhost} onClick={() => queueAll("encode")}><Film className="h-4 w-4" />Encode all pending</button>
         <button className={btnGhost} onClick={() => queueAll("split")}><Scissors className="h-4 w-4" />Split all anthologies</button>
+        <button className={btnGhost} onClick={() => setDialog({ kind: "doctor" })} title="Find and fix problems in your library">
+          <Stethoscope className="h-4 w-4" />Library doctor
+        </button>
         <button className={btnGhost} title="Remove records for files that no longer exist on disk"
                 onClick={() => run(async () => `Removed ${(await api.media.purge()).removed} missing file record(s)`)}>
           <Trash2 className="h-4 w-4" />Purge missing
@@ -552,9 +556,118 @@ export default function Library() {
         </Modal>
       )}
       {dialog?.kind === "preview" && <PreviewDialog file={dialog.file} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "doctor" && <DoctorDialog onClose={() => setDialog(null)} onChanged={load} />}
       {dialog?.kind === "organise" && <OrganiseDialog files={dialog.files} onClose={() => setDialog(null)}
                                                       onDone={(m) => { setPicked(new Set()); say(m); load(); }} />}
     </div>
+  );
+}
+
+const DOCTOR_KINDS: { kind: DoctorKind; title: string; hint: string }[] = [
+  { kind: "broken", title: "Can't be played", hint: "Damaged or incomplete files." },
+  { kind: "duplicate", title: "Duplicates", hint: "The best copy (resolution, then HEVC, then size) is kept." },
+  { kind: "missing", title: "Missing files", hint: "Listed in the Library, but the file is gone." },
+  { kind: "name", title: "Not named for Plex", hint: "Fixing moves them with Rename & organise." },
+  { kind: "sample", title: "Sample clips", hint: "Fixed automatically when that's on." },
+  { kind: "junk", title: "Leftover files", hint: "Fixed automatically when that's on." },
+  { kind: "empty", title: "Empty folders", hint: "Fixed automatically when that's on." },
+];
+
+/** Library doctor: last report, Check now, Fix (one, or all of a kind), and auto-fix. */
+function DoctorDialog({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const [state, setState] = useState<DoctorState | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => { api.doctor.get().then(setState).catch((e) => setMsg(e.message)); }, []);
+
+  const check = async () => {
+    setBusy("check"); setMsg(null);
+    try {
+      const s = await api.doctor.run();
+      setState(s);
+      const fixed = s.report?.fixed.length ?? 0;
+      setMsg(`${s.report?.total ? `${s.report.total} to look at` : "Nothing to fix"}${fixed ? ` · ${fixed} fixed automatically` : ""}`);
+      onChanged();
+    } catch (e) { setMsg((e as Error).message); } finally { setBusy(null); }
+  };
+  const fix = async (ids: string[], key: string) => {
+    setBusy(key); setMsg(null);
+    try {
+      const r = await api.doctor.fix(ids);
+      setState(r);
+      setMsg(`Fixed ${r.done}${r.errors.length ? ` · ${r.errors.length} couldn't be: ${r.errors[0]}` : ""}`);
+      onChanged();
+    } catch (e) { setMsg((e as Error).message); } finally { setBusy(null); }
+  };
+
+  const report = state?.report;
+  const byKind = (k: DoctorKind) => report?.issues.filter((i) => i.kind === k) ?? [];
+  return (
+    <Modal title="Library doctor" onClose={onClose} wide>
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+        <p className="mr-auto text-gray-600 dark:text-gray-300">
+          {report ? <>Last checked {new Date(report.checked_at).toLocaleString()}. Checks run every Saturday.</> : "Not checked yet."}
+        </p>
+        <button className={btnPrimary} onClick={check} disabled={!!busy}>
+          {busy === "check" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Stethoscope className="h-4 w-4" />}Check now
+        </button>
+      </div>
+      <label className="mb-3 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+        <input type="checkbox" checked={!!state?.auto_fix} disabled={!state}
+               onChange={async (e) => setState(await api.doctor.setAutoFix(e.target.checked))} />
+        Fix sample clips, leftover files and empty folders automatically (they go to the 30-day trash)
+      </label>
+      {msg && <p role="status" className="mb-3 rounded-lg bg-blue-50 dark:bg-blue-950/40 px-3 py-2 text-xs text-blue-800 dark:text-blue-200">{msg}</p>}
+
+      <div className="max-h-[55vh] space-y-3 overflow-y-auto">
+        {report && report.issues.length === 0 && (
+          <p className="flex items-center gap-2 rounded-lg border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30 p-3 text-sm text-green-800 dark:text-green-300">
+            <CheckCircle2 className="h-4 w-4" />Your library looks healthy.
+          </p>
+        )}
+        {DOCTOR_KINDS.map(({ kind, title, hint }) => {
+          const list = byKind(kind);
+          if (!list.length) return null;
+          return (
+            <section key={kind} className="rounded-lg border border-gray-200 dark:border-gray-700">
+              <header className="flex items-center gap-2 border-b border-gray-100 dark:border-gray-800 px-3 py-2">
+                <div className="mr-auto">
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{title} <span className="text-gray-400">({list.length})</span></p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{hint}</p>
+                </div>
+                <button className={btnGhost} disabled={!!busy} onClick={() => fix(list.map((i) => i.id), kind)}>
+                  {busy === kind ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Fix all
+                </button>
+              </header>
+              <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                {list.slice(0, 100).map((i) => (
+                  <li key={i.id} className="flex items-start gap-2 px-3 py-2 text-xs">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-mono text-gray-800 dark:text-gray-200" title={i.path}>{i.path}</p>
+                      <p className="break-words text-gray-500 dark:text-gray-400">{i.detail}</p>
+                      {i.error && <p className="text-red-600 dark:text-red-400">{i.error}</p>}
+                    </div>
+                    <button className="shrink-0 rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                            disabled={!!busy} title={i.fix} onClick={() => fix([i.id], i.id)}>
+                      {busy === i.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Fix"}
+                    </button>
+                  </li>
+                ))}
+                {list.length > 100 && <li className="px-3 py-2 text-xs text-gray-500">…and {list.length - 100} more (Fix all includes them).</li>}
+              </ul>
+            </section>
+          );
+        })}
+        {report && report.fixed.length > 0 && (
+          <details className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs text-gray-600 dark:text-gray-300">
+            <summary className="cursor-pointer">Fixed ({report.fixed.length})</summary>
+            <ul className="mt-2 space-y-1">
+              {report.fixed.slice(-100).map((i) => <li key={i.id} className="truncate" title={i.path}>{i.label}: {i.path} — {i.result}</li>)}
+            </ul>
+          </details>
+        )}
+      </div>
+    </Modal>
   );
 }
 

@@ -14,7 +14,7 @@ from .migrations import run_migrations
 from .middleware.auth import AuthMiddleware
 from .models import Setting
 from .routers import (
-    activity, auth, backup, browse, calendar, downloads, events, health, history, importer, insights, media,
+    activity, auth, backup, browse, calendar, doctor, downloads, events, health, history, importer, insights, media,
     onboarding, paths, pipeline, profiles, push, search, settings, trakt, updates, watchlist,
 )
 from .services import download_poller, journeys
@@ -95,6 +95,7 @@ app.include_router(pipeline.router, prefix="/api")
 app.include_router(importer.router, prefix="/api")
 app.include_router(push.router, prefix="/api")
 app.include_router(insights.router, prefix="/api")
+app.include_router(doctor.router, prefix="/api")
 
 # Serve compiled React frontend (production)
 if STATIC_DIR.exists():

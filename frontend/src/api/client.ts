@@ -433,6 +433,27 @@ export interface ProgressEvent {
 
 export type PipelineActionType = "trim" | "encode" | "split" | "organise";
 
+export type DoctorKind = "sample" | "junk" | "empty" | "broken" | "missing" | "duplicate" | "name";
+
+export interface DoctorIssue {
+  id: string;
+  kind: DoctorKind;
+  label: string;
+  path: string;
+  detail: string;
+  fix: string;
+  safe: boolean;
+  keep?: string;
+  target?: string;
+  result?: string;
+  error?: string;
+}
+
+export interface DoctorState {
+  auto_fix: boolean;
+  report: { checked_at: string; issues: DoctorIssue[]; total: number; fixed: DoctorIssue[] } | null;
+}
+
 export interface OrganiseSettings {
   organise_tv_dir: string;
   organise_movie_dir: string;
@@ -876,6 +897,15 @@ export const api = {
       req<{ ok: boolean; queued: number }>("/pipeline/apply", {
         method: "POST", body: JSON.stringify({ file_ids: fileIds, rule_id: ruleId ?? undefined }),
       }),
+  },
+
+  doctor: {
+    get: () => req<DoctorState>("/doctor"),
+    run: () => req<DoctorState>("/doctor/run", { method: "POST" }),
+    fix: (ids: string[]) =>
+      req<DoctorState & { done: number; errors: string[] }>("/doctor/fix", { method: "POST", body: JSON.stringify({ ids }) }),
+    setAutoFix: (on: boolean) =>
+      req<DoctorState>("/doctor/settings", { method: "PUT", body: JSON.stringify({ auto_fix: on }) }),
   },
 
   history: {

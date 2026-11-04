@@ -171,10 +171,12 @@ def rename_file(file_id: int, body: dict = Body(default={})):
     directory = os.path.dirname(old_path)
     ext = os.path.splitext(old_path)[1]
 
-    # Sanitize; strip any extension the user typed so we keep the original one.
-    # Check for blank first: sanitize() falls back to "Scene" for empty input, which
-    # in FileSplitter silently renamed the file to Scene.<ext>.
-    stem = os.path.splitext(raw_name)[0]
+    # Sanitize; strip a video extension the user typed so we keep the original one (only a
+    # real extension: "Rodriguez 03.07" keeps its ".07"). Check for blank first: sanitize()
+    # falls back to "Scene" for empty input, which in FileSplitter silently renamed the
+    # file to Scene.<ext>.
+    from ..services.organise import keep_extension
+    stem = keep_extension(raw_name, "")
     base = scene_namer.sanitize(stem) if stem.strip() else ""
     if not base:
         return _err("Invalid name", 400)

@@ -70,6 +70,23 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    # Once after upgrading: look for adult content that was moved into the Plex folders
+    # before folders could be protected, so the Library can point it out straight away.
+    def _adult_check_once():
+        db = SessionLocal()
+        try:
+            if not db.query(Setting).filter(Setting.key == "adult_check_v1").first():
+                from .services import doctor
+                doctor.run(db, auto_fix=False)
+                db.add(Setting(key="adult_check_v1", value="1"))
+                db.commit()
+        except Exception:
+            logging.getLogger(__name__).exception("Adult-content check after upgrade failed")
+        finally:
+            db.close()
+    import threading as _threading
+    _threading.Thread(target=_adult_check_once, name="adult-check", daemon=True).start()
+
     start_scheduler()
     media_engine.startup()
     download_poller.start()

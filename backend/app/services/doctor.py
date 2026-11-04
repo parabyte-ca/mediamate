@@ -42,6 +42,7 @@ LABEL = {
     "sample": "Sample clip", "junk": "Leftover file", "empty": "Empty folder", "broken": "Can't be played",
     "missing": "File is gone", "duplicate": "Duplicate", "audience": "Wrong folder", "name": "Not named for Plex",
     "oversize": "Larger than target", "lowres": "Lower than preferred",
+    "adult_in_plex": "Adult content in a Plex folder",
 }
 MAX_RATING_LOOKUPS = 200     # new TMDB lookups per check; the rest use the cache and catch up next week
 
@@ -235,10 +236,104 @@ def check(db: Session) -> dict:
     except Exception:
         logger.exception("Target-size check failed")
 
-    order = {k: i for i, k in enumerate(LABEL)}
+    # Adult content inside the Plex folders (moved there before folders could be protected).
+    try:
+        issues.extend(_adult_in_plex(db, rows))
+    except Exception:
+        logger.exception("Adult-content check failed")
+
+    order = {k: i for i, k in enumerate(["adult_in_plex", *LABEL])}
     issues.sort(key=lambda i: (order[i["kind"]], i["path"]))
     return {"checked_at": _now(), "roots": roots, "issues": issues[:MAX_ISSUES],
             "total": len(issues), "fixed": []}
+
+
+def _organise_dirs(settings: dict) -> list[tuple[str, str]]:
+    return [(k, os.path.abspath(v.strip())) for k in ("organise_tv_dir", "organise_tv_mature_dir",
+            "organise_movie_dir", "organise_movie_mature_dir") if (v := settings.get(k) or "").strip()]
+
+
+def protected_folders(db: Session) -> list[tuple[str, str]]:
+    """[(name, local root)] of protected folders that exist here."""
+    from ..models import DownloadPath
+    from . import folders
+    out = []
+    for dp in db.query(DownloadPath).filter(DownloadPath.protected == True).all():  # noqa: E712
+        root = folders.local_of(db, dp)
+        if root and os.path.isdir(root):
+            out.append((dp.name, root))
+    return out
+
+
+def _adult_in_plex(db: Session, rows: dict) -> list[dict]:
+    """Files in the TV / Movies (and Mature) folders that belong in a protected folder."""
+    from ..models import ContentRating, OrganiseMove, PipelinePlan
+    from . import adult, organise, ratings
+
+    dirs = _organise_dirs(organise.get_settings(db))
+    if not dirs:
+        return []
+    extra = adult.extra_keywords(db)
+    protected = protected_folders(db)
+    origin = {m.to_path: m.from_path for m in db.query(OrganiseMove).order_by(OrganiseMove.id)}
+    for p in db.query(PipelinePlan).filter(PipelinePlan.organised_to.isnot(None)):
+        origin.setdefault(p.organised_to, p.source_path)
+    from .show_metadata import tmdb_key
+    can_ask = bool(tmdb_key(db))
+    asked = [0]
+
+    def unknown_to_tmdb(title: str, year: int | None) -> bool:
+        """True when TMDB has been asked and has no rating (no such film, or unrated)."""
+        row = db.query(ContentRating).filter_by(kind="movie", title_key=ratings._key(title), year=year or 0).first()
+        if row is None:
+            if not can_ask or asked[0] >= MAX_RATING_LOOKUPS:
+                return False
+            asked[0] += 1
+            return ratings.certification(db, "movie", title, year, lookup=True) is None and \
+                db.query(ContentRating).filter_by(kind="movie", title_key=ratings._key(title),
+                                                  year=year or 0).first() is not None
+        return not row.cert
+    out = []
+    for path, row in rows.items():
+        p = os.path.abspath(path)
+        where = next((k for k, d in dirs if p.startswith(d.rstrip(os.sep) + os.sep)), None)
+        if where is None or not os.path.exists(path):
+            continue
+        src = origin.get(path)
+        why = None
+        if src and organise.protected_root(src, db):
+            why = f"Moved here from the protected folder {organise.protected_root(src, db)}"
+        elif (hint := adult.looks_adult(path, extra)):
+            why = f"Looks like adult content ({hint})"
+        elif where == "organise_movie_mature_dir":
+            parsed = organise.parse(path)
+            if parsed.kind == "movie" and unknown_to_tmdb(parsed.title, parsed.year):
+                why = "TMDB has no rating or match for this title, so it may not be a real movie (check it)"
+        if not why:
+            continue
+        dest = src if (src and os.path.isdir(os.path.dirname(src)) and not os.path.exists(src)) else (
+            os.path.join(protected[0][1], os.path.basename(path)) if protected else None)
+        out.append(_issue("adult_in_plex", path, why + (f". Goes back to {dest}" if dest else
+                                                          ". Mark a folder as Protected to move it there"),
+                          f"Move back to {os.path.dirname(dest)}" if dest else "Protect a folder first",
+                          file_id=row["id"], target=dest))
+    return out
+
+
+def move_back(db: Session, file_id: int, dest: str) -> str:
+    """Move a Library file (and its subtitles) to dest, outside the Plex folders. Returns dest."""
+    from . import organise
+    from .media import store
+    row = store.get_file(file_id)
+    if row is None:
+        raise ValueError("No longer in the Library")
+    if os.path.exists(dest):
+        raise ValueError(f"{dest} already exists")
+    src = row["path"]
+    organise.move(src, dest)
+    store.rename_file(file_id, dest, os.path.basename(dest))
+    organise._log_move(file_id, src, dest)
+    return dest
 
 
 def fix(db: Session, issue: dict) -> str:
@@ -270,6 +365,13 @@ def fix(db: Session, issue: dict) -> str:
         where = organise.plan(db, path, override=issue.get("audience"))
         dest = organise.organise_file(where["settings"], row["id"], where["show_hint"], where["audience"])
         return f"Moved to {dest}"
+    if kind == "adult_in_plex":
+        if row is None:
+            raise ValueError("No longer in the Library")
+        dest = issue.get("target")
+        if not dest:
+            raise ValueError("Mark a folder as Protected (Settings → Folders) so there's somewhere to move it")
+        return f"Moved back to {move_back(db, row['id'], dest)}"
     if kind == "oversize":
         if row is None:
             raise ValueError("No longer in the Library")

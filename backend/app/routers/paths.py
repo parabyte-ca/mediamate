@@ -38,6 +38,7 @@ def _with_disk_usage(db: Session, dp: DownloadPath, threshold: int = 0) -> dict:
         "target_max": dp.target_max,
         "target_shrink": bool(dp.target_shrink),
         "target_summary": _target_summary(dp),
+        "protected": bool(dp.protected),
     }
     try:
         usage = shutil.disk_usage(local)  # measured here, where ScreenMate sees the folder
@@ -81,7 +82,7 @@ def _clean_target(values: dict) -> dict:
     for key in ("target_min", "target_max"):
         if key in values and values[key] is not None and values[key] not in targets.HEIGHTS:
             raise HTTPException(status_code=400, detail="Pick a resolution from the list")
-    for key in ("target", "target_shrink", "target_min", "target_max"):
+    for key in ("target", "target_shrink", "target_min", "target_max", "protected"):
         if key in values and values[key] is None:
             values.pop(key)
     return values
@@ -127,6 +128,10 @@ def create_path(path: DownloadPathCreate, db: Session = Depends(get_db)):
     values = _clean_target(_clean(path.model_dump()))
     if "target" not in values:
         values.update(_guess_target(values.get("name", "")))
+    if values.get("protected") is None:
+        from ..services import adult
+        values["protected"] = adult.guess_protected(values.get("name", "")) or \
+            adult.guess_protected(values.get("path", ""))
     if values.get("is_default"):
         db.query(DownloadPath).update({"is_default": False})
     db_path = DownloadPath(**values)

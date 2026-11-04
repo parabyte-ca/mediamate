@@ -30,6 +30,7 @@ class DownloadPathCreate(BaseModel):
     target_min: Optional[int] = None
     target_max: Optional[int] = None
     target_shrink: Optional[bool] = None
+    protected: Optional[bool] = None      # never rename or move files here; None = guessed
 
 
 class DownloadPathUpdate(BaseModel):
@@ -43,6 +44,7 @@ class DownloadPathUpdate(BaseModel):
     target_min: Optional[int] = None
     target_max: Optional[int] = None
     target_shrink: Optional[bool] = None
+    protected: Optional[bool] = None
 
 
 class DownloadPathOut(BaseModel):
@@ -63,6 +65,7 @@ class DownloadPathOut(BaseModel):
     target_max: Optional[int] = None
     target_shrink: bool = False
     target_summary: str = ""           # e.g. "H.265, 720p–1080p"
+    protected: bool = False            # never renamed or moved (adult content)
 
     model_config = {"from_attributes": True}
 

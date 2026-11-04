@@ -84,7 +84,11 @@ function CheckRow({ label, hint, checked, onChange }: {
 export type FolderForm = {
   name: string; path: string; local_path: string; is_default: boolean; downloads: boolean; scan: boolean;
   target?: FolderTarget; target_min?: number | null; target_max?: number | null; target_shrink?: boolean;
+  protected?: boolean;
 };
+
+/** Same guess as the server: adult-content folders are protected by default. */
+const guessProtected = (name: string) => /bellesa|adult|xxx|nsfw|porn/i.test(name);
 
 const TARGET_HEIGHTS: [number, string][] = [[480, "480p"], [720, "720p"], [1080, "1080p"], [1440, "1440p"], [2160, "4K"]];
 const TARGET_KINDS: [FolderTarget, string, string][] = [
@@ -161,8 +165,11 @@ function PathModal({ initial, onClose, onSave }: {
     target_min: initial?.target_min ?? 720,
     target_max: initial?.target_max ?? 720,
     target_shrink: initial?.target_shrink ?? true,
+    protected: initial?.protected,
   });
+  const isProtected = form.protected ?? guessProtected(form.name);
   const valid = form.name.trim() && form.path.trim() && (form.downloads || form.scan);
+  const save = () => valid && onSave({ ...form, protected: isProtected });
   const set = <K extends keyof FolderForm>(k: K, v: FolderForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
@@ -247,6 +254,12 @@ function PathModal({ initial, onClose, onSave }: {
               )}
             </div>
           )}
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-red-200 dark:border-red-900/60 p-3">
+            <input type="checkbox" checked={isProtected} onChange={(e) => set("protected", e.target.checked)}
+                   className="mt-0.5 h-4 w-4 rounded border-gray-300 text-red-600" />
+            <span className="text-sm text-gray-700 dark:text-gray-300">Protected (adult content)
+              <span className="block text-xs text-gray-500">Files here are never renamed or moved into the TV or Movies folders, by anything.</span></span>
+          </label>
           {!form.downloads && !form.scan && (
             <p className="text-xs text-amber-700 dark:text-amber-400">Tick at least one: downloads, or scan &amp; encode.</p>
           )}
@@ -255,7 +268,7 @@ function PathModal({ initial, onClose, onSave }: {
           <button onClick={onClose} className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
             Cancel
           </button>
-          <button onClick={() => valid && onSave(form)} disabled={!valid} className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+          <button onClick={save} disabled={!valid} className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
             Save
           </button>
         </div>
@@ -964,6 +977,12 @@ export default function Settings() {
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{p.name}</span>
+                      {p.protected && (
+                        <span title="Never renamed or moved into the TV or Movies folders"
+                              className="rounded-full bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:text-red-300">
+                          Protected
+                        </span>
+                      )}
                       {p.is_default && (
                         <span className="inline-flex items-center gap-0.5 rounded-full bg-yellow-100 dark:bg-yellow-900/40 px-1.5 py-0.5 text-[10px] font-semibold text-yellow-700 dark:text-yellow-400">
                           <Star className="h-2.5 w-2.5" /> Default

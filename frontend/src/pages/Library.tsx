@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
+  AlertTriangle,
   ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderInput, FolderSearch, Layers, Loader2, MoreHorizontal,
   CheckCircle2, Pause, Play, Scissors, SkipForward, Square, Stethoscope, Timer, Trash2, X,
 } from "lucide-react";
-import { api, type DoctorKind, type DoctorState, type MediaFile, type MediaJobType, type MediaStats, type OrganisePlan } from "../api/client";
+import { api, type DoctorKind, type DoctorState, type DownloadPath, type MediaFile, type MediaJobType, type MediaStats, type OrganisePlan } from "../api/client";
 import { useEvent } from "../events";
 import { fmtSize } from "../utils";
 
@@ -103,6 +104,7 @@ type Dialog =
   | { kind: "delete"; files: MediaFile[] }
   | { kind: "preview"; file: MediaFile }
   | { kind: "organise"; files: MediaFile[] }
+  | { kind: "move"; files: MediaFile[] }
   | { kind: "doctor" };
 
 // ── Row actions menu ──────────────────────────────────────────────────────────
@@ -308,6 +310,13 @@ export default function Library() {
   const [toast, setToast] = useState<string | null>(null);
 
   const say = (m: string) => { setToast(m); window.setTimeout(() => setToast(null), 4000); };
+  // Adult content found in the Plex folders by the Library doctor: always shown until fixed.
+  const [adultCount, setAdultCount] = useState(0);
+  const loadAdult = useCallback(() => {
+    api.doctor.get().then((d) => setAdultCount(d.report?.issues.filter((i) => i.kind === "adult_in_plex").length ?? 0))
+      .catch(() => {});
+  }, []);
+  useEffect(() => { loadAdult(); }, [loadAdult]);
   const load = useCallback(async () => {
     const [f, s] = await Promise.all([api.media.files(), api.media.stats()]);
     setFiles(f);
@@ -476,6 +485,14 @@ export default function Library() {
         {anyFilter && <button className="text-sm text-blue-600 hover:underline" onClick={clearFilters}>Clear filters</button>}
       </div>
 
+      {adultCount > 0 && (
+        <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-800 dark:text-red-200">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="flex-1">{adultCount} adult file{adultCount === 1 ? " is" : "s are"} in a Plex folder (TV or Movies). Move {adultCount === 1 ? "it" : "them"} back to the protected folder.</span>
+          <button className={btnPrimary} onClick={() => setDialog({ kind: "doctor" })}>Review</button>
+        </div>
+      )}
+
       {pickedFiles.length > 0 && (
         <div className="sticky top-12 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/60 px-3 py-2 md:top-2">
           <span className="text-sm font-medium text-blue-800 dark:text-blue-200">{pickedFiles.length} selected</span>
@@ -484,6 +501,7 @@ export default function Library() {
           <button className={btnGhost} onClick={() => queue(pickedFiles, "trim")}><Timer className="h-4 w-4" />Trim</button>
           <button className={btnGhost} onClick={() => run(async () => { const r = await api.media.bulk("skip", [...picked]); setPicked(new Set()); return `Skipped ${r.done}`; })}><SkipForward className="h-4 w-4" />Skip</button>
           <button className={btnGhost} onClick={() => setDialog({ kind: "organise", files: files.filter((x) => picked.has(x.id)) })}><FolderInput className="h-4 w-4" />Organise</button>
+          <button className={btnGhost} onClick={() => setDialog({ kind: "move", files: files.filter((x) => picked.has(x.id)) })}><FolderInput className="h-4 w-4" />Move to folder</button>
           <button className={`${btnGhost} text-red-600 dark:text-red-400`} onClick={() => setDialog({ kind: "delete", files: pickedFiles })}><Trash2 className="h-4 w-4" />Delete</button>
           <button className="ml-auto text-sm text-blue-700 dark:text-blue-300 hover:underline" onClick={() => setPicked(new Set())}>Clear selection</button>
         </div>
@@ -607,7 +625,11 @@ export default function Library() {
         </Modal>
       )}
       {dialog?.kind === "preview" && <PreviewDialog file={dialog.file} onClose={() => setDialog(null)} />}
-      {dialog?.kind === "doctor" && <DoctorDialog onClose={() => setDialog(null)} onChanged={load} />}
+      {dialog?.kind === "doctor" && <DoctorDialog onClose={() => setDialog(null)} onChanged={() => { load(); loadAdult(); }} />}
+      {dialog?.kind === "move" && (
+        <MoveDialog files={dialog.files} onClose={() => setDialog(null)}
+                    onDone={(msg) => { setDialog(null); setPicked(new Set()); say(msg); load(); loadAdult(); }} />
+      )}
       {dialog?.kind === "organise" && <OrganiseDialog files={dialog.files} onClose={() => setDialog(null)}
                                                       onDone={(m) => { setPicked(new Set()); say(m); load(); }} />}
     </div>
@@ -615,6 +637,7 @@ export default function Library() {
 }
 
 const DOCTOR_KINDS: { kind: DoctorKind; title: string; hint: string }[] = [
+  { kind: "adult_in_plex", title: "Adult content in a Plex folder", hint: "Moved into TV or Movies before folders could be protected. Fixing moves each back to the protected folder (its original name when known). Check any marked \u201cmay not be a real movie\u201d first." },
   { kind: "broken", title: "Can't be played", hint: "Damaged or incomplete files." },
   { kind: "duplicate", title: "Duplicates", hint: "The best copy (resolution, then HEVC, then size) is kept." },
   { kind: "audience", title: "Wrong folder", hint: "Rated for adults in a regular folder, or the other way round." },
@@ -626,6 +649,53 @@ const DOCTOR_KINDS: { kind: DoctorKind; title: string; hint: string }[] = [
   { kind: "junk", title: "Leftover files", hint: "Fixed automatically when that's on." },
   { kind: "empty", title: "Empty folders", hint: "Fixed automatically when that's on." },
 ];
+
+/** Move files to another folder, keeping their names (e.g. back to Bellesa). */
+function MoveDialog({ files, onClose, onDone }: { files: MediaFile[]; onClose: () => void; onDone: (msg: string) => void }) {
+  const [folders, setFolders] = useState<DownloadPath[] | null>(null);
+  const [target, setTarget] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.paths.list().then((ps) => {
+      const usable = ps.filter((p) => p.scan && p.exists_here);
+      setFolders(usable);
+      setTarget((usable.find((p) => p.protected) ?? usable[0])?.id ?? null);
+    }).catch((e) => setError(e.message));
+  }, []);
+  const go = async () => {
+    if (target == null) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await api.media.bulk("move", files.map((f) => f.id), undefined, target);
+      if (r.errors.length && !r.done) setError(r.errors[0]);
+      else onDone(`Moved ${r.done}${r.errors.length ? ` · ${r.errors.length} couldn't be: ${r.errors[0]}` : ""}`);
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title={files.length === 1 ? `Move ${files[0].filename}` : `Move ${files.length} files`} onClose={onClose}>
+      <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">They keep their names. Nothing is overwritten.</p>
+      {folders === null ? <Loader2 className="h-5 w-5 animate-spin text-blue-600" /> : (
+        <div className="space-y-1.5">
+          {folders.map((p) => (
+            <label key={p.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 text-sm">
+              <input type="radio" name="move-to" checked={target === p.id} onChange={() => setTarget(p.id)} />
+              <span className="flex-1 text-gray-800 dark:text-gray-200">{p.name}<span className="block truncate font-mono text-xs text-gray-400">{p.local}</span></span>
+              {p.protected && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-900/40 dark:text-red-300">Protected</span>}
+            </label>
+          ))}
+        </div>
+      )}
+      {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button className={btnGhost} onClick={onClose}>Cancel</button>
+        <button className={btnPrimary} disabled={busy || target == null} onClick={go}>
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />}Move
+        </button>
+      </div>
+    </Modal>
+  );
+}
 
 /** "Some.Movie.2019.720p.x265.mkv" -> "Some Movie 2019", for a Search link. */
 function searchTitle(path: string): string {
@@ -653,6 +723,7 @@ function DoctorDialog({ onClose, onChanged }: { onClose: () => void; onChanged: 
     } catch (e) { setMsg((e as Error).message); } finally { setBusy(null); }
   };
   const fix = async (ids: string[], key: string, kind?: DoctorKind) => {
+    if (kind === "adult_in_plex" && !confirm(`Move ${ids.length === 1 ? "this file" : `${ids.length} files`} out of the Plex folders, back to the protected folder?`)) return;
     if (kind === "oversize" && !confirm(`Re-encode ${ids.length === 1 ? "this file" : `${ids.length} files`} to the folder's target size? `
         + "It takes a while and replaces the file (the original goes to the 30-day trash).")) return;
     setBusy(key); setMsg(null);

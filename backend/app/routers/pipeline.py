@@ -97,13 +97,23 @@ def get_organise(db: Session = Depends(get_db)):
 @router.put("/organise")
 def put_organise(body: dict = Body(...), db: Session = Depends(get_db)):
     from ..services import organise
+    corrected = []
     for key in organise.SETTINGS_DEFAULTS:
         if key in body and isinstance(body[key], str):
+            value = body[key].strip()
+            if key.endswith("_template") and value:
+                value, changed = organise.fix_template(value)
+                if changed:
+                    corrected.append(key)
             row = db.get(Setting, key) or Setting(key=key)
-            row.value = body[key].strip()
+            row.value = value
             db.merge(row)
     db.commit()
-    return _organise_status(db, organise.get_settings(db))
+    out = _organise_status(db, organise.get_settings(db))
+    for key in corrected:
+        out["warnings"][key] = ("Changed to end with {ext}: renamed files always keep their own extension "
+                                "(an .mp4 stays .mp4).")
+    return out
 
 
 @router.post("/organise/example")

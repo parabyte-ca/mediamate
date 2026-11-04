@@ -264,7 +264,7 @@ function OrganiseSection() {
             <input className={`${input} font-mono text-xs`} value={s.organise_movie_template}
                    onChange={(e) => set("organise_movie_template", e.target.value)} /></label>
           <p className="text-xs text-gray-500 sm:col-span-2">
-            Fields: <code>{"{show}"}</code> <code>{"{season:02d}"}</code> <code>{"{episode:02d}"}</code> <code>{"{title}"}</code> <code>{"{year}"}</code> <code>{"{ext}"}</code>. Use / for folders.
+            Fields: <code>{"{show}"}</code> <code>{"{season:02d}"}</code> <code>{"{episode:02d}"}</code> <code>{"{title}"}</code> <code>{"{year}"}</code> <code>{"{ext}"}</code>. Use / for folders. <code>{"{ext}"}</code> is the file's own extension and is always kept (an .mp4 stays .mp4).
           </p>
         </div>
       )}

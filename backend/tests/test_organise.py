@@ -23,7 +23,7 @@ S = dict(organise.SETTINGS_DEFAULTS, organise_tv_dir="/tv", organise_movie_dir="
     ("2001.A.Space.Odyssey.1968.1080p.BluRay.mkv",
      "/movies/2001 A Space Odyssey (1968)/2001 A Space Odyssey (1968).mkv"),
     ("Blade Runner 2049 (2017) 1080p.mkv", "/movies/Blade Runner 2049 (2017)/Blade Runner 2049 (2017).mkv"),
-    ("Movie.x264.2019.MKV", "/movies/Movie (2019)/Movie (2019).mkv"),
+    ("Movie.x264.2019.MKV", "/movies/Movie (2019)/Movie (2019).MKV"),   # extension kept exactly
 ])
 def test_targets(name, target):
     assert organise.target_for(S, "/dl/" + name)[0] == target
@@ -190,3 +190,55 @@ def test_settings_warn_about_folders_the_library_would_lose(lib, tmp_path):
     bad = client.post("/api/pipeline/organise/example",
                       json={"filename": "Show.S01E02.mkv", "organise_tv_template": "{nope}"}).json()
     assert not bad["ok"] and "template" in bad["error"]
+
+
+# ── the extension never changes ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("name,ext", [
+    ("Dune.2021.1080p.mp4", ".mp4"), ("Dune.2021.1080p.MKV", ".MKV"), ("Old.Film.1999.avi", ".avi"),
+    ("Show.S01E01.m4v", ".m4v"), ("Show.S01E01E02.mp4", ".mp4"),
+])
+def test_rename_keeps_the_files_own_extension(name, ext):
+    dest = organise.target_for(S, "/dl/" + name)[0]
+    assert dest.endswith(ext) and os.path.splitext(dest)[1] == ext
+
+
+@pytest.mark.parametrize("template", [
+    "{title} ({year})/{title} ({year}).mkv",          # a hard-coded .mkv
+    "{title} ({year})/{title} ({year})",             # no {ext}
+    "{title} ({year})/{title} ({year}).mkv{ext}",
+])
+def test_templates_cannot_change_the_extension(template):
+    s = dict(S, organise_movie_template=template)
+    assert organise.target_for(s, "/dl/Clip.2024.mp4")[0] == "/movies/Clip (2024)/Clip (2024).mp4"
+
+
+def test_fix_template():
+    assert organise.fix_template("{title} ({year}).mkv") == ("{title} ({year}){ext}", True)
+    assert organise.fix_template("{show}/{show} - S{season:02d}E{episode:02d}") == \
+        ("{show}/{show} - S{season:02d}E{episode:02d}{ext}", True)
+    assert organise.fix_template(organise.SETTINGS_DEFAULTS["organise_tv_template"])[1] is False
+
+
+def test_saving_a_template_with_mkv_is_corrected(lib):
+    client, Session, media = lib
+    r = client.put("/api/pipeline/organise", json={"organise_movie_template": "{title} ({year})/{title} ({year}).mkv"})
+    body = r.json()
+    assert body["organise_movie_template"] == "{title} ({year})/{title} ({year}){ext}"
+    assert "keep their own extension" in body["warnings"]["organise_movie_template"]
+    f = media / "Clip.2024.mp4"
+    f.write_bytes(b"x")
+    fid = store.upsert_file(str(f), f.name, 1, 60.0, "hevc", False)
+    out = client.post(f"/api/media/files/{fid}/organise", json={"audience": "general"}).json()
+    assert out["ok"] and out["path"].endswith("Clip (2024).mp4")
+
+
+def test_library_rename_keeps_extension_and_dotted_names(lib):
+    client, Session, media = lib
+    f = media / "clip.mp4"
+    f.write_bytes(b"x")
+    fid = store.upsert_file(str(f), f.name, 1, 60.0, "hevc", False)
+    assert client.post(f"/api/media/files/{fid}/rename", json={"new_name": "Rodriguez 03.07"}).json()["filename"] \
+        == "Rodriguez 03.07.mp4"
+    assert client.post(f"/api/media/files/{fid}/rename", json={"new_name": "New.mkv"}).json()["filename"] == "New.mp4"

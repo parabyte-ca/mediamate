@@ -89,7 +89,10 @@ def parse(filename: str) -> Parsed:
 
 def get_settings(db: Session) -> dict[str, str]:
     rows = {r.key: r.value for r in db.query(Setting).filter(Setting.key.in_(SETTINGS_DEFAULTS))}
-    return {k: (rows.get(k) if rows.get(k) not in (None, "") else v) for k, v in SETTINGS_DEFAULTS.items()}
+    out = {k: (rows.get(k) if rows.get(k) not in (None, "") else v) for k, v in SETTINGS_DEFAULTS.items()}
+    for key in ("organise_tv_template", "organise_movie_template"):
+        out[key] = fix_template(out[key])[0]     # always end with the file's own {ext}
+    return out
 
 
 class OrganiseError(Exception):
@@ -114,7 +117,7 @@ def target_for(settings: dict, path: str, show_hint: str | None = None,
                audience: str = "general") -> tuple[str, Parsed]:
     """Where `path` belongs. Raises OrganiseError when it can't be worked out."""
     p = parse(path)
-    ext = os.path.splitext(path)[1].lower()
+    ext = os.path.splitext(path)[1]          # exactly as it is: .mp4 stays .mp4, .MKV stays .MKV
     if p.kind == "episode":
         root = _root(settings, "episode", audience)
         if not root:
@@ -125,8 +128,7 @@ def target_for(settings: dict, path: str, show_hint: str | None = None,
         rel = settings["organise_tv_template"].format(show=show, season=p.season, episode=p.episode, ext=ext,
                                                       title=show, year=p.year or "")
         if p.episode_end:   # Show - S01E01-E02.mkv
-            stem, e = os.path.splitext(rel)
-            rel = f"{stem}-E{p.episode_end:02d}{e}"
+            rel = f"{keep_extension(rel, '')}-E{p.episode_end:02d}{ext}"
     elif p.kind == "movie":
         root = _root(settings, "movie", audience)
         if not root:
@@ -136,8 +138,43 @@ def target_for(settings: dict, path: str, show_hint: str | None = None,
                                                          show=title, season=0, episode=0)
     else:
         raise OrganiseError("Couldn't tell whether this is an episode (S01E02) or a movie (Title 2020)")
+    rel = keep_extension(rel, ext)
     parts = [safe(x) for x in rel.replace("\\", "/").split("/") if x.strip()]
+    parts[-1] = keep_extension(parts[-1], ext)   # safe() trims trailing dots, never the extension
     return os.path.join(root, *parts), p
+
+
+def _video_exts() -> set[str]:
+    from .media import config
+    return {e.lower() for e in config.VIDEO_EXTENSIONS} | {".part"}
+
+
+def keep_extension(name: str, ext: str) -> str:
+    """The name ending in the file's own extension, whatever a template produced: a
+    template's ".mkv" (or no {ext}) never changes an .mp4 into an .mkv."""
+    stem = name
+    while True:
+        base, e = os.path.splitext(stem)
+        if e and e.lower() in _video_exts() and base:
+            stem = base
+            continue
+        break
+    return stem + ext
+
+
+def fix_template(template: str) -> tuple[str, bool]:
+    """A template that ends in the file's own {ext}. Returns (template, changed)."""
+    t = (template or "").strip()
+    fixed = t
+    while True:
+        base, e = os.path.splitext(fixed)
+        if e and e.lower() in _video_exts() and base and "{" not in e:
+            fixed = base
+            continue
+        break
+    if not fixed.endswith("{ext}"):
+        fixed = fixed.replace("{ext}", "") + "{ext}"
+    return fixed, fixed != t
 
 
 def _sidecars(path: str) -> list[str]:

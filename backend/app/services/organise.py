@@ -194,6 +194,55 @@ def _prune_empty(folder: str) -> None:
         pass
 
 
+def protected_root(path: str, db: Session | None = None) -> str | None:
+    """The protected folder (name) this file is in, or None. Protected folders (e.g.
+    Bellesa) are never renamed or moved."""
+    from sqlalchemy.orm import Session as _S
+    from ..models import DownloadPath
+    from . import folders
+    from .media import store
+    own = db is None
+    db = db or _S(bind=store._engine())
+    try:
+        p = os.path.normpath(os.path.abspath(path))
+        for dp in db.query(DownloadPath).filter(DownloadPath.protected == True).all():  # noqa: E712
+            for root in {folders.local_of(db, dp), dp.path, dp.local_path}:
+                if not root:
+                    continue
+                r = os.path.normpath(os.path.abspath(root))
+                if p == r or p.startswith(r.rstrip(os.sep) + os.sep):
+                    return dp.name
+        return None
+    finally:
+        if own:
+            db.close()
+
+
+def guard(path: str, db: Session | None = None) -> None:
+    """Refuse to organise adult content: files in a protected folder, or that look adult.
+    Raises OrganiseError. Every organise path (Library, doctor, pipeline) goes through here."""
+    from . import adult
+    name = protected_root(path, db)
+    if name:
+        raise OrganiseError(f"It's in a protected folder ({name}): never renamed or moved")
+    why = adult.looks_adult(path, adult.extra_keywords(db))
+    if why:
+        raise OrganiseError(f"It looks like adult content ({why}), so it's never moved into a Plex folder")
+
+
+def _log_move(file_id: int, src: str, dest: str) -> None:
+    try:
+        from sqlalchemy.orm import Session as _S
+        from ..models import OrganiseMove
+        from .media import store
+        with _S(bind=store._engine()) as db:
+            db.add(OrganiseMove(file_id=file_id, from_path=src, to_path=dest))
+            db.commit()
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Couldn't record the move of %s", src)
+
+
 def organise_file(settings: dict, file_id: int, show_hint: str | None = None,
                   audience: str = "general") -> str:
     """Move a library file into place and update the Library. Returns the new path.
@@ -203,11 +252,15 @@ def organise_file(settings: dict, file_id: int, show_hint: str | None = None,
     row = store.get_file(file_id)
     if row is None:
         raise OrganiseError("The file is no longer in the library")
+    guard(row["path"])          # again here, whatever the caller checked
     if not os.path.isfile(row["path"]):
         raise OrganiseError(f"{row['path']} isn't there any more")
     dest, _ = target_for(settings, row["path"], show_hint, audience)
-    move(row["path"], dest)
+    src = row["path"]
+    move(src, dest)
     store.rename_file(file_id, dest, os.path.basename(dest))
+    if os.path.abspath(src) != os.path.abspath(dest):
+        _log_move(file_id, src, dest)
     return dest
 
 
@@ -243,6 +296,7 @@ def plan(db: Session, path: str, download_id: int | None = None, override: str |
     The audience is the override if given, else the watchlist show's setting (the show the
     download came from, or one with the same name), else the age rating (services/ratings)."""
     from . import ratings
+    guard(path, db)
     settings = get_settings(db)
     item = watchlist_for_download(db, download_id)
     parsed = parse(path)

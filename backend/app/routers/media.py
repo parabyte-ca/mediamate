@@ -331,11 +331,22 @@ def queue_bulk(body: dict = Body(default={})):
 
 @router.post("/files/bulk")
 def files_bulk(body: dict = Body(default={})):
-    """Skip, delete (to .trash) or rename & organise many files; busy files are left alone."""
+    """Skip, delete (to .trash), rename & organise, or move to a folder (keeping the name)
+    many files; busy files are left alone."""
     action = body.get("action")
     ids = body.get("file_ids") or []
-    if action not in ("skip", "delete", "organise") or not ids:
+    if action not in ("skip", "delete", "organise", "move") or not ids:
         return _err("Invalid parameters", 400)
+    dest_root = None
+    if action == "move":
+        from ..database import SessionLocal
+        from ..models import DownloadPath
+        from ..services import folders as folder_service
+        with SessionLocal() as s:
+            dp = s.get(DownloadPath, int(body.get("folder_id") or 0))
+            dest_root = folder_service.local_of(s, dp) if dp else None
+        if not dest_root or not os.path.isdir(dest_root):
+            return _err("Pick a folder ScreenMate can see", 400)
     done, skipped, errors = 0, 0, []
     for fid in ids:
         row = db.get_file(int(fid))
@@ -350,6 +361,19 @@ def files_bulk(body: dict = Body(default={})):
             try:
                 _organise(row, (body.get("audiences") or {}).get(str(row["id"])))
             except (organise.OrganiseError, OSError) as exc:
+                errors.append(f"{row['filename']}: {exc}")
+                continue
+        elif action == "move":
+            from ..database import SessionLocal
+            from ..services import doctor
+            dest = os.path.join(dest_root, row["filename"])
+            if os.path.abspath(dest) == os.path.abspath(row["path"]):
+                skipped += 1
+                continue
+            try:
+                with SessionLocal() as s:
+                    doctor.move_back(s, row["id"], dest)
+            except (ValueError, OSError) as exc:
                 errors.append(f"{row['filename']}: {exc}")
                 continue
         else:

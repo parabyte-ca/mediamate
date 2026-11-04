@@ -164,6 +164,19 @@ class DownloadPath(Base):
     target_min = Column(Integer, nullable=True)        # custom only: heights, e.g. 720
     target_max = Column(Integer, nullable=True)
     target_shrink = Column(Boolean, nullable=False, default=False, server_default=text("0"))
+    # Never rename or move files here (adult content, e.g. Bellesa). See services/adult.py.
+    protected = Column(Boolean, nullable=False, default=False, server_default=text("0"))
+
+
+class OrganiseMove(Base):
+    """Every Rename & organise move, so one can be traced and undone."""
+    __tablename__ = "organise_moves"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, nullable=True, index=True)
+    from_path = Column(String, nullable=False)
+    to_path = Column(String, nullable=False, index=True)
+    moved_at = Column(DateTime, server_default=func.now())
 
 
 class Setting(Base):

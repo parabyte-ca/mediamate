@@ -88,6 +88,13 @@ MIGRATIONS: list[tuple[str, str | None]] = [
      "UPDATE download_paths SET target_max = 720 WHERE target = 'custom'"),
     ("ALTER TABLE download_paths ADD COLUMN target_shrink INTEGER NOT NULL DEFAULT 0",
      "UPDATE download_paths SET target_shrink = 1 WHERE target = 'custom'"),
+    # Protected folders (adult content): never renamed or moved into the Plex folders.
+    (
+        "ALTER TABLE download_paths ADD COLUMN protected INTEGER NOT NULL DEFAULT 0",
+        "UPDATE download_paths SET protected = 1 WHERE lower(name) LIKE '%bellesa%' OR lower(name) LIKE '%adult%' "
+        "OR lower(name) LIKE '%xxx%' OR lower(name) LIKE '%nsfw%' OR lower(name) LIKE '%porn%' "
+        "OR lower(path) LIKE '%bellesa%' OR lower(coalesce(local_path, '')) LIKE '%bellesa%'",
+    ),
 ]
 
 

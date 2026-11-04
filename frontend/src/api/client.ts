@@ -190,6 +190,8 @@ export interface DownloadPath {
   target_max?: number | null;
   target_shrink?: boolean;
   target_summary?: string;
+  /** Never rename or move files here (adult content). */
+  protected?: boolean;
 }
 
 export type FolderTarget = "auto" | "tv" | "movies" | "custom";
@@ -205,6 +207,7 @@ export interface FolderInput {
   target_min?: number | null;
   target_max?: number | null;
   target_shrink?: boolean;
+  protected?: boolean;
 }
 
 export type Settings = Record<string, string>;
@@ -494,7 +497,7 @@ export interface ProgressEvent {
 export type PipelineActionType = "trim" | "encode" | "split" | "organise";
 
 export type DoctorKind = "sample" | "junk" | "empty" | "broken" | "missing" | "duplicate" | "audience" | "name"
-  | "oversize" | "lowres";
+  | "oversize" | "lowres" | "adult_in_plex";
 
 export interface OrganisePlan {
   ok: boolean;
@@ -870,9 +873,10 @@ export const api = {
       req<OrganisePlan>(`/media/files/${id}/organise${audience ? `?audience=${audience}` : ""}`),
     organise: (id: number) =>
       req<{ ok: boolean; msg: string; path: string }>(`/media/files/${id}/organise`, { method: "POST" }),
-    bulk: (action: "skip" | "delete" | "organise", fileIds: number[], audiences?: Record<number, "general" | "mature">) =>
+    bulk: (action: "skip" | "delete" | "organise" | "move", fileIds: number[],
+           audiences?: Record<number, "general" | "mature">, folderId?: number) =>
       req<{ ok: boolean; done: number; skipped: number; errors: string[] }>("/media/files/bulk", {
-        method: "POST", body: JSON.stringify({ action, file_ids: fileIds, audiences }),
+        method: "POST", body: JSON.stringify({ action, file_ids: fileIds, audiences, folder_id: folderId }),
       }),
     rename: (id: number, newName: string) =>
       req<MediaResult & { filename?: string }>(`/media/files/${id}/rename`, { method: "POST", body: JSON.stringify({ new_name: newName }) }),

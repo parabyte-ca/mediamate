@@ -405,21 +405,32 @@ def advance(bind, plan_id: int) -> None:
             plan.next_index += 1
             plan.status = "running"
             try:
-                # Decided before moving: may look up the age rating (regular vs Mature folder).
-                where = organise.plan(db, row["path"], plan.download_id)
-                db.commit()         # release the write lock before the Library row is updated
-                dest = organise.organise_file(where["settings"], plan.file_id, where["show_hint"],
-                                              where["audience"])
-                plan.organise_status, plan.organised_to = "done", dest
-            except (organise.OrganiseError, OSError) as exc:
-                plan.organise_status = "failed"
+                organise.guard(row["path"], db)
+                protected = None
+            except organise.OrganiseError as exc:
+                protected = exc
+            if protected is not None:
+                # Protected folder / adult content: never moved. Skip the step; the plan finishes.
+                plan.organise_status = "skipped"
                 plan.organised_to = None
-                plan.status = "failed"
-                plan.detail = f"Rename & organise: {exc}"
-                plan.finished_at = _utcnow()
-                db.commit()
-                journeys.refresh(db, plan.journey_id)
-                return
+                plan.detail = f"Left where it is: {protected}"
+            else:
+                try:
+                    # Decided before moving: may look up the age rating (regular vs Mature folder).
+                    where = organise.plan(db, row["path"], plan.download_id)
+                    db.commit()         # release the write lock before the Library row is updated
+                    dest = organise.organise_file(where["settings"], plan.file_id, where["show_hint"],
+                                                  where["audience"])
+                    plan.organise_status, plan.organised_to = "done", dest
+                except (organise.OrganiseError, OSError) as exc:
+                    plan.organise_status = "failed"
+                    plan.organised_to = None
+                    plan.status = "failed"
+                    plan.detail = f"Rename & organise: {exc}"
+                    plan.finished_at = _utcnow()
+                    db.commit()
+                    journeys.refresh(db, plan.journey_id)
+                    return
             plan.status = "done"
             plan.finished_at = _utcnow()
             db.commit()
@@ -529,6 +540,9 @@ def plan_steps(db: Session, journey_id: int) -> list[dict]:
         if plan.organise_status == "done":
             steps.append({"kind": "organise", "label": ACTION_LABEL["organise"], "status": "done",
                           "detail": f"Moved to {plan.organised_to}", "ref": ref})
+        elif plan.organise_status == "skipped":
+            steps.append({"kind": "organise", "label": ACTION_LABEL["organise"], "status": "skipped",
+                          "detail": plan.detail, "ref": ref})
         for action in actions[plan.next_index:]:
             steps.append({"kind": action["type"], "label": ACTION_LABEL[action["type"]],
                           "status": "skipped" if stopped else "pending",

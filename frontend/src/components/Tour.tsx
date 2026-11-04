@@ -36,12 +36,12 @@ const STEPS: Step[] = [
   {
     targets: ["nav-browse", "nav-more"],
     title: "Browse",
-    body: "See what's airing and what's coming to cinemas. Add a show, or a movie that isn't out yet: it downloads when it's released digitally. On a phone, it's under More.",
+    body: "See what's airing and what's coming to cinemas. Add a show, or a movie that isn't out yet: it downloads when it's released digitally.",
   },
   {
     targets: ["nav-calendar", "nav-more"],
     title: "Calendar",
-    body: "See what's airing and what's coming up. On a phone, Calendar, Browse, Insights and History are under More.",
+    body: "See what's airing and what's coming up. On a phone, Calendar, Insights, History and Settings are under More.",
   },
   {
     targets: ["nav-activity"],
@@ -66,7 +66,7 @@ const STEPS: Step[] = [
   {
     targets: ["themes"],
     title: "Make it yours",
-    body: "Pick colours and light or dark. It's saved on this device. You'll also find it in Settings → Appearance.",
+    body: "Pick colours and light or dark. It's saved on this device. You'll also find it in Settings → Appearance (under More on a phone).",
   },
   {
     title: "You're all set",

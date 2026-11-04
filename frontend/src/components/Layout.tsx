@@ -33,15 +33,16 @@ import CommandPalette from "./CommandPalette";
 
 const nav = [
   // mobile: a tab in the phone's bottom bar; the rest live under its "More" tab.
+  // The desktop sidebar mirrors this: the tabs first, then a "More" group.
   { to: "/search",    label: "Search",    icon: Search,        mobile: true  },
   { to: "/watchlist", label: "Watchlist", icon: Tv,            mobile: true  },
-  { to: "/browse",    label: "Browse",    icon: Compass,       mobile: false },
-  { to: "/calendar",  label: "Calendar",  icon: CalendarDays,  mobile: false },
+  { to: "/browse",    label: "Browse",    icon: Compass,       mobile: true  },
   { to: "/activity",  label: "Activity",  icon: Activity,      mobile: true  },
   { to: "/library",   label: "Library",   icon: Film,          mobile: true  },
+  { to: "/calendar",  label: "Calendar",  icon: CalendarDays,  mobile: false },
   { to: "/insights",  label: "Insights",  icon: TrendingUp,    mobile: false },
   { to: "/history",   label: "History",   icon: Clock,         mobile: false },
-  { to: "/settings",  label: "Settings",  icon: Settings,      mobile: true  },
+  { to: "/settings",  label: "Settings",  icon: Settings,      mobile: false },
   { to: "/updates",   label: "Updates",   icon: ArrowUpCircle, mobile: false },
 ];
 
@@ -222,7 +223,13 @@ export default function Layout() {
 
         {/* Navigation */}
         <nav className={`flex-1 space-y-1 py-4 ${collapsed ? "px-2" : "px-3"}`}>
-          {nav.map(({ to, label, icon: Icon }) => (
+          {nav.map(({ to, label, icon: Icon, mobile }, i) => (
+            <div key={to}>
+            {!mobile && nav[i - 1]?.mobile && (
+              collapsed
+                ? <div className="my-2 border-t border-gray-200 dark:border-gray-700" aria-hidden />
+                : <p className="mt-4 mb-1 border-t border-gray-200 dark:border-gray-700 px-3 pt-3 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">More</p>
+            )}
             <NavLink
               key={to}
               to={to}
@@ -246,6 +253,7 @@ export default function Layout() {
               </span>
               {!collapsed && label}
             </NavLink>
+            </div>
           ))}
         </nav>
 

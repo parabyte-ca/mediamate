@@ -12,8 +12,8 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from .candidates import WATCHLIST_LOCK, effective_item, failed_hashes, failed_titles, query_words, result_hash, \
-    title_has_query_word
+from .candidates import WATCHLIST_LOCK, effective_item, failed_hashes, failed_titles, matches_movie, \
+    query_words, result_hash
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ def find_candidates(eff, year: int | None, min_seeds: int, exclude_hashes=frozen
     results = [r for r in results
                if r.get("seeds", 0) >= min_seeds
                and not _EPISODE.search(r["title"])
-               and title_has_query_word(r["title"], words)
+               and matches_movie(r["title"], (eff.search_query, eff.title), year)
                and _year_ok(r["title"], year)]
     if eff.max_size_mb:
         results = [r for r in results if r.get("size_bytes", 0) <= eff.max_size_mb * 1024 * 1024]

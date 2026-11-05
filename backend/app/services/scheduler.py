@@ -25,7 +25,7 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
     from . import episode_guide
     from .candidates import (
         WATCHLIST_LOCK, effective_item, failed_hashes, failed_titles, find_with_fallback,
-        parse_episode_tag, query_words, title_has_query_word,
+        matches_show, parse_episode_tag, query_words, title_has_query_word,
     )
     from .indexers import search_all
     from .qbittorrent import add_torrent
@@ -127,7 +127,7 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                     _ep_pattern = re.compile(r"[Ss]\d+[Ee]\d+")
                     pack_results = [r for r in pack_results if not _ep_pattern.search(r["title"])]
                     pack_results = [
-                        r for r in pack_results if title_has_query_word(r["title"], words)
+                        r for r in pack_results if matches_show(r["title"], (item.search_query, item.title))
                     ]
                     bad_hashes = failed_hashes(db, item.id)
                     bad_titles = failed_titles(db, item.id)

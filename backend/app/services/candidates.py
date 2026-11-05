@@ -36,6 +36,63 @@ def title_has_query_word(title: str, words: set[str]) -> bool:
     return bool(words & set(re.sub(r"[^a-z0-9]", " ", title.lower()).split()))
 
 
+# ── Does a release belong to this show? ───────────────────────────────────────
+# The show's name must be the release's show part (the text before the episode or
+# season tag), not just appear somewhere in it: "MobLand S01E01 Stick or Twist" is
+# MobLand, not "Stick".
+
+_TAG = re.compile(r"(?i)(?<![a-z0-9])(?:s\d{1,2}(?:[ ._-]?e\d{1,3})*|\d{1,2}x\d{2,3}|season[ ._-]?\d+|complete)(?![a-z0-9])")
+_LEAD_GROUP = re.compile(r"^\s*[\[(][^\])]*[\])]\s*")
+_TAIL = re.compile(r"(?:\s+(?:19|20)\d{2}|\s+(?:us|uk|au|ca|nz))+$")
+
+
+def normalise_name(name: str) -> str:
+    """Compare-friendly show/movie name: lower case, separators as spaces, & = and,
+    no leading "The", no trailing year or country."""
+    n = (name or "").lower().replace("&", " and ").replace("'", "").replace("’", "")
+    n = re.sub(r"\(([^)]*)\)", r" \1 ", n)              # "(2005)" / "(US)" as plain words
+    n = re.sub(r"[^a-z0-9]+", " ", n).strip()
+    n = _TAIL.sub("", " " + n).strip()
+    n = re.sub(r"^the\s+", "", n)
+    return n
+
+
+def release_show_part(title: str) -> str | None:
+    """The normalised text before the episode/season tag, or None when there's no tag."""
+    t = _LEAD_GROUP.sub("", title or "")
+    m = _TAG.search(t)
+    if not m:
+        return None
+    return normalise_name(t[:m.start()])
+
+
+def matches_show(title: str, names) -> bool:
+    """Is this release of one of these shows (search query, title…)? Whole-name match."""
+    part = release_show_part(title)
+    if not part:
+        return False
+    wanted = {normalise_name(n) for n in names if n and normalise_name(n)}
+    return part in wanted
+
+
+def matches_movie(title: str, names, year: int | None = None) -> bool:
+    """Is this release of the movie? The text before the year (or the release junk)
+    must be the movie's name."""
+    t = _LEAD_GROUP.sub("", title or "")
+    spaced = re.sub(r"[._]+", " ", t)
+    cut = None
+    for m in re.finditer(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)", spaced):
+        if m.start() > 0:
+            cut = m.start()
+            if year is None or abs(int(m.group(1)) - year) <= 1:
+                break
+    if cut is None:
+        junk = re.search(r"(?i)\b(2160p|1080p|720p|480p|4k|web|bluray|hdtv|x26[45]|hevc)\b", spaced)
+        cut = junk.start() if junk else len(spaced)
+    part = normalise_name(spaced[:cut])
+    return bool(part) and part in {normalise_name(n) for n in names if n}
+
+
 def result_hash(result: dict) -> str | None:
     h = (result.get("info_hash") or "").lower()
     return h or _hash_from_magnet(result.get("magnet", ""))
@@ -128,8 +185,8 @@ def find_candidates(
     # Some indexers (e.g. EZTV) ignore the query, so verify the episode tag and
     # that at least one significant word of the show name is in the title.
     results = [r for r in results if ep_tag.lower() in r["title"].lower()]
-    words = query_words(item.search_query)
-    results = [r for r in results if title_has_query_word(r["title"], words)]
+    names = (item.search_query, getattr(item, "title", None))
+    results = [r for r in results if matches_show(r["title"], names)]
 
     if item.max_size_mb:
         max_bytes = item.max_size_mb * 1024 * 1024

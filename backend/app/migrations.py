@@ -104,6 +104,7 @@ MIGRATIONS: list[tuple[str, str | None]] = [
     # Music: artists on the watchlist, album downloads.
     ("ALTER TABLE watchlist ADD COLUMN mbid TEXT", None),
     ("ALTER TABLE downloads ADD COLUMN music_album_id INTEGER", None),
+    ("ALTER TABLE music_lib_albums ADD COLUMN cover_checked_at DATETIME", None),
 ]
 
 

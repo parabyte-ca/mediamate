@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Disc3, FolderInput, FolderSearch, Loader2, Pause, Play, Search, Tags, Wand2, X } from "lucide-react";
+import { AlertTriangle, Disc3, FolderInput, FolderSearch, ImageDown, Loader2, Pause, Play, Search, Tags, Wand2, X } from "lucide-react";
 import { api, type LibAlbum, type LibAlbumDetail, type MusicIssue } from "../api/client";
 import Stars from "./Stars";
 import { fmtSize } from "../utils";
@@ -244,6 +244,12 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
                       title="Fill in titles, track numbers and cover art from MusicBrainz">
                 {busy === "tags" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}Fix tags
               </button>
+              {!a.has_cover && (
+                <button className={ghost} disabled={busy !== null} onClick={() => act("cover", async () => (await api.music.getCover(id)).msg)}
+                        title="Use the artwork inside the files, or download it from MusicBrainz. Tags stay as they are.">
+                  {busy === "cover" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageDown className="h-4 w-4" />}Get cover
+                </button>
+              )}
               <button className={ghost} disabled={busy !== null} onClick={() => act("org", async () => (await api.music.organise(id)).msg)}
                       title="Move into the music library as Artist / Album (Year) / 01 - Title">
                 {busy === "org" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderInput className="h-4 w-4" />}Organise for Plex

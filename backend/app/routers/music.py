@@ -223,6 +223,23 @@ def library_fix_tags(album_id: int, db: Session = Depends(get_db)):
     return res
 
 
+@router.post("/music/library/albums/{album_id}/cover")
+def library_get_cover(album_id: int, db: Session = Depends(get_db)):
+    """Find a cover for an album without one (embedded artwork, else MusicBrainz). Tags are untouched."""
+    a = _lib_album(db, album_id)
+    if not os.path.isdir(a.folder):
+        raise HTTPException(status_code=404, detail="The album's folder is gone; scan again")
+    res = music_library.ensure_cover(a.folder, _album_files(db, a), a.artist, a.title, a.mb_release_group_id)
+    if res.get("unavailable"):
+        raise HTTPException(status_code=503, detail="MusicBrainz is unavailable right now; try again shortly")
+    a.cover = res.get("cover") or music_library.cover_in(a.folder)
+    db.commit()
+    msg = {"existing": "It already has a cover", "embedded": "Cover taken from the music files",
+           "musicbrainz": "Cover downloaded from MusicBrainz"}.get(res.get("source"),
+                                                                    "No cover found for this album")
+    return {"ok": bool(a.cover), "source": res.get("source"), "msg": msg}
+
+
 @router.post("/music/library/albums/{album_id}/organise")
 def library_organise(album_id: int, db: Session = Depends(get_db)):
     a = _lib_album(db, album_id)

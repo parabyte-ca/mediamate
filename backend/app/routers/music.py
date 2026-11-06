@@ -412,3 +412,49 @@ def embed_current_cover(album_id: int, db: Session = Depends(get_db)):
     _rescan(db, a)
     return {"ok": True, "msg": f"Cover put in {emb['embedded']} track{'s' if emb['embedded'] != 1 else ''}",
             **emb}
+
+
+# ── many albums at once ─────────────────────────────────────────────────────
+
+
+class AlbumBulk(BaseModel):
+    action: str                     # covers | fix_tags | organise | embed | rate | collect
+    album_ids: list[int]
+    stars: int | None = None
+    add: list[str] = []
+    remove: list[str] = []
+
+
+@router.post("/music/library/bulk")
+def library_bulk(body: AlbumBulk):
+    """Rate or collect many albums now; covers, tags, organising and embedding run in
+    the background (see /music/library/bulk/status)."""
+    from ..services import music_batch, plex_sync
+    if body.action in ("rate", "collect"):
+        done, sent, errors = 0, 0, []
+        for album_id in dict.fromkeys(body.album_ids):
+            try:
+                if body.action == "rate":
+                    r = plex_sync.edit(album_id, rating=body.stars or None, kind="music")
+                else:
+                    r = plex_sync.edit(album_id, add=body.add, remove=body.remove, kind="music")
+            except KeyError:
+                continue
+            except (TypeError, ValueError) as exc:
+                errors.append(str(exc))
+                continue
+            done += 1
+            sent += r.get("plex") == "sent"
+        return {"ok": not errors, "done": done, "sent": sent, "errors": errors}
+    try:
+        return music_batch.start(body.action, body.album_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.get("/music/library/bulk/status")
+def library_bulk_status():
+    from ..services import music_batch
+    return music_batch.status()

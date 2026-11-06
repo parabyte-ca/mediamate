@@ -473,3 +473,72 @@ def test_cover_from_musicbrainz_choice(bootleg, monkeypatch):
     assert client.post(f"/api/music/library/albums/{aid}/cover/musicbrainz", json={"mbid": "rg-none"}).status_code == 404
     r = client.post(f"/api/music/library/albums/{aid}/cover/embed").json()
     assert r["embedded"] == 3
+
+
+# ── many albums at once ─────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def shelf(root, monkeypatch):
+    from app.services import music_batch
+    monkeypatch.setattr(music_batch, "SYNC", True)
+    client, Session, music = root
+    album(music / "A" / "One (2001)", artist="A", title="One", n=1)
+    album(music / "B" / "Two (2002)", artist="B", title="Two", n=1)
+    embed(next((music / "B" / "Two (2002)").glob("*.flac")), _jpeg())
+    monkeypatch.setattr(musicbrainz, "find_release_group", lambda a, b: None)
+    ml.scan()                                     # B gets its embedded art; MusicBrainz knows nothing of A
+    with Session() as db:
+        ids = {a.title: a.id for a in db.query(MusicLibAlbum)}
+    return client, Session, music, ids
+
+
+def test_bulk_find_artwork_ignores_the_30_day_wait(shelf, monkeypatch):
+    client, Session, music, ids = shelf
+    with Session() as db:
+        assert db.get(MusicLibAlbum, ids["One"]).cover_checked_at is not None   # looked already
+    monkeypatch.setattr(musicbrainz, "find_release_group", lambda a, b: "rg-one")
+    monkeypatch.setattr(musicbrainz, "cover_bytes", lambda rg: _jpeg())
+    r = client.post("/api/music/library/bulk", json={"action": "covers", "album_ids": [ids["One"], ids["Two"]]}).json()
+    assert r["total"] == 2
+    st = client.get("/api/music/library/bulk/status").json()
+    assert not st["running"] and st["done"] == 2 and st["changed"] == 1 and st["msg"].startswith("1 of 2")
+    assert (music / "A" / "One (2001)" / "cover.jpg").exists()
+    albums = {a["title"]: a for a in client.get("/api/music/library/albums").json()}
+    assert albums["One"]["has_cover"] and albums["Two"]["has_cover"]
+
+
+def test_bulk_reports_albums_it_could_not_do(shelf):
+    client, Session, music, ids = shelf
+    client.post("/api/music/library/bulk", json={"action": "covers", "album_ids": [ids["One"]]})
+    st = client.get("/api/music/library/bulk/status").json()
+    assert st["changed"] == 0 and len(st["failed"]) == 1 and "One" in st["failed"][0]
+
+
+def test_bulk_embed_rate_collect_and_errors(shelf):
+    client, Session, music, ids = shelf
+    client.post("/api/music/library/bulk", json={"action": "embed", "album_ids": [ids["Two"], ids["One"]]})
+    st = client.get("/api/music/library/bulk/status").json()
+    assert st["changed"] == 1 and "no cover" in st["failed"][0]
+    r = client.post("/api/music/library/bulk", json={"action": "rate", "album_ids": list(ids.values()), "stars": 4}).json()
+    assert r["done"] == 2
+    r = client.post("/api/music/library/bulk", json={"action": "collect", "album_ids": list(ids.values()),
+                                                     "add": ["Road trip"]}).json()
+    assert r["done"] == 2
+    albums = client.get("/api/music/library/albums").json()
+    assert all(a["rating"] == 4 and a["collections"] == ["Road trip"] for a in albums)
+    assert client.post("/api/music/library/bulk", json={"action": "nope", "album_ids": [1]}).status_code == 422
+    assert client.post("/api/music/library/bulk", json={"action": "covers", "album_ids": []}).status_code == 422
+
+
+def test_bulk_organise(shelf):
+    client, Session, music, ids = shelf
+    loose = music / "incoming" / "rip"
+    album(loose, artist="C", title="Three", year="2003", n=2)
+    ml.scan()
+    with Session() as db:
+        cid = db.query(MusicLibAlbum).filter(MusicLibAlbum.title == "Three").one().id
+    client.post("/api/music/library/bulk", json={"action": "organise", "album_ids": [cid]})
+    st = client.get("/api/music/library/bulk/status").json()
+    assert st["changed"] == 1, st
+    assert (music / "C" / "Three (2003)" / "01 - Song 1.flac").exists() and not loose.exists()

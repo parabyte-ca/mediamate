@@ -110,6 +110,10 @@ export interface AlbumTags {
   tracks: TagRow[];
 }
 export interface NameGuess { path: string; title: string | null; track_no: number | null; disc_no: number | null; artist: string | null }
+export interface MusicBatch {
+  running: boolean; action: string | null; label: string | null; done: number; total: number;
+  changed: number; failed: string[]; msg: string | null; finished_at: string | null;
+}
 export interface CoverCandidate { mbid: string; title: string; artist: string; date: string; type: string; cover: string }
 
 export interface WatchlistItem {
@@ -899,6 +903,11 @@ export const api = {
       req<{ ok: boolean; msg: string }>(`/music/library/albums/${id}/cover/musicbrainz`, {
         method: "POST", body: JSON.stringify({ mbid, embed }) }),
     embedCover: (id: number) => req<{ ok: boolean; msg: string }>(`/music/library/albums/${id}/cover/embed`, { method: "POST" }),
+    bulk: (body: { action: "covers" | "fix_tags" | "organise" | "embed" | "rate" | "collect"; album_ids: number[];
+                   stars?: number; add?: string[]; remove?: string[] }) =>
+      req<MusicBatch & { done: number; sent?: number; errors?: string[]; ok?: boolean }>("/music/library/bulk", {
+        method: "POST", body: JSON.stringify(body) }),
+    bulkStatus: () => req<MusicBatch>("/music/library/bulk/status"),
     getCover: (id: number) => req<{ ok: boolean; source: string | null; msg: string }>(`/music/library/albums/${id}/cover`, { method: "POST" }),
     organise: (id: number) => req<{ ok: boolean; folder: string; msg: string }>(`/music/library/albums/${id}/organise`, { method: "POST" }),
     rateAlbum: (id: number, stars: number) =>

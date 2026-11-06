@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Disc3, FileText, FolderInput, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Tags, Upload, Wand2, X } from "lucide-react";
-import { api, type AlbumTags, type CoverCandidate, type LibAlbum, type LibAlbumDetail, type MusicIssue, type TagRow } from "../api/client";
+import { AlertTriangle, Disc3, FileText, LayoutGrid, List as ListIcon, Star, FolderInput, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Tags, Upload, Wand2, X } from "lucide-react";
+import { api, type AlbumTags, type CoverCandidate, type LibAlbum, type MusicBatch, type LibAlbumDetail, type MusicIssue, type TagRow } from "../api/client";
 import Stars from "./Stars";
 import { fmtSize } from "../utils";
 
@@ -19,6 +19,8 @@ const sel = "rounded-lg border border-gray-300 dark:border-gray-600 bg-white dar
 const btn = "flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-sm disabled:opacity-50";
 const ghost = `${btn} border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800`;
 const primary = `${btn} bg-blue-600 font-medium text-white hover:bg-blue-700`;
+
+const VIEW_KEY = "mm-music-view";
 
 function fmtLen(s?: number | null) {
   if (!s) return "";
@@ -44,7 +46,14 @@ export default function MusicLibrary() {
   const [issue, setIssue] = useState("");
   const [open, setOpen] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const say = (m: string) => { setToast(m); window.setTimeout(() => setToast(null), 4000); };
+  const say = (m: string) => { setToast(m); window.setTimeout(() => setToast(null), 5000); };
+  const [view, setViewState] = useState<"tiles" | "list">(() => {
+    try { return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "tiles"; } catch { return "tiles"; }
+  });
+  const setView = (v: "tiles" | "list") => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* not remembered */ } };
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [batch, setBatch] = useState<MusicBatch | null>(null);
+  const [failedOpen, setFailedOpen] = useState(false);
 
   const load = useCallback(async () => {
     const [a, s] = await Promise.all([api.music.library(), api.music.libraryStatus()]);
@@ -57,6 +66,37 @@ export default function MusicLibrary() {
     const id = window.setInterval(() => load().catch(() => {}), 2000);
     return () => window.clearInterval(id);
   }, [status?.running, load]);
+
+  // A background bulk action (covers, tags, organise, embed): poll until it finishes.
+  useEffect(() => { api.music.bulkStatus().then((b) => b.running && setBatch(b)).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!batch?.running) return;
+    const id = window.setInterval(async () => {
+      try {
+        const b = await api.music.bulkStatus();
+        setBatch(b);
+        if (!b.running) { if (b.msg) say(b.msg); setFailedOpen(false); load().catch(() => {}); }
+      } catch { /* try again */ }
+    }, 1500);
+    return () => window.clearInterval(id);
+  }, [batch?.running, load]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const togglePick = (id: number) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const runBulk = async (action: "covers" | "fix_tags" | "organise" | "embed") => {
+    try { setBatch(await api.music.bulk({ action, album_ids: [...picked] })); setPicked(new Set()); }
+    catch (e) { say((e as Error).message); }
+  };
+  const rateMany = async (n: number) => {
+    try { const r = await api.music.bulk({ action: "rate", album_ids: [...picked], stars: n }); say(`Rated ${r.done} album${r.done === 1 ? "" : "s"}`); setPicked(new Set()); load(); }
+    catch (e) { say((e as Error).message); }
+  };
+  const [collName, setCollName] = useState("");
+  const collectMany = async () => {
+    const name = collName.trim();
+    if (!name) return;
+    try { const r = await api.music.bulk({ action: "collect", album_ids: [...picked], add: [name] }); say(`Added ${r.done} to ${name}`); setCollName(""); setPicked(new Set()); load(); }
+    catch (e) { say((e as Error).message); }
+  };
 
   const patch = (id: number, p: Partial<LibAlbum>) => setAlbums((l) => (l ?? []).map((x) => (x.id === id ? { ...x, ...p } : x)));
   const rate = (a: LibAlbum, n: number) => {
@@ -77,6 +117,9 @@ export default function MusicLibrary() {
     return true;
   });
   const needing = (albums ?? []).filter((a) => a.issues.length).length;
+  const allShown = shown.length > 0 && shown.every((a) => picked.has(a.id));
+  const pickShown = () => setPicked((s) => { const n = new Set(s); shown.forEach((a) => (allShown ? n.delete(a.id) : n.add(a.id))); return n; });
+  const noCover = shown.filter((a) => !a.has_cover);
 
   return (
     <>
@@ -88,11 +131,28 @@ export default function MusicLibrary() {
           {status?.running ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderSearch className="h-4 w-4" />}
           {status?.running ? "Scanning…" : "Scan music"}
         </button>
+        <div className="ml-auto flex items-center gap-2 sm:order-last">
+          {albums && albums.length > 0 && (
+            <label className="flex min-h-[36px] cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300">
+              <input type="checkbox" checked={allShown} onChange={pickShown} aria-label="Select all albums shown" />All
+            </label>
+          )}
+          <div className="inline-flex rounded-lg border border-gray-300 p-0.5 dark:border-gray-600" role="radiogroup" aria-label="View">
+            {([["tiles", "Tiles", LayoutGrid], ["list", "List", ListIcon]] as const).map(([k, l, Icon]) => (
+              <button key={k} role="radio" aria-checked={view === k} aria-label={l} title={l} onClick={() => setView(k)}
+                      className={`rounded-md p-1.5 ${view === k ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"}`}>
+                <Icon className="h-4 w-4" />
+              </button>
+            ))}
+          </div>
+        </div>
         {status && (
           <span className="text-xs text-gray-500 dark:text-gray-400">
             {albums?.length ?? 0} albums
             {status.last?.tracks != null && ` · ${status.last.tracks} tracks`}
             {needing > 0 && <> · <button className="text-amber-600 hover:underline dark:text-amber-400" onClick={() => setIssue("any")}>{needing} need attention</button></>}
+            {noCover.length > 0 && <> · <button className="text-blue-600 hover:underline dark:text-blue-400" title="Select every album shown that has no cover"
+                                                 onClick={() => setPicked(new Set(noCover.map((a) => a.id)))}>select {noCover.length} without artwork</button></>}
           </span>
         )}
       </div>
@@ -127,6 +187,42 @@ export default function MusicLibrary() {
         </select>
       </div>
 
+      {batch?.running && (
+        <div role="status" className="mb-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/50 dark:text-blue-200">
+          <div className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />{batch.label}: {batch.done} of {batch.total}
+            {batch.failed.length > 0 && <span className="text-amber-700 dark:text-amber-300">· {batch.failed.length} not done</span>}</div>
+          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900">
+            <div className="h-full bg-blue-600 transition-all" style={{ width: `${batch.total ? (100 * batch.done) / batch.total : 0}%` }} />
+          </div>
+        </div>
+      )}
+      {!batch?.running && batch?.failed && batch.failed.length > 0 && batch.finished_at && (
+        <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          <button className="font-medium hover:underline" onClick={() => setFailedOpen((v) => !v)}>{batch.msg} {failedOpen ? "▾" : "▸"}</button>
+          {failedOpen && <ul className="mt-1 list-disc pl-5 text-xs">{batch.failed.slice(0, 50).map((f) => <li key={f}>{f}</li>)}</ul>}
+          <button className="ml-3 text-xs underline" onClick={() => setBatch(null)}>Dismiss</button>
+        </div>
+      )}
+
+      {picked.size > 0 && (
+        <div className="sticky top-12 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900 dark:bg-blue-950/60 md:top-2">
+          <span className="text-sm font-medium text-blue-800 dark:text-blue-200">{picked.size} selected</span>
+          <button className={primary} disabled={batch?.running} onClick={() => runBulk("covers")} title="Use art inside the files, else look it up on MusicBrainz now"><ImageDown className="h-4 w-4" />Find artwork</button>
+          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("fix_tags")}><Wand2 className="h-4 w-4" />Fix tags</button>
+          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("organise")}><FolderInput className="h-4 w-4" />Organise for Plex</button>
+          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("embed")} title="Put each album's cover inside its tracks"><ImagePlus className="h-4 w-4" />Put covers in files</button>
+          <span className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2 dark:border-gray-600 dark:bg-gray-900" title="Rate them all">
+            <Star className="h-3.5 w-3.5 text-gray-400" /><Stars value={0} label="the selected albums" onChange={(n) => rateMany(n)} />
+          </span>
+          <form className="flex items-center gap-1" onSubmit={(e) => { e.preventDefault(); collectMany(); }}>
+            <input value={collName} onChange={(e) => setCollName(e.target.value)} list="music-colls" placeholder="Add to collection…" aria-label="Add the selected albums to a collection" className={`${sel} w-44`} />
+            <datalist id="music-colls">{colls.map((c) => <option key={c} value={c} />)}</datalist>
+            <button type="submit" className={ghost} disabled={!collName.trim()}><Tags className="h-4 w-4" />Add</button>
+          </form>
+          <button className="ml-auto text-sm text-blue-700 hover:underline dark:text-blue-300" onClick={() => setPicked(new Set())}>Clear selection</button>
+        </div>
+      )}
+
       {albums === null ? (
         <div className="flex justify-center p-10"><Loader2 className="h-5 w-5 animate-spin text-blue-600" /></div>
       ) : albums.length === 0 ? (
@@ -137,10 +233,58 @@ export default function MusicLibrary() {
         </div>
       ) : shown.length === 0 ? (
         <p className="p-10 text-center text-sm text-gray-500">No albums match these filters.</p>
+      ) : view === "list" ? (
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
+          <table className="w-full text-sm">
+            <thead className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              <tr>
+                <th className="w-10 px-3 py-2"><input type="checkbox" aria-label="Select all albums shown" checked={allShown} onChange={pickShown} /></th>
+                <th className="w-full px-2 py-2">Album</th>
+                <th className="hidden px-2 py-2 md:table-cell">Year</th>
+                <th className="hidden px-2 py-2 sm:table-cell">Format</th>
+                <th className="hidden px-2 py-2 lg:table-cell">Tracks</th>
+                <th className="hidden px-2 py-2 lg:table-cell">Size</th>
+                <th className="px-2 py-2">Rating</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              {shown.map((a) => (
+                <tr key={a.id} className={picked.has(a.id) ? "bg-blue-50/60 dark:bg-blue-950/30" : "hover:bg-gray-50 dark:hover:bg-gray-800/50"}>
+                  <td className="px-3 py-2"><input type="checkbox" aria-label={`Select ${a.title}`} checked={picked.has(a.id)} onChange={() => togglePick(a.id)} /></td>
+                  <td className="max-w-0 px-2 py-2">
+                    <div className="flex items-center gap-3">
+                      <button type="button" onClick={() => setOpen(a.id)} aria-label={`Open ${a.title} by ${a.artist}`} className="shrink-0">
+                        <Cover a={a} className="h-10 w-10 rounded" />
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <button type="button" onClick={() => setOpen(a.id)} className="block max-w-full truncate text-left font-medium text-gray-900 hover:text-blue-600 hover:underline dark:text-gray-100 dark:hover:text-blue-400" title={a.title ?? ""}>{a.title}</button>
+                        <p className="flex flex-wrap items-center gap-x-2 text-xs text-gray-500 dark:text-gray-400">
+                          <span className="truncate">{a.artist}</span>
+                          <span className="md:hidden">{a.year ?? ""}{a.format ? ` · ${a.format.toUpperCase()}` : ""}</span>
+                          {!a.has_cover && <span className="text-gray-400">no artwork</span>}
+                          {a.issues.map((i) => <span key={i} title={ISSUE[i][1]} className="rounded bg-amber-100 px-1.5 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">{ISSUE[i][0]}</span>)}
+                          {a.collections.map((c) => <button key={c} type="button" onClick={() => setColl(c)} className="rounded bg-sky-100 px-1.5 text-sky-700 hover:underline dark:bg-sky-900/40 dark:text-sky-300">{c}</button>)}
+                        </p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="hidden whitespace-nowrap px-2 py-2 text-gray-600 dark:text-gray-300 md:table-cell">{a.year ?? "—"}</td>
+                  <td className="hidden whitespace-nowrap px-2 py-2 text-gray-600 dark:text-gray-300 sm:table-cell">{a.format?.toUpperCase() ?? "—"}</td>
+                  <td className="hidden whitespace-nowrap px-2 py-2 text-gray-600 dark:text-gray-300 lg:table-cell">{a.tracks}</td>
+                  <td className="hidden whitespace-nowrap px-2 py-2 text-gray-600 dark:text-gray-300 lg:table-cell">{fmtSize(a.size_bytes)}</td>
+                  <td className="whitespace-nowrap px-2 py-2"><Stars value={a.rating} label={`${a.title}`} onChange={(n) => rate(a, n)} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {shown.map((a) => (
-            <div key={a.id} className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
+            <div key={a.id} className={`relative overflow-hidden rounded-xl border bg-white shadow-sm dark:bg-gray-900 ${picked.has(a.id) ? "border-blue-500 ring-2 ring-blue-500" : "border-gray-200 dark:border-gray-700"}`}>
+              <label className="absolute left-2 top-2 z-10 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-white/90 shadow dark:bg-gray-900/90">
+                <input type="checkbox" aria-label={`Select ${a.title}`} checked={picked.has(a.id)} onChange={() => togglePick(a.id)} />
+              </label>
               <button type="button" onClick={() => setOpen(a.id)} className="block w-full text-left" aria-label={`Open ${a.title} by ${a.artist}`}>
                 <Cover a={a} className="aspect-square w-full" />
               </button>

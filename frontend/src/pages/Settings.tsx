@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Compass, Copy, RefreshCw, Download, Edit2, FolderOpen, Loader2, MinusCircle, Plus, Save, Star, Stethoscope, Trash2, Upload, XCircle } from "lucide-react";
-import { api, SECRET_MASK, type DownloadPath, type FolderTarget, type FolderSuggestion, type FolderTest, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
+import { api, SECRET_MASK, type DownloadPath, type FolderTarget, type FolderSuggestion, type FolderTest, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type PlexSyncStatus, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
 import { PALETTES, useTheme, type Theme } from "../ThemeContext";
 import ImportPanel from "../components/ImportPanel";
@@ -1319,6 +1319,21 @@ export default function Settings() {
                 </span>
               )}
             </div>
+            <div className="border-t border-gray-100 pt-3 dark:border-gray-800">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input type="checkbox" checked={settings.plex_sync_enabled === "true"}
+                       onChange={(e) => set("plex_sync_enabled", e.target.checked ? "true" : "false")}
+                       className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" />
+                <span>
+                  <span className="block text-sm font-medium text-gray-700 dark:text-gray-300">Sync star ratings &amp; collections with Plex</span>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400">
+                    Stars and collections set in the Library go to Plex, and ones set in Plex show in the Library
+                    (every 30 minutes). If both change, Plex wins. Ratings are the Plex owner's. Protected folders are never sent.
+                  </span>
+                </span>
+              </label>
+              {settings.plex_sync_enabled === "true" && <PlexSyncPanel />}
+            </div>
           </div>
         </Section>
 
@@ -1643,6 +1658,37 @@ export default function Settings() {
           {toast}
         </div>
       )}
+    </div>
+  );
+}
+
+
+/** Last sync, unsent edits and a Sync now button (Settings → Plex). */
+function PlexSyncPanel() {
+  const [st, setSt] = useState<PlexSyncStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => api.media.plexStatus().then(setSt).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const go = async () => {
+    setBusy(true);
+    try { await api.media.plexSync(); } catch { /* shown in the status */ }
+    await load();
+    setBusy(false);
+  };
+  const last = st?.last;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-3 pl-7 text-sm">
+      <button onClick={go} disabled={busy || !st?.enabled}
+              title={st?.enabled ? undefined : "Save settings first"}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800">
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}Sync now
+      </button>
+      <span className={`text-xs ${last && !last.ok ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
+        {!st?.enabled ? "Save settings to start syncing."
+          : !last ? "Not synced yet."
+          : `${last.msg} · ${new Date(last.at).toLocaleString()}${last.unmatched ? ` · ${last.unmatched} not in Plex` : ""}`}
+        {!!st?.pending && ` · ${st.pending} edit${st.pending === 1 ? "" : "s"} waiting`}
+      </span>
     </div>
   );
 }

@@ -95,6 +95,12 @@ MIGRATIONS: list[tuple[str, str | None]] = [
         "OR lower(name) LIKE '%xxx%' OR lower(name) LIKE '%nsfw%' OR lower(name) LIKE '%porn%' "
         "OR lower(path) LIKE '%bellesa%' OR lower(coalesce(local_path, '')) LIKE '%bellesa%'",
     ),
+    # Star ratings and collections, synced with Plex.
+    ("ALTER TABLE media_files ADD COLUMN rating INTEGER", None),
+    ("ALTER TABLE media_files ADD COLUMN collections TEXT", None),
+    ("ALTER TABLE media_files ADD COLUMN plex_key TEXT", None),
+    ("ALTER TABLE media_files ADD COLUMN plex_seen TEXT", None),
+    ("ALTER TABLE media_files ADD COLUMN plex_dirty INTEGER NOT NULL DEFAULT 0", None),
 ]
 
 

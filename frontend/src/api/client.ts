@@ -669,6 +669,25 @@ export interface MediaFile {
   target?: string | null;
   /** "above": H.265 but bigger than the target; "below": lower than preferred. */
   target_note?: "above" | "below" | null;
+  /** Stars 1-5 (null: not rated), synced with Plex when that's on. */
+  rating?: number | null;
+  /** Plex collections (an episode's are its show's). */
+  collections?: string[];
+  plex_key?: string | null;
+  /** 1: an edit not yet sent to Plex. */
+  plex_dirty?: number;
+}
+
+export interface TagResult {
+  ok: boolean; rating: number | null; collections: string[];
+  plex: "sent" | "queued" | "off" | "local"; msg: string;
+}
+
+export interface PlexSyncStatus {
+  enabled: boolean;
+  pending: number;
+  last: { ok: boolean; at: string; msg: string; matched?: number; unmatched?: number; pulled?: number;
+          pushed?: number; skipped?: number; errors?: string[] } | null;
 }
 
 export interface MediaStats {
@@ -878,6 +897,17 @@ export const api = {
       req<{ ok: boolean; done: number; skipped: number; errors: string[] }>("/media/files/bulk", {
         method: "POST", body: JSON.stringify({ action, file_ids: fileIds, audiences, folder_id: folderId }),
       }),
+    rate: (id: number, stars: number) =>
+      req<TagResult>(`/media/files/${id}/rating`, { method: "POST", body: JSON.stringify({ stars }) }),
+    setCollections: (id: number, add: string[], remove: string[]) =>
+      req<TagResult>(`/media/files/${id}/collections`, { method: "POST", body: JSON.stringify({ add, remove }) }),
+    tagBulk: (body: { action: "rate"; stars: number } | { action: "collect"; add: string[]; remove: string[] }, fileIds: number[]) =>
+      req<{ ok: boolean; done: number; errors: string[]; sent: number }>("/media/files/bulk", {
+        method: "POST", body: JSON.stringify({ ...body, file_ids: fileIds }),
+      }),
+    collectionNames: () => req<{ names: string[] }>("/media/plex/collections"),
+    plexStatus: () => req<PlexSyncStatus>("/media/plex/status"),
+    plexSync: () => req<PlexSyncStatus["last"] & { ok: boolean; msg: string }>("/media/plex/sync", { method: "POST" }),
     rename: (id: number, newName: string) =>
       req<MediaResult & { filename?: string }>(`/media/files/${id}/rename`, { method: "POST", body: JSON.stringify({ new_name: newName }) }),
     remove: (id: number) => req<MediaResult>(`/media/files/${id}/delete`, { method: "POST" }),

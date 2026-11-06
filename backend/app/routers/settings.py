@@ -59,6 +59,7 @@ DEFAULTS: dict[str, str] = {
     "plex_url": "",
     "plex_token": "",
     "plex_library_key": "",
+    "plex_sync_enabled": "false",      # star ratings + collections, both ways
     # Jellyfin
     "jellyfin_enabled": "false",
     "jellyfin_url": "",
@@ -90,6 +91,7 @@ _PRIVATE_KEYS = set(SERVER_ONLY_KEYS) | {
     "update_previous_version",
     "disk_warned",
     "trakt_last_result",
+    "plex_sync_last",
 }
 
 

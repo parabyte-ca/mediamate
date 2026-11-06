@@ -711,6 +711,16 @@ def run_movie_housekeeping() -> None:
         db.close()
 
 
+def run_plex_sync() -> None:
+    """Stars and collections, both ways, when Plex sync is on."""
+    from . import plex_sync
+    try:
+        if plex_sync.ready():
+            plex_sync.sync()
+    except Exception:
+        logger.exception("Plex sync failed")
+
+
 def start_scheduler() -> None:
     from .download_events import process_download_events
     from .updater import daily_update_check
@@ -776,6 +786,12 @@ def start_scheduler() -> None:
         run_movie_housekeeping,
         trigger=CronTrigger(hour=5, minute=11, timezone="UTC"),
         id="movie_housekeeping",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        run_plex_sync,
+        trigger=IntervalTrigger(minutes=30),
+        id="plex_sync",
         replace_existing=True,
     )
     _scheduler.start()

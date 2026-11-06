@@ -259,6 +259,13 @@ class MediaFile(Base):
     height = Column(Integer, default=0)
     # NULL = automatic classification; 0/1 = manual override from the UI
     anthology_override = Column(Integer, nullable=True)
+    # Plex sync (services/plex_sync.py): stars 1-5 (NULL = none), collection names (JSON list),
+    # Plex's item key, what Plex last said (JSON {"rating", "collections"}), unsent local edit.
+    rating = Column(Integer, nullable=True)
+    collections = Column(String, nullable=True)
+    plex_key = Column(String, nullable=True)
+    plex_seen = Column(String, nullable=True)
+    plex_dirty = Column(Integer, nullable=False, default=0, server_default="0")
 
 
 class MediaJob(Base):

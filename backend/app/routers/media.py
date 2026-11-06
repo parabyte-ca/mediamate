@@ -3,6 +3,7 @@
 Response bodies keep FileSplitter's shapes ({"ok": ..., "msg": ...} and so on) so the
 Library page can be built against the same contract.
 """
+import json
 import os
 import threading
 
@@ -36,6 +37,8 @@ def list_files():
     for r in db.get_all_files():
         d = dict(r)
         d["category"] = config.categorize(d["path"])
+        d["collections"] = json.loads(d.get("collections") or "[]")
+        d.pop("plex_seen", None)
         # Compared with its folder's target: "above" (bigger, H.265) / "below" (lower than preferred).
         d["target_note"] = None
         d["target"] = None
@@ -331,14 +334,60 @@ def queue_bulk(body: dict = Body(default={})):
     return {"ok": True, "queued": len(queued), "skipped": skipped, "job_ids": queued}
 
 
+# --- Stars and collections (synced with Plex) ---
+
+def _edit(file_id: int, **kw):
+    from ..services import plex_sync
+    try:
+        return plex_sync.edit(file_id, **kw)
+    except KeyError:
+        return _err("File not found", 404)
+    except (TypeError, ValueError) as exc:
+        return _err(str(exc), 400)
+
+
+@router.post("/files/{file_id}/rating")
+def rate_file(file_id: int, body: dict = Body(default={})):
+    stars = body.get("stars")
+    return _edit(file_id, rating=None if stars in (None, "", 0) else stars)
+
+
+@router.post("/files/{file_id}/collections")
+def file_collections(file_id: int, body: dict = Body(default={})):
+    names = body.get("names")
+    if names is not None and not isinstance(names, list):
+        return _err("names must be a list", 400)
+    return _edit(file_id, collections=names, add=body.get("add") or [], remove=body.get("remove") or [])
+
+
+@router.get("/plex/collections")
+def plex_collections():
+    from ..services import plex_sync
+    return {"names": plex_sync.collection_names()}
+
+
+@router.get("/plex/status")
+def plex_status():
+    from ..services import plex_sync
+    return plex_sync.status()
+
+
+@router.post("/plex/sync")
+def plex_sync_now():
+    from ..services import plex_sync
+    return plex_sync.sync()
+
+
 @router.post("/files/bulk")
 def files_bulk(body: dict = Body(default={})):
     """Skip, delete (to .trash), rename & organise, or move to a folder (keeping the name)
     many files; busy files are left alone."""
     action = body.get("action")
     ids = body.get("file_ids") or []
-    if action not in ("skip", "delete", "organise", "move") or not ids:
+    if action not in ("skip", "delete", "organise", "move", "rate", "collect") or not ids:
         return _err("Invalid parameters", 400)
+    if action in ("rate", "collect"):
+        return _bulk_tag(action, ids, body)
     dest_root = None
     if action == "move":
         from ..database import SessionLocal
@@ -388,6 +437,28 @@ def files_bulk(body: dict = Body(default={})):
             db.delete_file(row["id"])
         done += 1
     return {"ok": not errors, "done": done, "skipped": skipped, "errors": errors}
+
+
+def _bulk_tag(action: str, ids: list, body: dict):
+    """Stars or collections for many files (busy files too: nothing on disk changes)."""
+    from ..services import plex_sync
+    done, errors, sent = 0, [], 0
+    for fid in ids:
+        try:
+            if action == "rate":
+                stars = body.get("stars")
+                r = plex_sync.edit(int(fid), rating=None if stars in (None, "", 0) else stars)
+            else:
+                r = plex_sync.edit(int(fid), add=body.get("add") or [], remove=body.get("remove") or [])
+        except KeyError:
+            continue
+        except (TypeError, ValueError) as exc:
+            row = db.get_file(int(fid))
+            errors.append(f"{row['filename'] if row else fid}: {exc}")
+            continue
+        done += 1
+        sent += r.get("plex") == "sent"
+    return {"ok": not errors, "done": done, "skipped": 0, "errors": errors, "sent": sent}
 
 
 @router.post("/queue/pause")

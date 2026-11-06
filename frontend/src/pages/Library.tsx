@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderInput, FolderSearch, Layers, Loader2, MoreHorizontal,
-  CheckCircle2, Pause, Play, Scissors, SkipForward, Square, Stethoscope, Timer, Trash2, X,
+  CheckCircle2, Pause, Play, Scissors, SkipForward, Square, Star, Stethoscope, Tags, Timer, Trash2, X,
 } from "lucide-react";
 import { api, type DoctorKind, type DoctorState, type DownloadPath, type MediaFile, type MediaJobType, type MediaStats, type OrganisePlan } from "../api/client";
 import { useEvent } from "../events";
@@ -29,8 +29,8 @@ const STATUS_STYLE: Record<string, string> = {
   cancelled: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
 };
 
-type Filters = Record<"q" | "category" | "status" | "codec" | "type" | "res" | "dur" | "size", string>;
-const FILTER_KEYS: (keyof Filters)[] = ["q", "category", "status", "codec", "type", "res", "dur", "size"];
+type Filters = Record<"q" | "category" | "status" | "codec" | "type" | "res" | "dur" | "size" | "rating" | "coll", string>;
+const FILTER_KEYS: (keyof Filters)[] = ["q", "category", "status", "codec", "type", "res", "dur", "size", "rating", "coll"];
 
 function fmtDur(s?: number | null) {
   if (!s) return "—";
@@ -65,6 +65,9 @@ function matches(f: MediaFile, fl: Filters) {
   if (fl.size === "500to2000" && (mb < 500 || mb > 2000)) return false;
   if (fl.size === "2000to5000" && (mb < 2000 || mb > 5000)) return false;
   if (fl.size === "gt5000" && mb <= 5000) return false;
+  if (fl.rating === "unrated" && f.rating) return false;
+  if (fl.rating && fl.rating !== "unrated" && (f.rating ?? 0) < Number(fl.rating)) return false;
+  if (fl.coll && !(f.collections ?? []).includes(fl.coll)) return false;
   return true;
 }
 
@@ -75,6 +78,25 @@ const btn = "flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-sm disa
 const btnGhost = `${btn} border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800`;
 const btnPrimary = `${btn} bg-blue-600 font-medium text-white hover:bg-blue-700`;
 const iconBtn = "rounded p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30";
+
+// ── Stars ─────────────────────────────────────────────────────────────────────
+
+/** 1-5 stars; picking the current value clears it. */
+function Stars({ value, onChange, label, big }: { value?: number | null; onChange: (n: number) => void; label: string; big?: boolean }) {
+  const v = value ?? 0;
+  return (
+    <span className="inline-flex items-center" role="group" aria-label={`Rating for ${label}`}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button key={n} type="button" onClick={() => onChange(v === n ? 0 : n)} aria-pressed={v >= n}
+                aria-label={v === n ? `Clear rating (${n} star${n > 1 ? "s" : ""})` : `${n} star${n > 1 ? "s" : ""}`}
+                title={v === n ? "Clear rating" : `${n} star${n > 1 ? "s" : ""}`}
+                className={`rounded ${big ? "p-1" : "p-1 sm:p-0.5"} hover:bg-amber-50 dark:hover:bg-amber-900/20`}>
+          <Star className={`${big ? "h-6 w-6" : "h-3.5 w-3.5"} ${v >= n ? "fill-amber-400 text-amber-400" : "text-gray-300 dark:text-gray-600"}`} />
+        </button>
+      ))}
+    </span>
+  );
+}
 
 // ── Modals ────────────────────────────────────────────────────────────────────
 
@@ -105,6 +127,8 @@ type Dialog =
   | { kind: "preview"; file: MediaFile }
   | { kind: "organise"; files: MediaFile[] }
   | { kind: "move"; files: MediaFile[] }
+  | { kind: "collections"; files: MediaFile[] }
+  | { kind: "rate"; files: MediaFile[] }
   | { kind: "doctor" };
 
 // ── Row actions menu ──────────────────────────────────────────────────────────
@@ -177,6 +201,7 @@ function RowMenu({ f, onAction }: { f: MediaFile; onAction: (a: string) => void 
           {item("trim", "Trim intro (3.5 s)", Timer, busy(f))}
           {item("rename", "Rename…", Edit2, busy(f))}
           {item("organise", "Rename & organise…", FolderInput, busy(f))}
+          {item("collections", "Collections…", Tags)}
           {item("anthology", f.is_anthology ? "Mark not anthology" : "Mark as anthology", Layers)}
           {f.anthology_override != null && item("anthology-auto", "Anthology: automatic", Layers)}
           {busy(f) ? item("cancel", "Cancel job", Square) : item("skip", "Skip", SkipForward, f.status === "skipped")}
@@ -317,6 +342,9 @@ export default function Library() {
       .catch(() => {});
   }, []);
   useEffect(() => { loadAdult(); }, [loadAdult]);
+  // "Not in Plex yet" only means something while Plex sync is on.
+  const [plexOn, setPlexOn] = useState(false);
+  useEffect(() => { api.media.plexStatus().then((s) => setPlexOn(s.enabled)).catch(() => {}); }, []);
   const load = useCallback(async () => {
     const [f, s] = await Promise.all([api.media.files(), api.media.stats()]);
     setFiles(f);
@@ -353,6 +381,7 @@ export default function Library() {
   const clearFilters = () => setParams(new URLSearchParams(), { replace: true });
 
   const categories = useMemo(() => [...new Set(files.map((f) => f.category))].sort(), [files]);
+  const collections = useMemo(() => [...new Set(files.flatMap((f) => f.collections ?? []))].sort((a, b) => a.localeCompare(b)), [files]);
   const codecs = useMemo(() => [...new Set(files.map((f) => f.codec ?? "").filter(Boolean))].sort(), [files]);
   const filtered = useMemo(() => files.filter((f) => matches(f, filters)), [files, params]); // eslint-disable-line react-hooks/exhaustive-deps
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -390,8 +419,18 @@ export default function Library() {
     return `Queued ${r.queued} file${r.queued === 1 ? "" : "s"}${r.skipped ? ` (${r.skipped} skipped)` : ""}`;
   });
 
+  const patch = (id: number, p: Partial<MediaFile>) => setFiles((fs) => fs.map((x) => (x.id === id ? { ...x, ...p } : x)));
+  const rate = (f: MediaFile, n: number) => {
+    patch(f.id, { rating: n || null });
+    api.media.rate(f.id, n).then((r) => {
+      patch(f.id, { rating: r.rating, collections: r.collections, plex_dirty: r.plex === "queued" ? 1 : 0 });
+      if (r.plex === "queued" || r.plex === "local") say(r.msg);
+    }).catch((e) => { say((e as Error).message); load().catch(() => {}); });
+  };
+
   const onRowAction = (f: MediaFile, a: string) => {
     if (a === "preview") return setDialog({ kind: "preview", file: f });
+    if (a === "collections") return setDialog({ kind: "collections", files: [f] });
     if (a === "organise") return setDialog({ kind: "organise", files: [f] });
     if (a === "encode") setDialog({ kind: "encode", files: [f] });
     else if (a === "split") setDialog({ kind: "split", files: [f] });
@@ -482,6 +521,16 @@ export default function Library() {
           <option value="">All sizes</option><option value="lt500">&lt; 500 MB</option><option value="500to2000">500 MB–2 GB</option>
           <option value="2000to5000">2–5 GB</option><option value="gt5000">&gt; 5 GB</option>
         </select>
+        <select aria-label="Rating" className={sel} value={filters.rating} onChange={(e) => setFilter("rating", e.target.value)}>
+          <option value="">Any rating</option>
+          {[5, 4, 3, 2, 1].map((n) => <option key={n} value={n}>{"★".repeat(n)}{n < 5 ? " or more" : ""}</option>)}
+          <option value="unrated">Not rated</option>
+        </select>
+        {collections.length > 0 && (
+          <select aria-label="Collection" className={sel} value={filters.coll} onChange={(e) => setFilter("coll", e.target.value)}>
+            <option value="">All collections</option>{collections.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
         {anyFilter && <button className="text-sm text-blue-600 hover:underline" onClick={clearFilters}>Clear filters</button>}
       </div>
 
@@ -502,6 +551,8 @@ export default function Library() {
           <button className={btnGhost} onClick={() => run(async () => { const r = await api.media.bulk("skip", [...picked]); setPicked(new Set()); return `Skipped ${r.done}`; })}><SkipForward className="h-4 w-4" />Skip</button>
           <button className={btnGhost} onClick={() => setDialog({ kind: "organise", files: files.filter((x) => picked.has(x.id)) })}><FolderInput className="h-4 w-4" />Organise</button>
           <button className={btnGhost} onClick={() => setDialog({ kind: "move", files: files.filter((x) => picked.has(x.id)) })}><FolderInput className="h-4 w-4" />Move to folder</button>
+          <button className={btnGhost} onClick={() => setDialog({ kind: "rate", files: pickedFiles })}><Star className="h-4 w-4" />Rate</button>
+          <button className={btnGhost} onClick={() => setDialog({ kind: "collections", files: pickedFiles })}><Tags className="h-4 w-4" />Collections</button>
           <button className={`${btnGhost} text-red-600 dark:text-red-400`} onClick={() => setDialog({ kind: "delete", files: pickedFiles })}><Trash2 className="h-4 w-4" />Delete</button>
           <button className="ml-auto text-sm text-blue-700 dark:text-blue-300 hover:underline" onClick={() => setPicked(new Set())}>Clear selection</button>
         </div>
@@ -546,6 +597,14 @@ export default function Library() {
                       <span>{f.category}</span>
                       {!!f.is_anthology && <span className="rounded bg-violet-100 dark:bg-violet-900/40 px-1.5 text-violet-700 dark:text-violet-300">anthology</span>}
                       <span className="md:hidden">{f.codec} · {f.height ? `${f.height}p` : "?"} · {fmtSize(f.size_bytes)}</span>
+                      <Stars value={f.rating} label={f.filename} onChange={(n) => rate(f, n)} />
+                      {(f.collections ?? []).map((c) => (
+                        <button key={c} type="button" onClick={() => setFilter("coll", c)} title={`Show the ${c} collection`}
+                                className="inline-flex items-center gap-1 rounded bg-sky-100 px-1.5 text-sky-700 hover:underline dark:bg-sky-900/40 dark:text-sky-300">
+                          <Tags className="h-3 w-3" />{c}
+                        </button>
+                      ))}
+                      {plexOn && !!f.plex_dirty && <span className="text-amber-600 dark:text-amber-400" title="Saved here; it goes to Plex on the next sync (or Plex hasn't found this file yet)">not in Plex yet</span>}
                       {f.error_msg && f.status === "error" && <span className="truncate text-red-600 dark:text-red-400" title={f.error_msg}>{f.error_msg}</span>}
                     </p>
                     </div>
@@ -630,6 +689,26 @@ export default function Library() {
         <MoveDialog files={dialog.files} onClose={() => setDialog(null)}
                     onDone={(msg) => { setDialog(null); setPicked(new Set()); say(msg); load(); loadAdult(); }} />
       )}
+      {dialog?.kind === "collections" && <CollectionsDialog files={dialog.files} onClose={() => setDialog(null)}
+                                                            onDone={(m) => { setDialog(null); setPicked(new Set()); say(m); load(); }} />}
+      {dialog?.kind === "rate" && (
+        <Modal title={`Rate ${dialog.files.length} file${dialog.files.length === 1 ? "" : "s"}`} onClose={() => setDialog(null)}>
+          <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">Pick the stars for all of them. Ratings go to Plex when Plex sync is on.</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Stars big value={0} label="the selected files" onChange={(n) => {
+              const ids = dialog.files.map((f) => f.id);
+              setDialog(null);
+              run(async () => { const r = await api.media.tagBulk({ action: "rate", stars: n }, ids); setPicked(new Set());
+                return `Rated ${r.done} file${r.done === 1 ? "" : "s"}${r.errors.length ? ` · ${r.errors[0]}` : ""}`; });
+            }} />
+            <button className={btnGhost} onClick={() => {
+              const ids = dialog.files.map((f) => f.id);
+              setDialog(null);
+              run(async () => { const r = await api.media.tagBulk({ action: "rate", stars: 0 }, ids); setPicked(new Set()); return `Cleared ${r.done} rating${r.done === 1 ? "" : "s"}`; });
+            }}>Clear ratings</button>
+          </div>
+        </Modal>
+      )}
       {dialog?.kind === "organise" && <OrganiseDialog files={dialog.files} onClose={() => setDialog(null)}
                                                       onDone={(m) => { setPicked(new Set()); say(m); load(); }} />}
     </div>
@@ -649,6 +728,85 @@ const DOCTOR_KINDS: { kind: DoctorKind; title: string; hint: string }[] = [
   { kind: "junk", title: "Leftover files", hint: "Fixed automatically when that's on." },
   { kind: "empty", title: "Empty folders", hint: "Fixed automatically when that's on." },
 ];
+
+/** Add files to Plex collections, or take them out. */
+function CollectionsDialog({ files, onClose, onDone }: { files: MediaFile[]; onClose: () => void; onDone: (msg: string) => void }) {
+  const [names, setNames] = useState<string[] | null>(null);
+  const [want, setWant] = useState<Record<string, boolean | null>>({});   // null: leave as is (some have it)
+  const [fresh, setFresh] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const has = (n: string) => files.filter((f) => (f.collections ?? []).includes(n)).length;
+  useEffect(() => {
+    const mine = files.flatMap((f) => f.collections ?? []);
+    api.media.collectionNames().then((r) => r.names).catch(() => [] as string[]).then((all) => {
+      const list = [...new Set([...all, ...mine])].sort((a, b) => a.localeCompare(b));
+      setNames(list);
+      setWant(Object.fromEntries(list.map((n) => {
+        const k = files.filter((f) => (f.collections ?? []).includes(n)).length;
+        return [n, k === files.length ? true : k === 0 ? false : null];
+      })));
+    });
+  }, [files]);
+  const addNew = () => {
+    const n = fresh.trim();
+    if (!n) return;
+    setNames((l) => (l?.includes(n) ? l : [...(l ?? []), n]));
+    setWant((w) => ({ ...w, [n]: true }));
+    setFresh("");
+  };
+  const episodes = files.some((f) => /\bS\d{1,2}E\d{1,3}\b|\b\d{1,2}x\d{2}\b/i.test(f.filename));
+  const save = async () => {
+    const add = Object.entries(want).filter(([n, v]) => v === true && has(n) < files.length).map(([n]) => n);
+    const remove = Object.entries(want).filter(([n, v]) => v === false && has(n) > 0).map(([n]) => n);
+    if (!add.length && !remove.length) return onClose();
+    setBusy(true); setError(null);
+    try {
+      if (files.length === 1) {
+        const r = await api.media.setCollections(files[0].id, add, remove);
+        onDone(r.msg);
+      } else {
+        const r = await api.media.tagBulk({ action: "collect", add, remove }, files.map((f) => f.id));
+        if (r.errors.length && !r.done) setError(r.errors[0]);
+        else onDone(`Updated ${r.done} file${r.done === 1 ? "" : "s"}${r.sent ? ` · ${r.sent} sent to Plex` : ""}${r.errors.length ? ` · ${r.errors[0]}` : ""}`);
+      }
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title={files.length === 1 ? `Collections: ${files[0].filename}` : `Collections for ${files.length} files`} onClose={onClose}>
+      <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">
+        Collections show up in Plex for everyone using that library.
+        {episodes && " For TV episodes, Plex adds the whole show."}
+      </p>
+      {names === null ? <Loader2 className="h-5 w-5 animate-spin text-blue-600" /> : (
+        <div className="max-h-64 space-y-1 overflow-y-auto">
+          {names.length === 0 && <p className="text-sm text-gray-500">No collections yet. Make one below.</p>}
+          {names.map((n) => (
+            <label key={n} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-800 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
+              <input type="checkbox" checked={want[n] === true}
+                     ref={(el) => { if (el) el.indeterminate = want[n] === null; }}
+                     onChange={() => setWant((w) => ({ ...w, [n]: w[n] !== true }))} />
+              <span className="flex-1">{n}</span>
+              {files.length > 1 && has(n) > 0 && <span className="text-xs text-gray-400">{has(n)} of {files.length}</span>}
+            </label>
+          ))}
+        </div>
+      )}
+      <div className="mt-3 flex gap-2">
+        <input value={fresh} onChange={(e) => setFresh(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addNew()}
+               placeholder="New collection, e.g. Christmas" aria-label="New collection name" className={`${sel} min-w-0 flex-1`} />
+        <button className={btnGhost} onClick={addNew} disabled={!fresh.trim()}>Add</button>
+      </div>
+      {error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button className={btnGhost} onClick={onClose}>Cancel</button>
+        <button className={btnPrimary} disabled={busy || names === null} onClick={save}>
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />}Save
+        </button>
+      </div>
+    </Modal>
+  );
+}
 
 /** Move files to another folder, keeping their names (e.g. back to Bellesa). */
 function MoveDialog({ files, onClose, onDone }: { files: MediaFile[]; onClose: () => void; onDone: (msg: string) => void }) {

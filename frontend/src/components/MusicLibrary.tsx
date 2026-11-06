@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Disc3, FolderInput, FolderSearch, ImageDown, Loader2, Pause, Play, Search, Tags, Wand2, X } from "lucide-react";
-import { api, type LibAlbum, type LibAlbumDetail, type MusicIssue } from "../api/client";
+import { AlertTriangle, Disc3, FileText, FolderInput, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Tags, Upload, Wand2, X } from "lucide-react";
+import { api, type AlbumTags, type CoverCandidate, type LibAlbum, type LibAlbumDetail, type MusicIssue, type TagRow } from "../api/client";
 import Stars from "./Stars";
 import { fmtSize } from "../utils";
 
@@ -189,15 +189,17 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
   const [names, setNames] = useState<string[] | null>(null);
   const [fresh, setFresh] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   const audio = useRef<HTMLAudioElement>(null);
 
   const load = useCallback(() => api.music.libraryAlbum(id).then(setA).catch((e) => setError(e.message)), [id]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const k = (e: KeyboardEvent) => e.key === "Escape" && !editing && !coverOpen && onClose();
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
-  }, [onClose]);
+  }, [onClose, editing, coverOpen]);
 
   const play = (tid: number) => {
     const el = audio.current;
@@ -240,6 +242,14 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
             )}
 
             <div className="flex flex-wrap gap-2 px-4 pt-3">
+              <button className={ghost} disabled={busy !== null} onClick={() => setEditing(true)}
+                      title="Change the album and track tags yourself (live recordings and bootlegs too)">
+                <PencilLine className="h-4 w-4" />Edit tags
+              </button>
+              <button className={ghost} disabled={busy !== null} onClick={() => setCoverOpen(true)}
+                      title="Upload a picture, or choose one from MusicBrainz">
+                <ImagePlus className="h-4 w-4" />{a.has_cover ? "Change cover" : "Add cover"}
+              </button>
               <button className={ghost} disabled={busy !== null} onClick={() => act("tags", async () => (await api.music.fixTags(id)).msg)}
                       title="Fill in titles, track numbers and cover art from MusicBrainz">
                 {busy === "tags" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}Fix tags
@@ -297,6 +307,10 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
                 </li>
               ))}
             </ol>
+            {editing && <TagEditor id={id} onClose={() => setEditing(false)}
+                                   onSaved={(m) => { setEditing(false); load(); onChanged(m); }} />}
+            {coverOpen && <CoverDialog a={a} onClose={() => setCoverOpen(false)}
+                                       onSaved={(m) => { setCoverOpen(false); load(); onChanged(m); }} />}
             <audio ref={audio} onEnded={() => setPlaying(null)} className="hidden" />
             <div className="flex justify-end border-t border-gray-200 p-3 dark:border-gray-700">
               <button className={primary} onClick={onClose}>Done</button>
@@ -306,4 +320,266 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
       </div>
     </div>
   );
+}
+
+
+// ── Editing tags by hand ──────────────────────────────────────────────────────
+
+const field = "w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100";
+const label = "mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300";
+
+function Overlay({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+    window.addEventListener("keydown", k, true);
+    return () => window.removeEventListener("keydown", k, true);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
+      <div className={`flex max-h-[94vh] w-full ${wide ? "max-w-4xl" : "max-w-xl"} flex-col rounded-t-2xl bg-white shadow-xl dark:bg-gray-900 sm:rounded-2xl`}>
+        <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+          <h3 className="min-w-0 flex-1 truncate font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+          <button onClick={onClose} aria-label="Close" className="rounded p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"><X className="h-4 w-4" /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function TagEditor({ id, onClose, onSaved }: { id: number; onClose: () => void; onSaved: (msg: string) => void }) {
+  const [data, setData] = useState<AlbumTags | null>(null);
+  const [album, setAlbum] = useState<AlbumTags["album"] | null>(null);
+  const [rows, setRows] = useState<TagRow[]>([]);
+  const [isLive, setIsLive] = useState(false);
+  const [live, setLive] = useState({ date: "", venue: "", city: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.music.tags(id).then((d) => { setData(d); setAlbum(d.album); setRows(d.tracks); })
+      .catch((e) => setError(e.message));
+  }, [id]);
+
+  const setRow = (i: number, p: Partial<TagRow>) => setRows((r) => r.map((x, n) => (n === i ? { ...x, ...p } : x)));
+  const fromNames = async () => {
+    setError(null);
+    try {
+      const g = new Map((await api.music.fromNames(id)).map((x) => [x.path, x]));
+      let n = 0;
+      setRows((r) => r.map((x) => {
+        const y = g.get(x.path);
+        if (!y) return x;
+        n += 1;
+        return { ...x, title: y.title ?? x.title, track_no: y.track_no ?? x.track_no,
+                 disc_no: y.disc_no ?? x.disc_no, artist: y.artist ?? x.artist };
+      }));
+      setNote(`Filled from ${n} file name${n === 1 ? "" : "s"}. Check them, then Save.`);
+    } catch (e) { setError((e as Error).message); }
+  };
+  const numberInOrder = () => setRows((r) => {
+    const count: Record<number, number> = {};
+    return r.map((x) => { const d = x.disc_no || 1; count[d] = (count[d] ?? 0) + 1; return { ...x, track_no: count[d] }; });
+  });
+  const liveTitle = [live.date.trim(), [live.venue.trim(), live.city.trim()].filter(Boolean).join(", ")].filter(Boolean).join(" ");
+  const save = async () => {
+    if (!album) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await api.music.saveTags(id, {
+        album: { ...album, album: isLive && !album.album.trim() ? "" : album.album },
+        tracks: rows.map(({ path, title, artist, track_no, disc_no }) => ({ path, title, artist, track_no, disc_no })),
+        live: isLive ? live : null,
+      });
+      if (!r.ok && !r.saved) setError(r.msg); else onSaved(r.msg);
+    } catch (e) { setError((e as Error).message); }
+    setBusy(false);
+  };
+
+  return (
+    <Overlay title="Edit tags" onClose={onClose} wide>
+      {!data || !album ? (
+        <div className="flex justify-center p-10">{error ? <p className="text-sm text-red-600">{error}</p> : <Loader2 className="h-5 w-5 animate-spin text-blue-600" />}</div>
+      ) : (
+        <>
+          <div className="space-y-4 overflow-y-auto p-4">
+            <section className="grid gap-3 sm:grid-cols-2">
+              <div><label className={label} htmlFor="t-aa">Album artist</label>
+                <input id="t-aa" className={field} value={album.album_artist} onChange={(e) => setAlbum({ ...album, album_artist: e.target.value })} /></div>
+              <div><label className={label} htmlFor="t-al">Album{isLive && " (blank: built from the live details)"}</label>
+                <input id="t-al" className={field} value={album.album} placeholder={isLive ? liveTitle : ""} onChange={(e) => setAlbum({ ...album, album: e.target.value })} /></div>
+              <div><label className={label} htmlFor="t-dt">Date or year</label>
+                <input id="t-dt" className={field} value={album.date} placeholder="2020 or 2020-06-18" onChange={(e) => setAlbum({ ...album, date: e.target.value })} disabled={isLive} /></div>
+              <div><label className={label} htmlFor="t-gn">Genre</label>
+                <input id="t-gn" className={field} value={album.genre} onChange={(e) => setAlbum({ ...album, genre: e.target.value })} /></div>
+            </section>
+            {data.mixed.length > 0 && (
+              <p className="text-xs text-amber-700 dark:text-amber-300">The tracks don't all agree on: {data.mixed.map((m) => m.replace("_", " ")).join(", ")}. Saving gives every track the values above.</p>
+            )}
+
+            <section className="rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
+                <input type="checkbox" checked={isLive} onChange={(e) => setIsLive(e.target.checked)} />Live recording or bootleg
+              </label>
+              {isLive && (
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <div><label className={label} htmlFor="t-ld">Show date</label>
+                    <input id="t-ld" type="date" className={field} value={live.date} onChange={(e) => setLive({ ...live, date: e.target.value })} /></div>
+                  <div><label className={label} htmlFor="t-lv">Venue</label>
+                    <input id="t-lv" className={field} value={live.venue} placeholder="Barton Hall" onChange={(e) => setLive({ ...live, venue: e.target.value })} /></div>
+                  <div><label className={label} htmlFor="t-lc">City</label>
+                    <input id="t-lc" className={field} value={live.city} placeholder="Ithaca NY" onChange={(e) => setLive({ ...live, city: e.target.value })} /></div>
+                  <p className="text-xs text-gray-500 sm:col-span-3 dark:text-gray-400">
+                    Saves the show date, a comment (“Live at {[live.venue, live.city].filter(Boolean).join(", ") || "…"}”) and, if Album is blank, the album title <b>{liveTitle || "…"}</b>.
+                  </p>
+                </div>
+              )}
+            </section>
+
+            <section>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <h4 className="mr-auto text-sm font-semibold text-gray-800 dark:text-gray-200">Tracks</h4>
+                <button className={ghost} onClick={fromNames} title="Use titles and numbers from file names like ‘03 - Song.flac’ or ‘d1t03’"><FileText className="h-4 w-4" />Fill from file names</button>
+                <button className={ghost} onClick={numberInOrder} title="Number the tracks 1, 2, 3… in the order shown, per disc">Number in order</button>
+              </div>
+              {note && <p className="mb-2 text-xs text-blue-700 dark:text-blue-300">{note}</p>}
+              <div className="hidden grid-cols-[3.5rem_3.5rem_1fr_1fr] gap-2 px-1 pb-1 text-xs text-gray-500 sm:grid dark:text-gray-400">
+                <span>Disc</span><span>Track</span><span>Title</span><span>Artist (blank: album artist)</span>
+              </div>
+              <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                {rows.map((r, i) => (
+                  <li key={r.path} className="grid grid-cols-[3.5rem_3.5rem_1fr] gap-2 py-1.5 sm:grid-cols-[3.5rem_3.5rem_1fr_1fr]">
+                    <input aria-label={`Disc for ${r.file}`} placeholder="Disc" inputMode="numeric" className={`${field} self-start`} value={r.disc_no ?? ""} onChange={(e) => setRow(i, { disc_no: e.target.value ? Number(e.target.value.replace(/\D/g, "")) || null : null })} />
+                    <input aria-label={`Track for ${r.file}`} placeholder="#" inputMode="numeric" className={`${field} self-start`} value={r.track_no ?? ""} onChange={(e) => setRow(i, { track_no: e.target.value ? Number(e.target.value.replace(/\D/g, "")) || null : null })} />
+                    <div className="min-w-0">
+                      <input aria-label={`Title for ${r.file}`} placeholder="Title" className={field} value={r.title} onChange={(e) => setRow(i, { title: e.target.value })} />
+                      <span className="mt-0.5 block truncate font-mono text-[10px] text-gray-400" title={r.file}>{r.file}</span>
+                    </div>
+                    <input aria-label={`Artist for ${r.file}`} className={`${field} col-span-3 sm:col-span-1`} value={r.artist} placeholder={album.album_artist || "Artist"} onChange={(e) => setRow(i, { artist: e.target.value })} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+            {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+          </div>
+          <div className="flex items-center justify-end gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
+            <span className="mr-auto hidden text-xs text-gray-500 sm:inline dark:text-gray-400">Saved into the files. Run Organise for Plex afterwards to rename them.</span>
+            <button className={ghost} onClick={onClose}>Cancel</button>
+            <button className={primary} disabled={busy} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save tags</button>
+          </div>
+        </>
+      )}
+    </Overlay>
+  );
+}
+
+// ── Changing the cover by hand ────────────────────────────────────────────────
+
+function CoverDialog({ a, onClose, onSaved }: { a: LibAlbum; onClose: () => void; onSaved: (msg: string) => void }) {
+  const [tab, setTab] = useState<"upload" | "mb">("upload");
+  const [embed, setEmbed] = useState(true);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [q, setQ] = useState(`${a.artist ?? ""} ${a.title ?? ""}`.trim());
+  const [found, setFound] = useState<CoverCandidate[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+  const pick = (f: File | null) => {
+    setError(null);
+    if (f && !/^image\/(jpeg|png)$/.test(f.type)) { setError("Choose a JPEG or PNG image"); return; }
+    setFile(f);
+    setPreview(f ? URL.createObjectURL(f) : null);
+  };
+  const search = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    setBusy(true); setError(null);
+    try { setFound(await api.music.coverCandidates(a.id, q)); } catch (err) { setError((err as Error).message); }
+    setBusy(false);
+  };
+  useEffect(() => { if (tab === "mb" && found === null) search(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  const run = async (fn: () => Promise<{ msg: string }>) => {
+    setBusy(true); setError(null);
+    try { onSaved((await fn()).msg); } catch (err) { setError((err as Error).message); setBusy(false); }
+  };
+
+  return (
+    <Overlay title={`Cover for ${a.title ?? "this album"}`} onClose={onClose}>
+      <div className="space-y-4 overflow-y-auto p-4">
+        <div className="inline-flex rounded-lg border border-gray-200 p-0.5 dark:border-gray-700" role="tablist">
+          {([["upload", "Upload a picture"], ["mb", "Choose from MusicBrainz"]] as const).map(([k, l]) => (
+            <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+                    className={`rounded-md px-3 py-1.5 text-sm font-medium ${tab === k ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}>{l}</button>
+          ))}
+        </div>
+
+        {tab === "upload" ? (
+          <div className="space-y-3">
+            <label htmlFor="cover-file"
+                   onDragOver={(e) => e.preventDefault()}
+                   onDrop={(e) => { e.preventDefault(); pick(e.dataTransfer.files?.[0] ?? null); }}
+                   className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-300 p-6 text-center text-sm text-gray-600 hover:border-blue-400 dark:border-gray-600 dark:text-gray-300">
+              {preview ? <img src={preview} alt="New cover" className="h-40 w-40 rounded-lg object-cover" />
+                       : <Upload className="h-6 w-6 text-gray-400" />}
+              <span>{file ? file.name : "Choose or drop a JPEG or PNG (square works best)"}</span>
+            </label>
+            <input id="cover-file" type="file" accept="image/jpeg,image/png" className="sr-only" onChange={(e) => pick(e.target.files?.[0] ?? null)} />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <form onSubmit={search} className="flex gap-2">
+              <input value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search MusicBrainz" placeholder="Artist and album, e.g. Grateful Dead Cornell" className={`${field} min-w-0 flex-1`} />
+              <button type="submit" className={ghost} disabled={busy}>{busy && !found ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}Search</button>
+            </form>
+            {found && found.length === 0 && <p className="text-sm text-gray-500">Nothing found. Try fewer words, or upload a picture instead.</p>}
+            {found && found.length > 0 && (
+              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {found.map((c) => (
+                  <li key={c.mbid}>
+                    <button type="button" disabled={busy} onClick={() => run(() => api.music.coverFromMusicBrainz(a.id, c.mbid, embed))}
+                            className="block w-full overflow-hidden rounded-lg border border-gray-200 text-left hover:border-blue-500 disabled:opacity-50 dark:border-gray-700"
+                            aria-label={`Use the cover of ${c.title} by ${c.artist}`}>
+                      <CandidateArt src={c.cover} />
+                      <span className="block p-1.5">
+                        <span className="block truncate text-xs font-medium text-gray-800 dark:text-gray-200">{c.title}</span>
+                        <span className="block truncate text-[11px] text-gray-500">{[c.artist, c.date.slice(0, 4), c.type].filter(Boolean).join(" · ")}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        <label className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <input type="checkbox" checked={embed} onChange={(e) => setEmbed(e.target.checked)} className="mt-0.5" />
+          <span>Also put it inside each track, so the art travels with the files (Plex and phones show it too)</span>
+        </label>
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      </div>
+      <div className="flex items-center justify-end gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
+        {a.has_cover && (
+          <button className={`${ghost} mr-auto`} disabled={busy} onClick={() => run(() => api.music.embedCover(a.id))}
+                  title="Put the current cover inside the tracks">Put current cover in files</button>
+        )}
+        <button className={ghost} onClick={onClose}>Cancel</button>
+        {tab === "upload" && (
+          <button className={primary} disabled={!file || busy} onClick={() => file && run(() => api.music.uploadCover(a.id, file, embed))}>
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />}Use this picture
+          </button>
+        )}
+      </div>
+    </Overlay>
+  );
+}
+
+/** A MusicBrainz cover thumbnail; releases without art show a placeholder. */
+function CandidateArt({ src }: { src: string }) {
+  const [bad, setBad] = useState(false);
+  return bad
+    ? <span className="flex aspect-square w-full items-center justify-center bg-gray-100 text-xs text-gray-400 dark:bg-gray-800">No cover</span>
+    : <img src={src} alt="" loading="lazy" onError={() => setBad(true)} className="aspect-square w-full object-cover" />;
 }

@@ -129,3 +129,26 @@ def cover_bytes(release_group_mbid: str) -> bytes | None:
         return r.content if r.is_success and r.content else None
     except httpx.HTTPError:
         return None
+
+
+def search_release_groups(artist_name: str | None, album_title: str | None, text: str | None = None,
+                          limit: int = 12) -> list[dict]:
+    """Release groups to pick a cover from, live albums and bootleg-ish ones included:
+    [{mbid, title, artist, date, type, cover}]."""
+    if text:
+        q = text
+    else:
+        parts = []
+        if album_title:
+            parts.append(f'releasegroup:"{album_title}"')
+        if artist_name:
+            parts.append(f'artist:"{artist_name}"')
+        q = " AND ".join(parts) or "*"
+    out = []
+    for g in _get("/release-group", query=q, limit=limit).get("release-groups", []):
+        credit = "".join(c.get("name", "") + c.get("joinphrase", "") for c in g.get("artist-credit") or [])
+        kinds = [g.get("primary-type") or ""] + list(g.get("secondary-types") or [])
+        out.append({"mbid": g["id"], "title": g.get("title", ""), "artist": credit,
+                    "date": g.get("first-release-date") or "", "type": " · ".join(k for k in kinds if k),
+                    "cover": cover_url(g["id"])})
+    return out

@@ -103,6 +103,15 @@ export interface LibTrack {
 
 export interface LibAlbumDetail extends LibAlbum { track_list: LibTrack[] }
 
+export interface TagRow { path: string; file: string; title: string; artist: string; track_no: number | null; disc_no: number | null }
+export interface AlbumTags {
+  album: { album_artist: string; album: string; date: string; genre: string; comment: string };
+  mixed: string[];
+  tracks: TagRow[];
+}
+export interface NameGuess { path: string; title: string | null; track_no: number | null; disc_no: number | null; artist: string | null }
+export interface CoverCandidate { mbid: string; title: string; artist: string; date: string; type: string; cover: string }
+
 export interface WatchlistItem {
   id: number;
   title: string;
@@ -869,6 +878,27 @@ export const api = {
     libraryStatus: () => req<{ running: boolean; roots: string[]; music_dir: string | null;
                                last: { ok: boolean; albums?: number; tracks?: number; removed?: number; msg?: string } | null }>("/music/library/status"),
     fixTags: (id: number) => req<{ ok: boolean; tagged: number; msg: string }>(`/music/library/albums/${id}/fix-tags`, { method: "POST" }),
+    tags: (id: number) => req<AlbumTags>(`/music/library/albums/${id}/tags`),
+    fromNames: (id: number) => req<NameGuess[]>(`/music/library/albums/${id}/from-names`),
+    saveTags: (id: number, body: { album: Partial<AlbumTags["album"]>; tracks: Partial<TagRow>[];
+                                   live?: { date: string; venue: string; city: string } | null }) =>
+      req<{ ok: boolean; saved: number; failed: string[]; msg: string }>(`/music/library/albums/${id}/tags`, {
+        method: "PUT", body: JSON.stringify(body) }),
+    uploadCover: async (id: number, file: File, embed: boolean): Promise<{ ok: boolean; msg: string }> => {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("embed", embed ? "true" : "false");
+      const res = await authedFetch(`/music/library/albums/${id}/cover/upload`, { method: "POST", body: form });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.detail ?? "Upload failed");
+      return body;
+    },
+    coverCandidates: (id: number, q?: string) =>
+      req<CoverCandidate[]>(`/music/library/albums/${id}/cover/candidates${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+    coverFromMusicBrainz: (id: number, mbid: string, embed: boolean) =>
+      req<{ ok: boolean; msg: string }>(`/music/library/albums/${id}/cover/musicbrainz`, {
+        method: "POST", body: JSON.stringify({ mbid, embed }) }),
+    embedCover: (id: number) => req<{ ok: boolean; msg: string }>(`/music/library/albums/${id}/cover/embed`, { method: "POST" }),
     getCover: (id: number) => req<{ ok: boolean; source: string | null; msg: string }>(`/music/library/albums/${id}/cover`, { method: "POST" }),
     organise: (id: number) => req<{ ok: boolean; folder: string; msg: string }>(`/music/library/albums/${id}/organise`, { method: "POST" }),
     rateAlbum: (id: number, stars: number) =>

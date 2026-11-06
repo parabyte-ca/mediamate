@@ -36,6 +36,16 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** An API URL with the session token in the query (for <img>, <audio>, <video>). */
+function withToken(path: string, v?: string | null): string {
+  const p = new URLSearchParams();
+  const token = authStore.getToken();
+  if (token) p.set("token", token);
+  if (v) p.set("v", v);
+  const q = p.toString();
+  return `${BASE}${path}${q ? `?${q}` : ""}`;
+}
+
 // For endpoints that return a raw Response (file downloads, multipart uploads)
 function authedFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${BASE}${path}`, {
@@ -58,6 +68,40 @@ export interface TorrentResult {
   source: string;
   url?: string;
 }
+
+export interface ArtistAlbums {
+  wanted: number; grabbed: number; have: number; ignored: number; total: number;
+  next: { title: string; date: string | null } | null;
+}
+
+export interface MusicArtist {
+  mbid: string; name: string; disambiguation: string; country: string; type: string; begin: string; score: number;
+}
+
+export type AlbumStatus = "wanted" | "grabbed" | "have" | "ignored";
+
+export interface MusicAlbum {
+  id: number; mbid: string; title: string; type: string | null; release_date: string | null;
+  status: AlbumStatus; released: boolean; torrent_name: string | null; quality: string | null;
+  cover_url: string; completed_at: string | null;
+}
+
+export type MusicIssue = "untagged" | "missing_tracks" | "low_bitrate" | "duplicate";
+
+export interface LibAlbum {
+  id: number; folder: string; artist: string | null; title: string | null; year: number | null;
+  format: string | null; tracks: number; size_bytes: number; duration_sec: number; has_cover: boolean;
+  mb_release_group_id: string | null; issues: MusicIssue[]; rating: number | null; collections: string[];
+  plex_dirty: number; scanned_at: string | null;
+}
+
+export interface LibTrack {
+  id: number; title: string; artist: string | null; track_no: number | null; disc_no: number | null;
+  format: string | null; bitrate: number | null; lossless: boolean; duration_sec: number | null;
+  size_bytes: number | null; file: string;
+}
+
+export interface LibAlbumDetail extends LibAlbum { track_list: LibTrack[] }
 
 export interface WatchlistItem {
   id: number;
@@ -88,8 +132,11 @@ export interface WatchlistItem {
   /** Rename & organise folder: null = from the age rating. */
   audience?: "general" | "mature" | null;
   /** "tv" follows episodes; "movie" waits for its release and downloads once. */
-  kind?: "tv" | "movie";
+  kind?: "tv" | "movie" | "artist";
   tmdb_id?: number | null;
+  /** Artists: MusicBrainz id, and album counts. */
+  mbid?: string | null;
+  albums?: ArtistAlbums | null;
   year?: number | null;
   /** When good releases appear (YYYY-MM-DD); release_kind says how we know. */
   release_date?: string | null;
@@ -194,7 +241,7 @@ export interface DownloadPath {
   protected?: boolean;
 }
 
-export type FolderTarget = "auto" | "tv" | "movies" | "custom";
+export type FolderTarget = "auto" | "tv" | "movies" | "custom" | "music";
 
 export interface FolderInput {
   name: string;
@@ -804,6 +851,33 @@ export const api = {
     const p = new URLSearchParams({ q, indexer, codec, filter_adult: String(filterAdult) });
     if (quality && quality !== "Any") p.set("quality", quality);
     return req<TorrentResult[]>(`/search?${p}`);
+  },
+
+  music: {
+    searchArtists: (q: string) => req<MusicArtist[]>(`/music/artists/search?q=${encodeURIComponent(q)}`),
+    follow: (body: { mbid: string; start: "new" | "latest" | "all"; include_eps?: boolean; download_path_id?: number | null }) =>
+      req<WatchlistItem>("/watchlist/from-musicbrainz", { method: "POST", body: JSON.stringify(body) }),
+    albums: (itemId: number) => req<MusicAlbum[]>(`/watchlist/${itemId}/albums`),
+    refreshAlbums: (itemId: number) => req<{ new: number; albums: ArtistAlbums }>(`/watchlist/${itemId}/albums/refresh`, { method: "POST" }),
+    setAlbum: (albumId: number, status: "wanted" | "ignored" | "have") =>
+      req<MusicAlbum>(`/music/albums/${albumId}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+    searchAlbum: (albumId: number) =>
+      req<{ status: string; message: string }>(`/music/albums/${albumId}/search`, { method: "POST" }),
+    library: () => req<LibAlbum[]>("/music/library/albums"),
+    libraryAlbum: (id: number) => req<LibAlbumDetail>(`/music/library/albums/${id}`),
+    libraryScan: () => req<{ ok: boolean; running: boolean }>("/music/library/scan", { method: "POST" }),
+    libraryStatus: () => req<{ running: boolean; roots: string[]; music_dir: string | null;
+                               last: { ok: boolean; albums?: number; tracks?: number; removed?: number; msg?: string } | null }>("/music/library/status"),
+    fixTags: (id: number) => req<{ ok: boolean; tagged: number; msg: string }>(`/music/library/albums/${id}/fix-tags`, { method: "POST" }),
+    organise: (id: number) => req<{ ok: boolean; folder: string; msg: string }>(`/music/library/albums/${id}/organise`, { method: "POST" }),
+    rateAlbum: (id: number, stars: number) =>
+      req<TagResult>(`/music/library/albums/${id}/rating`, { method: "POST", body: JSON.stringify({ stars }) }),
+    albumCollections: (id: number, add: string[], remove: string[]) =>
+      req<TagResult>(`/music/library/albums/${id}/collections`, { method: "POST", body: JSON.stringify({ add, remove }) }),
+    collectionNames: () => req<{ names: string[] }>("/music/library/collections"),
+    /** URLs for <img>/<audio>; they carry the token because those can't send headers. */
+    coverUrl: (id: number, v?: string | null) => withToken(`/music/library/albums/${id}/cover`, v),
+    trackUrl: (id: number) => withToken(`/music/library/tracks/${id}/stream`),
   },
 
   watchlist: {

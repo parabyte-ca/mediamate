@@ -26,7 +26,7 @@ class DownloadPathCreate(BaseModel):
     downloads: bool = True             # qBittorrent may save here
     scan: bool = True                  # the media engine scans and encodes here
     # Target format (all H.265); None = guessed from the name.
-    target: Optional[Literal["auto", "tv", "movies", "custom"]] = None
+    target: Optional[Literal["auto", "tv", "movies", "custom", "music"]] = None
     target_min: Optional[int] = None
     target_max: Optional[int] = None
     target_shrink: Optional[bool] = None
@@ -40,7 +40,7 @@ class DownloadPathUpdate(BaseModel):
     local_path: Optional[str] = None
     downloads: Optional[bool] = None
     scan: Optional[bool] = None
-    target: Optional[Literal["auto", "tv", "movies", "custom"]] = None
+    target: Optional[Literal["auto", "tv", "movies", "custom", "music"]] = None
     target_min: Optional[int] = None
     target_max: Optional[int] = None
     target_shrink: Optional[bool] = None
@@ -145,6 +145,9 @@ class WatchlistOut(BaseModel):
     # Movies, filled in by GET /watchlist: waiting | looking | downloading | downloaded | paused
     movie_state: Optional[str] = None
     removes_at: Optional[datetime] = None
+    # Artists: MusicBrainz id and album counts {wanted, grabbed, have, ignored, total, next}
+    mbid: Optional[str] = None
+    albums: Optional[dict] = None
 
     model_config = {"from_attributes": True}
 

@@ -55,6 +55,8 @@ class WatchlistItem(Base):
     release_date = Column(String, nullable=True)        # YYYY-MM-DD: when good releases appear
     release_kind = Column(String, nullable=True)        # digital | physical | estimated
     completed_at = Column(DateTime, nullable=True)      # the movie's download finished
+    # Music: "artist" items follow an artist (MusicBrainz id); albums in music_albums.
+    mbid = Column(String, nullable=True, index=True)
     keep = Column(Boolean, default=False, server_default="0")
 
     episodes = relationship(
@@ -139,6 +141,75 @@ class Download(Base):
     last_progress_at = Column(DateTime, nullable=True)
     # How many automatic re-searches led to this download (0 = original grab).
     retry_count = Column(Integer, default=0, server_default="0")
+    music_album_id = Column(Integer, ForeignKey("music_albums.id"), nullable=True)
+
+
+class MusicAlbum(Base):
+    """An album of an artist on the Watchlist (MusicBrainz release group).
+
+    status: wanted (look for it once released) | grabbed (downloading) | have |
+    ignored (older albums when following "new releases only", or skipped by hand).
+    """
+    __tablename__ = "music_albums"
+
+    id = Column(Integer, primary_key=True, index=True)
+    watchlist_id = Column(Integer, ForeignKey("watchlist.id", ondelete="CASCADE"), nullable=False, index=True)
+    mbid = Column(String, nullable=False)
+    title = Column(String, nullable=False)
+    album_type = Column(String, nullable=True)           # Album | EP
+    release_date = Column(String, nullable=True)         # YYYY[-MM[-DD]]
+    status = Column(String, nullable=False, default="wanted", server_default="wanted")
+    torrent_name = Column(String, nullable=True)
+    quality = Column(String, nullable=True)              # flac | mp3-320 | ...
+    grabbed_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("watchlist_id", "mbid", name="uq_music_album"),)
+
+
+class MusicLibAlbum(Base):
+    """An album folder in the music library (services/music_library.py). Stars and
+    collections live here and sync with Plex like the video Library's."""
+    __tablename__ = "music_lib_albums"
+
+    id = Column(Integer, primary_key=True, index=True)
+    folder = Column(String, unique=True, nullable=False)
+    artist = Column(String, nullable=True)               # album artist
+    title = Column(String, nullable=True)
+    year = Column(Integer, nullable=True)
+    format = Column(String, nullable=True)               # flac | mp3 | m4a | mixed ...
+    tracks = Column(Integer, nullable=False, default=0, server_default="0")
+    size_bytes = Column(BigInteger, nullable=False, default=0, server_default="0")
+    duration_sec = Column(Float, nullable=False, default=0, server_default="0")
+    cover = Column(String, nullable=True)                # image file in the folder
+    mb_release_group_id = Column(String, nullable=True)
+    issues = Column(String, nullable=True)               # JSON list: untagged, missing_tracks, low_bitrate, duplicate
+    rating = Column(Integer, nullable=True)
+    collections = Column(String, nullable=True)
+    plex_key = Column(String, nullable=True)
+    plex_seen = Column(String, nullable=True)
+    plex_dirty = Column(Integer, nullable=False, default=0, server_default="0")
+    scanned_at = Column(DateTime, nullable=True)
+
+
+class MusicTrack(Base):
+    __tablename__ = "music_tracks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    album_id = Column(Integer, ForeignKey("music_lib_albums.id", ondelete="CASCADE"), nullable=False, index=True)
+    path = Column(String, unique=True, nullable=False)
+    title = Column(String, nullable=True)
+    artist = Column(String, nullable=True)
+    track_no = Column(Integer, nullable=True)
+    track_total = Column(Integer, nullable=True)
+    disc_no = Column(Integer, nullable=True)
+    format = Column(String, nullable=True)
+    bitrate = Column(Integer, nullable=True)             # kbps
+    lossless = Column(Boolean, nullable=False, default=False, server_default=text("0"))
+    duration_sec = Column(Float, nullable=True)
+    size_bytes = Column(BigInteger, nullable=True)
+    mtime = Column(Float, nullable=True)
 
 
 class DownloadPath(Base):

@@ -3,10 +3,12 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderInput, FolderSearch, Layers, Loader2, MoreHorizontal,
-  CheckCircle2, Pause, Play, Scissors, SkipForward, Square, Star, Stethoscope, Tags, Timer, Trash2, X,
+  CheckCircle2, Music, Pause, Play, Scissors, SkipForward, Square, Star, Stethoscope, Tags, Timer, Trash2, X,
 } from "lucide-react";
 import { api, type DoctorKind, type DoctorState, type DownloadPath, type MediaFile, type MediaJobType, type MediaStats, type OrganisePlan } from "../api/client";
 import { useEvent } from "../events";
+import Stars from "../components/Stars";
+import MusicLibrary from "../components/MusicLibrary";
 import { fmtSize } from "../utils";
 
 // The media library (FileSplitter's Files tab): everything under the media
@@ -78,25 +80,6 @@ const btn = "flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-sm disa
 const btnGhost = `${btn} border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800`;
 const btnPrimary = `${btn} bg-blue-600 font-medium text-white hover:bg-blue-700`;
 const iconBtn = "rounded p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-30";
-
-// ── Stars ─────────────────────────────────────────────────────────────────────
-
-/** 1-5 stars; picking the current value clears it. */
-function Stars({ value, onChange, label, big }: { value?: number | null; onChange: (n: number) => void; label: string; big?: boolean }) {
-  const v = value ?? 0;
-  return (
-    <span className="inline-flex items-center" role="group" aria-label={`Rating for ${label}`}>
-      {[1, 2, 3, 4, 5].map((n) => (
-        <button key={n} type="button" onClick={() => onChange(v === n ? 0 : n)} aria-pressed={v >= n}
-                aria-label={v === n ? `Clear rating (${n} star${n > 1 ? "s" : ""})` : `${n} star${n > 1 ? "s" : ""}`}
-                title={v === n ? "Clear rating" : `${n} star${n > 1 ? "s" : ""}`}
-                className={`rounded ${big ? "p-1" : "p-1 sm:p-0.5"} hover:bg-amber-50 dark:hover:bg-amber-900/20`}>
-          <Star className={`${big ? "h-6 w-6" : "h-3.5 w-3.5"} ${v >= n ? "fill-amber-400 text-amber-400" : "text-gray-300 dark:text-gray-600"}`} />
-        </button>
-      ))}
-    </span>
-  );
-}
 
 // ── Modals ────────────────────────────────────────────────────────────────────
 
@@ -456,10 +439,36 @@ export default function Library() {
     ["Processing", stats.processing, "processing"], ["Done", stats.done, "done"], ["Errors", stats.errors, "error"],
   ] : [];
 
+  const libKind = params.get("lib") === "music" ? "music" : "video";
+  const setLib = (k: "video" | "music") => setParams(k === "music" ? { lib: "music" } : {}, { replace: true });
+  const libTabs = (
+    <div className="inline-flex rounded-lg border border-gray-200 p-0.5 dark:border-gray-700" role="tablist" aria-label="Library">
+      {([["video", "Videos", Film], ["music", "Music", Music]] as const).map(([k, label, Icon]) => (
+        <button key={k} role="tab" aria-selected={libKind === k} onClick={() => setLib(k)}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${libKind === k
+                  ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}>
+          <Icon className="h-4 w-4" aria-hidden />{label}
+        </button>
+      ))}
+    </div>
+  );
+  if (libKind === "music") {
+    return (
+      <div className="mx-auto max-w-6xl p-4 md:p-6">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Library</h1>
+          {libTabs}
+        </div>
+        <MusicLibrary />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-6xl p-4 md:p-6">
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <h1 className="mr-auto text-xl font-bold text-gray-900 dark:text-gray-100">Library</h1>
+        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Library</h1>
+        <div className="mr-auto">{libTabs}</div>
         <button className={btnGhost} onClick={() => run(async () => { await api.media.scan(); return "Scan started"; })} disabled={stats?.scan_running}>
           {stats?.scan_running ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderSearch className="h-4 w-4" />}
           {stats?.scan_running ? "Scanning…" : "Scan now"}

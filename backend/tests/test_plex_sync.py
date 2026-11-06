@@ -18,8 +18,8 @@ class FakePlex:
     """Two sections: Movies (1) and TV (2). A 'Sci-Fi' collection holds Dune."""
 
     def __init__(self):
-        self.ratings = {"100": None, "200": None}
-        self.colls = {"1": {"Sci-Fi": {"100"}}, "2": {}}
+        self.ratings = {"100": None, "200": None, "300": None}
+        self.colls = {"1": {"Sci-Fi": {"100"}}, "2": {}, "3": {}}
         self.puts: list[tuple[str, dict]] = []
         self.down = False
 
@@ -33,7 +33,7 @@ class FakePlex:
         for sec, colls in self.colls.items():
             for i, (name, members) in enumerate(colls.items()):
                 if ck == f"9{sec}{i}":
-                    kind = "Video" if sec == "1" else "Directory"
+                    kind = "Video" if sec == "1" else "Directory"   # albums and shows are Directories
                     return "<MediaContainer>" + "".join(f'<{kind} ratingKey="{m}"/>' for m in members) + \
                         "</MediaContainer>"
         return "<MediaContainer/>"
@@ -79,6 +79,12 @@ class FakePlex:
                     '<Part file="/data/movies/Dune (2021)/Dune (2021).mkv" size="11"/></Media></Video>'
                     '<Video ratingKey="101"><Media><Part file="/other/Dune (2021).mkv" size="99"/></Media></Video>'
                     '</MediaContainer>')
+        elif path == "/library/sections/3/all" and q.get("type") == "9":
+            body = f'<MediaContainer><Directory ratingKey="300"{self._rating("300")}/></MediaContainer>'
+        elif path == "/library/sections/3/all":
+            body = ('<MediaContainer><Track ratingKey="301" parentRatingKey="300"><Media>'
+                    '<Part file="/data/music/Phoebe Bridgers/Punisher (2020)/01 - Garden Song.flac" size="7"/>'
+                    '</Media></Track></MediaContainer>')
         elif path == "/library/sections/2/all":
             body = (f'<MediaContainer><Video ratingKey="200" grandparentRatingKey="20"{self._rating("200")}>'
                     '<Media><Part file="/data/tv/Stick/Season 01/Stick S01E01.mkv" size="5"/></Media></Video>'
@@ -293,3 +299,31 @@ def test_migration_adds_columns(tmp_path):
     with engine.connect() as c:
         cols = {r[1] for r in c.execute(text("PRAGMA table_info(media_files)"))}
     assert {"rating", "collections", "plex_key", "plex_seen", "plex_dirty"} <= cols
+
+
+# ── music albums ────────────────────────────────────────────────────────────
+
+
+def test_music_album_stars_and_collections(plex):
+    from app.models import MusicLibAlbum, MusicTrack
+    client, Session, media, fake, ids = plex
+    folder = media / "Music" / "Phoebe Bridgers" / "Punisher (2020)"
+    with Session() as db:
+        a = MusicLibAlbum(folder=str(folder), artist="Phoebe Bridgers", title="Punisher", tracks=1)
+        db.add(a)
+        db.flush()
+        db.add(MusicTrack(album_id=a.id, path=str(folder / "01 - Garden Song.flac"), size_bytes=7))
+        db.commit()
+        aid = a.id
+    r = client.post(f"/api/music/library/albums/{aid}/rating", json={"stars": 5}).json()
+    assert r["plex"] == "sent" and fake.ratings["300"] == 10.0 and fake.puts[-1][1]["key"] == "300"
+    r = client.post(f"/api/music/library/albums/{aid}/collections", json={"add": ["Sad Girl Indie"]}).json()
+    path, q = fake.puts[-1]
+    assert r["plex"] == "sent" and path == "/library/sections/3/all" and q["type"] == "9" and q["id"] == "300"
+    assert "Sad Girl Indie" in client.get("/api/music/library/collections").json()["names"]
+    assert "Sad Girl Indie" not in client.get("/api/media/plex/collections").json()["names"]   # music only
+    fake.ratings["300"] = 4.0                                                     # changed in Plex
+    res = plex_sync.sync()
+    assert res["matched"] == 3
+    with Session() as db:
+        assert db.get(MusicLibAlbum, aid).rating == 2

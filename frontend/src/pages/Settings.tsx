@@ -96,6 +96,7 @@ const TARGET_KINDS: [FolderTarget, string, string][] = [
   ["tv", "TV shows", "H.265, 720p–1080p"],
   ["movies", "Movies", "H.265, 1080p–4K"],
   ["custom", "Custom", "H.265 at the sizes you choose"],
+  ["music", "Music", "Albums: listed in Library → Music, never encoded"],
 ];
 
 const CHECK_ICON = {
@@ -893,6 +894,15 @@ export default function Settings() {
             <div className="sm:col-span-2">
               <Field label="Category" hint="Torrents added by ScreenMate will use this category in qBittorrent." value={settings.qbit_category ?? ""} onChange={(v) => set("qbit_category", v)} placeholder="screenmate" />
             </div>
+            <Field label="Music category" hint="Album downloads use this category, so qBittorrent can keep them apart." value={settings.qbit_music_category ?? ""} onChange={(v) => set("qbit_music_category", v)} placeholder="music" />
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Music download folder</label>
+              <select value={settings.music_download_path_id ?? ""} onChange={(e) => set("music_download_path_id", e.target.value)} className={FIELD}>
+                <option value="">A folder named "Music" (else the default)</option>
+                {paths.filter((p) => p.downloads !== false).map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+              </select>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Add it under Folders first; an artist can also pick its own.</p>
+            </div>
           </div>
           <div className="mt-4 flex items-center gap-3">
             <button onClick={handleTestQbit} disabled={testing}
@@ -1265,6 +1275,17 @@ export default function Settings() {
         </Section>
 
         {/* Plex */}
+        <div id="music">
+        <Section title="Music">
+          <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+            Follow artists on the Watchlist's Music tab. Finished albums are tagged from MusicBrainz and linked into this
+            folder as <code>Artist/Album (Year)/01 - Title.flac</code> (the torrent keeps seeding). Point a Plex Music library at it.
+          </p>
+          <Field label="Music library folder" hint="As ScreenMate sees it, e.g. /mnt/video/music. It must be mounted into the container."
+                 value={settings.organise_music_dir ?? ""} onChange={(v) => set("organise_music_dir", v)} placeholder="/mnt/video/music" />
+        </Section>
+        </div>
+
         <Section title="Plex Media Server">
           <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
             Optional. ScreenMate will refresh your Plex library whenever a download completes.

@@ -47,6 +47,9 @@ def get_watchlist(db: Session = Depends(get_db)):
         if item.kind == "movie":
             row.movie_state = movies.state(db, item)
             row.removes_at = movies.removes_on(db, item, days)
+        elif item.kind == "artist":
+            from ..services import music
+            row.albums = music.summary(db, item)
         out.append(row)
     return out
 
@@ -134,7 +137,7 @@ async def refresh_metadata(db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
     due = [
         i for i in db.query(WatchlistItem).filter(WatchlistItem.poster_url.is_(None)).all()
-        if show_metadata.metadata_due(i, now)
+        if i.kind != "artist" and show_metadata.metadata_due(i, now)
     ]
     checked = matched = 0
     unavailable = False
@@ -175,6 +178,12 @@ def delete_watchlist_item(item_id: int, db: Session = Depends(get_db)):
     db_item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
     if not db_item:
         raise HTTPException(status_code=404, detail="Item not found")
+    from ..models import Download, MusicAlbum
+    album_ids = [a.id for a in db.query(MusicAlbum.id).filter(MusicAlbum.watchlist_id == item_id)]
+    if album_ids:
+        db.query(Download).filter(Download.music_album_id.in_(album_ids)).update(
+            {Download.music_album_id: None}, synchronize_session=False)
+        db.query(MusicAlbum).filter(MusicAlbum.watchlist_id == item_id).delete(synchronize_session=False)
     db.delete(db_item)
     db.commit()
     return {"ok": True}

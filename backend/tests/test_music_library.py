@@ -1,0 +1,255 @@
+"""The music library: tags, scanning and checks, MusicBrainz tag fixes, organising for
+Plex, importing finished album downloads, and the routes. Audio clips are made with ffmpeg."""
+import json
+import os
+import shutil
+import subprocess
+
+import pytest
+
+from app.models import Download, MusicAlbum, MusicLibAlbum, MusicTrack, Setting, WatchlistItem
+from app.services import music_library as ml
+from app.services import musicbrainz
+
+from tests.test_pipeline import env  # noqa: F401
+from tests.test_organise import lib  # noqa: F401
+
+pytestmark = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
+
+
+def clip(path, kbps=None, **tags):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    codec = ["-c:a", "flac"] if path.suffix == ".flac" else ["-c:a", "libmp3lame", "-b:a", f"{kbps or 320}k"]
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=d=1", *codec, str(path)],
+                   check=True)
+    if tags:
+        assert ml.write(str(path), tags)
+    return path
+
+
+def album(folder, artist="Phoebe Bridgers", title="Punisher", year="2020", n=3, ext=".flac", **kw):
+    for i in range(1, n + 1):
+        clip(folder / f"{i:02d} track{ext}", artist=artist, albumartist=artist, album=title, date=year,
+             title=f"Song {i}", tracknumber=f"{i}/{n}", **kw)
+    return folder
+
+
+@pytest.fixture
+def root(lib):
+    client, Session, media = lib
+    music = media.parent / "music"
+    music.mkdir()
+    with Session() as db:
+        db.merge(Setting(key="organise_music_dir", value=str(music)))
+        db.commit()
+    return client, Session, music
+
+
+# ── tags ────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("ext", [".flac", ".mp3"])
+def test_tags_round_trip(tmp_path, ext):
+    p = clip(tmp_path / f"a{ext}", title="Garden Song", artist="Phoebe Bridgers", album="Punisher",
+             date="2020-06-18", tracknumber="1/11", discnumber="1/1", musicbrainz_releasegroupid="rg-2")
+    t = ml.read(str(p))
+    assert (t["title"], t["artist"], t["album_artist"], t["album"], t["year"]) == \
+        ("Garden Song", "Phoebe Bridgers", "Phoebe Bridgers", "Punisher", 2020)
+    assert (t["track_no"], t["track_total"], t["disc_no"]) == (1, 11, 1)
+    assert t["mb_release_group_id"] == "rg-2" and t["duration_sec"] > 0.5
+    assert t["lossless"] == (ext == ".flac")
+
+
+# ── scanning and checks ─────────────────────────────────────────────────────
+
+
+def test_scan_finds_albums_and_flags_problems(root):
+    client, Session, music = root
+    album(music / "Phoebe Bridgers" / "Punisher (2020)")
+    album(music / "Phoebe Bridgers" / "Copy of Punisher")                    # a duplicate
+    gaps = music / "Phoebe Bridgers" / "Stranger in the Alps (2017)"
+    clip(gaps / "01.flac", artist="Phoebe Bridgers", album="Stranger in the Alps", title="Smoke", tracknumber="1/3")
+    clip(gaps / "03.flac", artist="Phoebe Bridgers", album="Stranger in the Alps", title="Motion", tracknumber="3/3")
+    clip(music / "Unknown" / "rip" / "track.flac")                             # no tags at all
+    album(music / "Lo" / "Fi (2001)", artist="Lo", title="Fi", ext=".mp3", n=2, )
+    for f in (music / "Lo" / "Fi (2001)").iterdir():                          # re-encode at 128 kbps
+        clip(f, kbps=128, artist="Lo", albumartist="Lo", album="Fi", title=f.stem, tracknumber="1")
+    res = ml.scan()
+    assert res["ok"] and res["albums"] == 5
+    with Session() as db:
+        by = {os.path.basename(a.folder): json.loads(a.issues or "[]") for a in db.query(MusicLibAlbum)}
+        assert by["Punisher (2020)"] == ["duplicate"] and by["Copy of Punisher"] == ["duplicate"]
+        assert by["Stranger in the Alps (2017)"] == ["missing_tracks"]
+        assert "untagged" in by["rip"]
+        assert "low_bitrate" in by["Fi (2001)"]
+        p = db.query(MusicLibAlbum).filter(MusicLibAlbum.folder.endswith("Punisher (2020)")).one()
+        assert (p.artist, p.title, p.year, p.format, p.tracks) == ("Phoebe Bridgers", "Punisher", 2020, "flac", 3)
+    shutil.rmtree(music / "Phoebe Bridgers" / "Copy of Punisher")
+    res = ml.scan()
+    with Session() as db:
+        assert res["removed"] == 1
+        p = db.query(MusicLibAlbum).filter(MusicLibAlbum.folder.endswith("Punisher (2020)")).one()
+        assert p.issues is None
+
+
+def test_disc_folders_are_one_album(root):
+    client, Session, music = root
+    a = music / "Band" / "Double (1999)"
+    clip(a / "CD1" / "01.flac", artist="Band", album="Double", title="One", tracknumber="1", discnumber="1")
+    clip(a / "CD2" / "01.flac", artist="Band", album="Double", title="Two", tracknumber="1", discnumber="2")
+    ml.scan()
+    with Session() as db:
+        assert db.query(MusicLibAlbum).count() == 1 and db.query(MusicLibAlbum).one().tracks == 2
+
+
+# ── tags from MusicBrainz ───────────────────────────────────────────────────
+
+
+@pytest.fixture
+def mbz(monkeypatch):
+    rel = {"mbid": "rel-1", "title": "Punisher", "date": "2020-06-18", "artist": "Phoebe Bridgers", "discs": 1,
+           "tracks": [{"disc": 1, "no": i, "title": t, "artist": "Phoebe Bridgers"}
+                      for i, t in enumerate(["DVD Menu", "Garden Song", "Kyoto"], 1)]}
+    monkeypatch.setattr(musicbrainz, "find_release_group", lambda a, b: "rg-2")
+    monkeypatch.setattr(musicbrainz, "releases", lambda rg: [dict(rel, tracks=rel["tracks"][:2]), rel])
+    monkeypatch.setattr(musicbrainz, "cover_bytes", lambda rg: b"\xff\xd8jpeg")
+
+
+def test_fix_tags_from_musicbrainz(tmp_path, mbz):
+    files = [str(clip(tmp_path / "rip" / f"track{i}.flac")) for i in (1, 2, 3)]
+    res = ml.fix_tags(files, "Phoebe Bridgers", "Punisher")
+    assert res["ok"] and res["tagged"] == 3
+    t = [ml.read(f) for f in files]
+    assert [x["title"] for x in t] == ["DVD Menu", "Garden Song", "Kyoto"]
+    assert t[1]["track_no"] == 2 and t[1]["track_total"] == 3 and t[1]["year"] == 2020
+    assert t[0]["mb_release_group_id"] == "rg-2"
+    assert (tmp_path / "rip" / "cover.jpg").read_bytes() == b"\xff\xd8jpeg"
+    assert not ml.fix_tags(files[:1] * 5, "Phoebe Bridgers", "Punisher")["ok"]          # no 5-track release
+
+
+# ── organising ──────────────────────────────────────────────────────────────
+
+
+def test_organise_names_files_for_plex(root, tmp_path):
+    client, Session, music = root
+    src = album(tmp_path / "dl" / "Phoebe.Bridgers-Punisher-2020-FLAC")
+    (src / "folder.jpg").write_bytes(b"img")
+    files = sorted(str(p) for p in src.glob("*.flac"))
+    with Session() as db:
+        res = ml.organise(db, files, str(music), keep_source=True)
+    dest = music / "Phoebe Bridgers" / "Punisher (2020)"
+    assert res["ok"] and res["folder"] == str(dest) and res["moved"] == 3
+    assert sorted(p.name for p in dest.iterdir()) == ["01 - Song 1.flac", "02 - Song 2.flac", "03 - Song 3.flac",
+                                                    "cover.jpg"]
+    assert all(os.path.exists(f) for f in files)                                # still seeding
+    with Session() as db:
+        again = ml.organise(db, files, str(music), keep_source=True)
+    assert again["moved"] == 0 and again["skipped"] == 3                         # never overwritten
+
+
+def test_organise_multi_disc_and_untagged(root, tmp_path):
+    client, Session, music = root
+    a = clip(tmp_path / "x" / "a.flac", artist="Band", album="Double", title="One", tracknumber="1", discnumber="1")
+    b = clip(tmp_path / "x" / "b.flac", artist="Band", album="Double", title="Two", tracknumber="1", discnumber="2")
+    with Session() as db:
+        res = ml.organise(db, [str(a), str(b)], str(music), keep_source=False)
+        assert sorted(p.name for p in (music / "Band" / "Double").iterdir()) == ["1-01 - One.flac", "2-01 - Two.flac"]
+        assert not a.exists()
+        bare = clip(tmp_path / "y" / "c.flac")
+        assert not ml.organise(db, [str(bare)], str(music), keep_source=False)["ok"]
+
+
+# ── a finished album download ───────────────────────────────────────────────
+
+
+def test_finished_download_is_tagged_organised_and_indexed(root, tmp_path, mbz, monkeypatch):
+    client, Session, music = root
+    monkeypatch.setattr(ml, "IMPORT_SYNC", True)
+    monkeypatch.setattr("app.services.pipeline.on_download_complete", lambda bind, dl_id: None)
+    dl_dir = tmp_path / "downloads"
+    rip = dl_dir / "Phoebe Bridgers - Punisher [FLAC]"
+    for i in (1, 2, 3):
+        clip(rip / f"{i}.flac")
+    with Session() as db:
+        w = WatchlistItem(kind="artist", mbid="art-1", title="Phoebe Bridgers", search_query="Phoebe Bridgers",
+                          season=1, episode=1)
+        db.add(w)
+        db.flush()
+        al = MusicAlbum(watchlist_id=w.id, mbid="rg-2", title="Punisher", release_date="2020-06-18", status="grabbed")
+        db.add(al)
+        db.flush()
+        dl = Download(title=rip.name, download_path=str(dl_dir), status="downloading", watchlist_id=w.id,
+                      music_album_id=al.id, qbit_removed=True)
+        db.add(dl)
+        db.commit()
+        dl.status = "completed"
+        db.commit()
+    dest = music / "Phoebe Bridgers" / "Punisher (2020)"
+    assert sorted(p.name for p in dest.glob("*.flac")) == ["01 - DVD Menu.flac", "02 - Garden Song.flac",
+                                                           "03 - Kyoto.flac"]
+    assert (dest / "cover.jpg").exists() and (rip / "1.flac").exists()
+    with Session() as db:
+        assert db.query(MusicAlbum).one().status == "have"
+        a = db.query(MusicLibAlbum).one()
+        assert a.folder == str(dest) and a.tracks == 3 and a.cover == "cover.jpg" and a.issues is None
+
+
+# ── routes ──────────────────────────────────────────────────────────────────
+
+
+def test_routes(root, mbz, monkeypatch):
+    client, Session, music = root
+    monkeypatch.setattr(ml, "IMPORT_SYNC", True)
+    src = music / "incoming" / "rip"
+    for i in (1, 2, 3):
+        clip(src / f"{i}.flac", artist="Phoebe Bridgers", albumartist="Phoebe Bridgers", album="Punisher")
+    (src / "cover.png").write_bytes(b"png")
+    assert client.post("/api/music/library/scan").json()["ok"]
+    st = client.get("/api/music/library/status").json()
+    assert st["last"]["albums"] == 1 and st["music_dir"] == str(music)
+    a = client.get("/api/music/library/albums").json()[0]
+    assert a["issues"] == ["untagged"] and a["has_cover"] and a["tracks"] == 3
+    detail = client.get(f"/api/music/library/albums/{a['id']}").json()
+    assert len(detail["track_list"]) == 3
+    assert client.get(f"/api/music/library/albums/{a['id']}/cover").content == b"png"
+    tid = detail["track_list"][0]["id"]
+    assert client.get(f"/api/music/library/tracks/{tid}/stream").status_code == 200
+
+    r = client.post(f"/api/music/library/albums/{a['id']}/fix-tags").json()
+    assert r["ok"] and r["tagged"] == 3
+    a = client.get("/api/music/library/albums").json()[0]
+    assert a["issues"] == [] and a["title"] == "Punisher"
+
+    r = client.post(f"/api/music/library/albums/{a['id']}/organise").json()
+    assert r["ok"] and r["folder"] == str(music / "Phoebe Bridgers" / "Punisher (2020)")
+    a = client.get("/api/music/library/albums").json()[0]
+    assert a["folder"] == r["folder"] and not src.exists()
+
+    r = client.post(f"/api/music/library/albums/{a['id']}/rating", json={"stars": 4}).json()
+    assert r["plex"] == "off" and r["rating"] == 4
+    r = client.post(f"/api/music/library/albums/{a['id']}/collections", json={"add": ["Sad Girl Indie"]}).json()
+    assert r["collections"] == ["Sad Girl Indie"]
+    assert client.get("/api/music/library/collections").json()["names"] == ["Sad Girl Indie"]
+    assert client.post("/api/music/library/albums/999/rating", json={"stars": 1}).status_code == 404
+    assert client.get("/api/music/library/tracks/999/stream").status_code == 404
+
+
+def test_organise_needs_a_music_folder(lib):
+    client, Session, media = lib
+    with Session() as db:
+        a = MusicLibAlbum(folder="/nowhere", artist="X", title="Y")
+        db.add(a)
+        db.commit()
+        aid = a.id
+    r = client.post(f"/api/music/library/albums/{aid}/organise")
+    assert r.status_code == 400 and "music library folder" in r.json()["detail"]
+
+
+def test_tracks_table_cleared_with_album(root):
+    client, Session, music = root
+    album(music / "A" / "B (2000)", artist="A", title="B", n=2)
+    ml.scan()
+    shutil.rmtree(music / "A")
+    ml.scan()
+    with Session() as db:
+        assert db.query(MusicLibAlbum).count() == 0 and db.query(MusicTrack).count() == 0

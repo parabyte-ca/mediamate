@@ -367,6 +367,12 @@ def _after_commit(session: Session) -> None:
             movies.on_download_complete(bind, dl_id)
         except Exception:
             logger.exception("Marking the watchlist movie finished failed (download %s)", dl_id)
+        try:
+            from . import music, music_library
+            if music.on_download_complete(bind, dl_id):
+                music_library.import_later(bind, dl_id)
+        except Exception:
+            logger.exception("Marking the album finished failed (download %s)", dl_id)
         _start_pipeline(bind, dl_id)
 
 

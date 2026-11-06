@@ -47,6 +47,9 @@ DEFAULTS: dict[str, str] = {
     "default_profile_id": "",          # new TV shows
     "default_movie_profile_id": "",    # new movies
     "browse_country": "US",
+    "qbit_music_category": "music",    # qBittorrent category for album downloads
+    "music_download_path_id": "",
+    "organise_music_dir": "",          # music library: Artist/Album (Year)/NN - Title      # Folders entry albums download to ("" = a folder named Music)
     # Trakt watchlist sync
     "trakt_enabled": "false",
     "trakt_client_id": "",

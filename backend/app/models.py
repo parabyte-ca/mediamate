@@ -191,6 +191,7 @@ class MusicLibAlbum(Base):
     plex_seen = Column(String, nullable=True)
     plex_dirty = Column(Integer, nullable=False, default=0, server_default="0")
     scanned_at = Column(DateTime, nullable=True)
+    cover_checked_at = Column(DateTime, nullable=True)   # last MusicBrainz cover lookup that found none
 
 
 class MusicTrack(Base):

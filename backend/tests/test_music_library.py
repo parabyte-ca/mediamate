@@ -17,6 +17,15 @@ from tests.test_organise import lib  # noqa: F401
 pytestmark = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not installed")
 
 
+@pytest.fixture(autouse=True)
+def offline(monkeypatch):
+    """Never reach the real MusicBrainz; tests that need it set their own answers."""
+    def nope(*a, **k):
+        raise musicbrainz.MusicBrainzUnavailable("offline in tests")
+    monkeypatch.setattr(musicbrainz, "_get", nope)
+    monkeypatch.setattr(musicbrainz, "cover_bytes", lambda rg: None)
+
+
 def clip(path, kbps=None, **tags):
     path.parent.mkdir(parents=True, exist_ok=True)
     codec = ["-c:a", "flac"] if path.suffix == ".flac" else ["-c:a", "libmp3lame", "-b:a", f"{kbps or 320}k"]
@@ -253,3 +262,99 @@ def test_tracks_table_cleared_with_album(root):
     ml.scan()
     with Session() as db:
         assert db.query(MusicLibAlbum).count() == 0 and db.query(MusicTrack).count() == 0
+
+
+# ── covers ──────────────────────────────────────────────────────────────────
+
+JPEG = b"\xff\xd8\xff\xe0embedded"
+
+
+def embed(path, data=JPEG):
+    if path.suffix == ".flac":
+        from mutagen.flac import FLAC, Picture
+        f = FLAC(str(path))
+        pic = Picture()
+        pic.type, pic.mime, pic.data = 3, "image/jpeg", data
+        f.add_picture(pic)
+        f.save()
+    else:
+        from mutagen.id3 import APIC, ID3
+        tags = ID3(str(path))
+        tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=data))
+        tags.save()
+
+
+@pytest.mark.parametrize("ext", [".flac", ".mp3"])
+def test_embedded_artwork_becomes_cover_jpg(tmp_path, ext, monkeypatch):
+    monkeypatch.setattr(musicbrainz, "cover_bytes", lambda rg: pytest.fail("no network when files have art"))
+    f = clip(tmp_path / "a" / f"01{ext}", title="x")
+    embed(f)
+    assert ml.embedded_cover(str(f)) == (JPEG, ".jpg")
+    res = ml.ensure_cover(str(f.parent), None, "A", "B", "rg-1")
+    assert res == {"cover": "cover.jpg", "source": "embedded"}
+    assert (f.parent / "cover.jpg").read_bytes() == JPEG
+
+
+def test_cover_from_musicbrainz_and_never_replaced(tmp_path, mbz):
+    folder = tmp_path / "a"
+    clip(folder / "01.flac")
+    assert ml.ensure_cover(str(folder), None, "Phoebe Bridgers", "Punisher")["source"] == "musicbrainz"
+    assert (folder / "cover.jpg").read_bytes() == b"\xff\xd8jpeg"
+    (folder / "cover.jpg").write_bytes(b"mine")
+    assert ml.ensure_cover(str(folder), None, "Phoebe Bridgers", "Punisher")["source"] == "existing"
+    assert (folder / "cover.jpg").read_bytes() == b"mine"
+
+
+def test_tagged_download_still_gets_a_cover(root, tmp_path, mbz, monkeypatch):
+    client, Session, music = root
+    monkeypatch.setattr(ml, "IMPORT_SYNC", True)
+    monkeypatch.setattr("app.services.pipeline.on_download_complete", lambda bind, dl_id: None)
+    monkeypatch.setattr(ml, "fix_tags", lambda *a, **k: pytest.fail("tags are fine; no tag fix"))
+    rip = album(tmp_path / "downloads" / "Phoebe Bridgers - Punisher [FLAC]")
+    with Session() as db:
+        w = WatchlistItem(kind="artist", mbid="art-1", title="Phoebe Bridgers", search_query="Phoebe Bridgers",
+                          season=1, episode=1)
+        db.add(w)
+        db.flush()
+        al = MusicAlbum(watchlist_id=w.id, mbid="rg-2", title="Punisher", status="grabbed")
+        db.add(al)
+        db.flush()
+        dl = Download(title=rip.name, download_path=str(rip.parent), status="downloading", watchlist_id=w.id,
+                      music_album_id=al.id, qbit_removed=True)
+        db.add(dl)
+        db.commit()
+        dl.status = "completed"
+        db.commit()
+    dest = music / "Phoebe Bridgers" / "Punisher (2020)"
+    assert (dest / "cover.jpg").read_bytes() == b"\xff\xd8jpeg"
+    with Session() as db:
+        assert db.query(MusicLibAlbum).one().cover == "cover.jpg"
+
+
+def test_scan_fills_missing_covers_and_waits_before_asking_again(root, monkeypatch):
+    client, Session, music = root
+    calls = []
+    monkeypatch.setattr(musicbrainz, "find_release_group", lambda a, b: calls.append(b) or None)
+    monkeypatch.setattr(musicbrainz, "cover_bytes", lambda rg: pytest.fail("no group, no download"))
+    album(music / "A" / "Art (2001)", artist="A", title="Art", n=1)
+    embed(next((music / "A" / "Art (2001)").glob("*.flac")))
+    album(music / "B" / "Bare (2002)", artist="B", title="Bare", n=1)
+    res = ml.scan()
+    assert res["covers"]["embedded"] == 1 and calls == ["Bare"]
+    with Session() as db:
+        by = {a.title: a for a in db.query(MusicLibAlbum)}
+        assert by["Art"].cover == "cover.jpg" and by["Bare"].cover is None and by["Bare"].cover_checked_at
+    ml.scan()
+    assert calls == ["Bare"]                                     # not asked again for 30 days
+
+
+def test_get_cover_route(root, mbz):
+    client, Session, music = root
+    album(music / "Phoebe Bridgers" / "Punisher (2020)", n=1)
+    ml.scan()
+    with Session() as db:
+        aid = db.query(MusicLibAlbum).one().id
+    r = client.post(f"/api/music/library/albums/{aid}/cover").json()
+    assert r["ok"] and r["source"] in ("musicbrainz", "existing")
+    assert client.get("/api/music/library/albums").json()[0]["has_cover"]
+    assert client.post(f"/api/music/library/albums/{aid}/cover").json()["source"] == "existing"

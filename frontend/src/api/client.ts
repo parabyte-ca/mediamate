@@ -869,6 +869,7 @@ export const api = {
     libraryStatus: () => req<{ running: boolean; roots: string[]; music_dir: string | null;
                                last: { ok: boolean; albums?: number; tracks?: number; removed?: number; msg?: string } | null }>("/music/library/status"),
     fixTags: (id: number) => req<{ ok: boolean; tagged: number; msg: string }>(`/music/library/albums/${id}/fix-tags`, { method: "POST" }),
+    getCover: (id: number) => req<{ ok: boolean; source: string | null; msg: string }>(`/music/library/albums/${id}/cover`, { method: "POST" }),
     organise: (id: number) => req<{ ok: boolean; folder: string; msg: string }>(`/music/library/albums/${id}/organise`, { method: "POST" }),
     rateAlbum: (id: number, stars: number) =>
       req<TagResult>(`/music/library/albums/${id}/rating`, { method: "POST", body: JSON.stringify({ stars }) }),

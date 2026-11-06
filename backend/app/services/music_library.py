@@ -299,8 +299,9 @@ def scan(bind=None) -> dict:
                     removed += 1
             mark_duplicates(db)
             db.commit()
+            covers = fill_covers(db)
             return {"ok": True, "roots": rs, "albums": db.query(MusicLibAlbum).count(),
-                    "tracks": db.query(MusicTrack).count(), "removed": removed}
+                    "tracks": db.query(MusicTrack).count(), "removed": removed, "covers": covers}
     finally:
         _scan_lock.release()
 
@@ -339,17 +340,123 @@ def fix_tags(files: list[str], artist: str, album: str, rg_mbid: str | None = No
             "musicbrainz_releasegroupid": rg, "musicbrainz_albumid": rel["mbid"],
         })
         tagged += ok
-    folder = os.path.dirname(infos[0]["path"])
-    if not cover_in(folder):
-        data = musicbrainz.cover_bytes(rg)
-        if data:
-            try:
-                with open(os.path.join(folder, "cover.jpg"), "wb") as fh:
-                    fh.write(data)
-            except OSError:
-                pass
+    ensure_cover(os.path.dirname(infos[0]["path"]), [i["path"] for i in infos], rg_mbid=rg)
     return {"ok": tagged == len(infos), "tagged": tagged, "release_group": rg,
             "msg": f"Tagged {tagged} of {len(infos)} tracks from MusicBrainz"}
+
+
+# ── covers ──────────────────────────────────────────────────────────────────
+
+COVER_RETRY_DAYS = 30
+SCAN_LOOKUPS = 25                  # MusicBrainz cover lookups per scan (1 request a second)
+
+
+def embedded_cover(path: str) -> tuple[bytes, str] | None:
+    """The front cover stored inside an audio file, as (data, ".jpg"/".png"), or None."""
+    import base64
+    import mutagen
+    try:
+        f = mutagen.File(path)
+    except Exception:
+        return None
+    if f is None:
+        return None
+    pics = []
+    for p in getattr(f, "pictures", None) or []:                      # FLAC
+        pics.append((p.type, p.data, p.mime))
+    tags = f.tags
+    try:
+        for k in list(tags.keys()) if tags is not None else []:
+            v = tags[k]
+            if str(k).startswith("APIC"):                               # MP3 (ID3)
+                pics.append((getattr(v, "type", 0), v.data, v.mime))
+            elif k == "covr":                                           # MP4 / M4A
+                for c in v:
+                    pics.append((3, bytes(c), "image/png" if getattr(c, "imageformat", 13) == 14 else "image/jpeg"))
+            elif str(k).lower() == "metadata_block_picture":            # Ogg / Opus
+                from mutagen.flac import Picture
+                for b64 in v:
+                    try:
+                        p = Picture(base64.b64decode(b64))
+                        pics.append((p.type, p.data, p.mime))
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+    pics = [p for p in pics if p[1]]
+    if not pics:
+        return None
+    ptype, data, mime = sorted(pics, key=lambda p: p[0] != 3)[0]       # type 3 = front cover
+    return data, ".png" if "png" in (mime or "").lower() else ".jpg"
+
+
+def _save_cover(folder: str, data: bytes, ext: str = ".jpg") -> str | None:
+    name = "cover" + ext
+    try:
+        with open(os.path.join(folder, name), "wb") as fh:
+            fh.write(data)
+        return name
+    except OSError as exc:
+        logger.info("Couldn't save the cover in %s: %s", folder, exc)
+        return None
+
+
+def ensure_cover(folder: str, files: list[str] | None = None, artist: str | None = None,
+                 album: str | None = None, rg_mbid: str | None = None, online: bool = True) -> dict:
+    """Give an album folder a cover image if it has none: from the files' embedded
+    artwork first, else the Cover Art Archive (MusicBrainz). Never replaces a picture.
+    Returns {"cover": file name or None, "source": "existing" | "embedded" | "musicbrainz" | None}."""
+    have = cover_in(folder)
+    if have:
+        return {"cover": have, "source": "existing"}
+    for f in (files if files is not None else audio_files(folder))[:5]:
+        got = embedded_cover(f)
+        if got:
+            name = _save_cover(folder, *got)
+            if name:
+                return {"cover": name, "source": "embedded"}
+            break
+    if not online or not (rg_mbid or (artist and album)):
+        return {"cover": None, "source": None}
+    from . import musicbrainz
+    try:
+        rg = rg_mbid or musicbrainz.find_release_group(artist, album)
+        data = musicbrainz.cover_bytes(rg) if rg else None
+    except musicbrainz.MusicBrainzUnavailable:
+        return {"cover": None, "source": None, "unavailable": True}
+    if data:
+        ext = ".png" if data[:8] == b"\x89PNG\r\n\x1a\n" else ".jpg"
+        name = _save_cover(folder, data, ext)
+        if name:
+            return {"cover": name, "source": "musicbrainz"}
+    return {"cover": None, "source": None}
+
+
+def fill_covers(db, limit: int = SCAN_LOOKUPS) -> dict:
+    """Covers for albums without one: embedded artwork for all of them, and up to
+    ``limit`` MusicBrainz lookups (an album with none is asked again after 30 days)."""
+    from datetime import timedelta
+    from ..models import MusicLibAlbum
+    now = datetime.now(timezone.utc)
+    found = {"embedded": 0, "musicbrainz": 0}
+    lookups = 0
+    for a in db.query(MusicLibAlbum).filter(MusicLibAlbum.cover.is_(None)).all():
+        if not os.path.isdir(a.folder):
+            continue
+        checked = a.cover_checked_at
+        if checked is not None and checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        online = lookups < limit and (checked is None or now - checked > timedelta(days=COVER_RETRY_DAYS))
+        res = ensure_cover(a.folder, None, a.artist, a.title, a.mb_release_group_id, online=online)
+        if res.get("cover"):
+            a.cover = res["cover"]
+            found[res["source"]] = found.get(res["source"], 0) + 1
+        elif online and not res.get("unavailable"):
+            a.cover_checked_at = now
+        if online and res.get("source") != "embedded":
+            lookups += 1
+    db.commit()
+    return found
 
 
 # ── organising ──────────────────────────────────────────────────────────────
@@ -486,6 +593,9 @@ def import_download(bind, download_id: int) -> dict:
             res = {"ok": True, "msg": "No music library folder set; left in the download folder"}
             folder = os.path.dirname(files[0])
         if folder and os.path.isdir(folder):
+            placed = audio_files(folder) if root and os.path.isdir(root) else files
+            ensure_cover(folder, placed, item.title if item else None, album.title if album else None,
+                         album.mbid if album else None)
             scan_folder(db, os.path.normpath(folder))
             mark_duplicates(db)
             db.commit()

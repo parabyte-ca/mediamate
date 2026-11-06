@@ -101,6 +101,9 @@ MIGRATIONS: list[tuple[str, str | None]] = [
     ("ALTER TABLE media_files ADD COLUMN plex_key TEXT", None),
     ("ALTER TABLE media_files ADD COLUMN plex_seen TEXT", None),
     ("ALTER TABLE media_files ADD COLUMN plex_dirty INTEGER NOT NULL DEFAULT 0", None),
+    # Music: artists on the watchlist, album downloads.
+    ("ALTER TABLE watchlist ADD COLUMN mbid TEXT", None),
+    ("ALTER TABLE downloads ADD COLUMN music_album_id INTEGER", None),
 ]
 
 

@@ -17,6 +17,7 @@ import {
   X,
   Trash2,
   Tv,
+  Music,
   XCircle,
 } from "lucide-react";
 import {
@@ -33,14 +34,15 @@ import {
 } from "../api/client";
 import EpisodeGuide from "../components/EpisodeGuide";
 import Poster from "../components/Poster";
+import { AddArtistDialog, ArtistCard } from "../components/MusicWatch";
 import { fmtAgo, fmtDate, fmtDay } from "../utils";
 
-type Tab = "all" | "tv" | "movies";
+type Tab = "all" | "tv" | "movies" | "music";
 const TAB_KEY = "sm-watchlist-tab";
 function readTab(): Tab {
   try {
     const v = localStorage.getItem(TAB_KEY);
-    return v === "tv" || v === "movies" ? v : "all";
+    return v === "tv" || v === "movies" || v === "music" ? v : "all";
   } catch {
     return "all";
   }
@@ -425,7 +427,7 @@ function FormModal({ initial, initialKind = "tv", paths, profiles, defaultProfil
   };
   const [form, setForm] = useState<WatchlistCreate>(
     initial
-      ? { title: initial.title, search_query: initial.search_query, quality: initial.quality, codec: initial.codec ?? "x265", season: initial.season, episode: initial.episode, download_path_id: initial.download_path_id, enabled: initial.enabled, max_size_mb: initial.max_size_mb ?? null, preferred_groups: initial.preferred_groups ?? null, prefer_season_packs: initial.prefer_season_packs ?? false, profile_id: initial.profile_id ?? null, audience: initial.audience ?? "auto", kind: initial.kind ?? "tv" }
+      ? { title: initial.title, search_query: initial.search_query, quality: initial.quality, codec: initial.codec ?? "x265", season: initial.season, episode: initial.episode, download_path_id: initial.download_path_id, enabled: initial.enabled, max_size_mb: initial.max_size_mb ?? null, preferred_groups: initial.preferred_groups ?? null, prefer_season_packs: initial.prefer_season_packs ?? false, profile_id: initial.profile_id ?? null, audience: initial.audience ?? "auto", kind: initial.kind === "movie" ? "movie" : "tv" }
       : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: defaultPath?.id, enabled: true, max_size_mb: null, preferred_groups: null, prefer_season_packs: false, profile_id: defaultFor(initialKind), audience: "auto", kind: initialKind }
   );
   const profile = profiles.find((p) => p.id === form.profile_id);
@@ -1030,7 +1032,9 @@ export default function Watchlist() {
   const [bulkWorking, setBulkWorking] = useState(false);
   const [search,     setSearch]    = useState("");
   const [params, setParams] = useSearchParams();
-  const tab: Tab = params.get("type") === "movies" ? "movies" : params.get("type") === "tv" ? "tv" : readTab();
+  const typeParam = params.get("type");
+  const tab: Tab = typeParam === "movies" || typeParam === "tv" || typeParam === "music" ? typeParam : readTab();
+  const [addArtist, setAddArtist] = useState(false);
   const setTab = (t: Tab) => {
     try { localStorage.setItem(TAB_KEY, t); } catch { /* not remembered */ }
     setParams(t === "all" ? {} : { type: t }, { replace: true });
@@ -1106,7 +1110,8 @@ export default function Watchlist() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Remove this show from the watchlist?")) return;
+    const it = items.find((i) => i.id === id);
+    if (!confirm(it?.kind === "artist" ? `Stop following ${it.title}? Downloaded albums stay in your library.` : "Remove this show from the watchlist?")) return;
     await api.watchlist.delete(id); load();
   };
 
@@ -1124,8 +1129,13 @@ export default function Watchlist() {
 
   const q = search.trim().toLowerCase();
   const isMovie = (i: WatchlistItem) => i.kind === "movie";
-  const counts = { all: items.length, tv: items.filter((i) => !isMovie(i)).length, movies: items.filter(isMovie).length };
-  const inTab = items.filter((i) => tab === "all" || (tab === "movies") === isMovie(i));
+  const isArtist = (i: WatchlistItem) => i.kind === "artist";
+  const tabOf = (i: WatchlistItem): Tab => (isArtist(i) ? "music" : isMovie(i) ? "movies" : "tv");
+  const counts = {
+    all: items.length, tv: items.filter((i) => tabOf(i) === "tv").length,
+    movies: items.filter(isMovie).length, music: items.filter(isArtist).length,
+  };
+  const inTab = items.filter((i) => tab === "all" || tabOf(i) === tab);
   const filtered = q
     ? inTab.filter(
         (i) =>
@@ -1133,7 +1143,7 @@ export default function Watchlist() {
           i.search_query.toLowerCase().includes(q)
       )
     : inTab;
-  const noun = tab === "movies" ? "movie" : tab === "tv" ? "show" : "item";
+  const noun = tab === "movies" ? "movie" : tab === "tv" ? "show" : tab === "music" ? "artist" : "item";
 
   const toggleSelect = (id: number) => {
     setSelected((prev) => {
@@ -1194,7 +1204,7 @@ export default function Watchlist() {
         <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Watchlist</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            ScreenMate downloads new episodes of these shows, and each movie once it's out.
+            ScreenMate downloads new episodes of these shows, each movie once it's out, and new albums by these artists.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1226,23 +1236,23 @@ export default function Watchlist() {
             Browse
           </Link>
           <button
-            onClick={() => setModal(true)}
+            onClick={() => (tab === "music" ? setAddArtist(true) : setModal(true))}
             className="flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
           >
             <Plus className="h-4 w-4" />
-            {tab === "movies" ? "Add movie" : tab === "tv" ? "Add show" : "Add"}
+            {tab === "movies" ? "Add movie" : tab === "tv" ? "Add show" : tab === "music" ? "Follow artist" : "Add"}
           </button>
         </div>
       </div>
 
-      {/* TV shows / Movies */}
-      {items.length > 0 && (
-        <div className="mb-3 inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5" role="tablist" aria-label="Show">
-          {([["all", "All", null], ["tv", "TV shows", Tv], ["movies", "Movies", Clapperboard]] as const).map(([id, label, Icon]) => (
+      {/* TV shows / Movies / Music (always shown, so Music is reachable on an empty watchlist) */}
+      {(
+        <div className="mb-3 flex max-w-full overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 p-0.5 sm:inline-flex" role="tablist" aria-label="Show">
+          {([["all", "All", null], ["tv", "TV shows", Tv], ["movies", "Movies", Clapperboard], ["music", "Music", Music]] as const).map(([id, label, Icon]) => (
             <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${tab === id
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1.5 text-sm font-medium sm:px-3 ${tab === id
                 ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}>
-              {Icon && <Icon className="h-4 w-4" aria-hidden />}{label}
+              {Icon && <Icon className="hidden h-4 w-4 sm:block" aria-hidden />}{label}
               <span className={`rounded-full px-1.5 text-xs tabular-nums ${tab === id ? "bg-white/20" : "bg-gray-100 dark:bg-gray-800"}`}>{counts[id]}</span>
             </button>
           ))}
@@ -1257,7 +1267,7 @@ export default function Watchlist() {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={tab === "movies" ? "Filter movies…" : tab === "tv" ? "Filter shows…" : "Filter shows and movies…"}
+            placeholder={tab === "movies" ? "Filter movies…" : tab === "tv" ? "Filter shows…" : tab === "music" ? "Filter artists…" : "Filter shows, movies and artists…"}
             className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 py-2 pl-9 pr-4 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -1301,13 +1311,19 @@ export default function Watchlist() {
         </div>
       )}
 
-      {items.length === 0 ? (
+      {items.length === 0 && tab !== "music" ? (
         <div className="py-20 text-center text-gray-400 dark:text-gray-600">
           <Tv className="mx-auto mb-3 h-12 w-12 opacity-30" />
           <p className="font-medium">No shows on your watchlist yet.</p>
           <p className="mt-1 text-sm">
             Click "Add show", <Link to="/browse" className="text-blue-600 dark:text-blue-400 underline">browse what's airing</Link>, or use the Search page.
           </p>
+        </div>
+      ) : inTab.length === 0 && tab === "music" ? (
+        <div className="py-16 text-center text-gray-400 dark:text-gray-600">
+          <Music className="mx-auto mb-3 h-10 w-10 opacity-30" />
+          <p className="font-medium">You don't follow any artists yet.</p>
+          <p className="mt-1 text-sm">Click "Follow artist" and their new albums download when they come out.</p>
         </div>
       ) : inTab.length === 0 ? (
         <div className="py-16 text-center text-gray-400 dark:text-gray-600">
@@ -1335,7 +1351,18 @@ export default function Watchlist() {
             </p>
           )}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {filtered.map((item) => isMovie(item) ? (
+            {filtered.map((item) => isArtist(item) ? (
+              <ArtistCard
+                key={item.id}
+                item={item}
+                selected={selected.has(item.id)}
+                onToggleSelect={() => toggleSelect(item.id)}
+                onToggle={() => handleToggle(item)}
+                onDelete={() => handleDelete(item.id)}
+                onRefresh={load}
+                onToast={showToast}
+              />
+            ) : isMovie(item) ? (
               <MovieCard
                 key={item.id}
                 item={item}
@@ -1371,6 +1398,11 @@ export default function Watchlist() {
 
       {modal !== null && (
         <FormModal initial={modal === true ? undefined : modal} initialKind={tab === "movies" ? "movie" : "tv"} paths={paths} profiles={profiles} defaultProfileId={defaultProfileId} defaultMovieProfileId={defaultMovieProfileId} onClose={() => setModal(null)} onSave={handleSave} />
+      )}
+
+      {addArtist && (
+        <AddArtistDialog paths={paths} onClose={() => setAddArtist(false)}
+                         onAdded={(name) => { setAddArtist(false); showToast(`Following ${name}`); if (tab !== "music" && tab !== "all") setTab("music"); load(); }} />
       )}
 
       {toast && (

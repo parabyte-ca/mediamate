@@ -893,6 +893,15 @@ export default function Settings() {
             <div className="sm:col-span-2">
               <Field label="Category" hint="Torrents added by ScreenMate will use this category in qBittorrent." value={settings.qbit_category ?? ""} onChange={(v) => set("qbit_category", v)} placeholder="screenmate" />
             </div>
+            <Field label="Music category" hint="Album downloads use this category, so qBittorrent can keep them apart." value={settings.qbit_music_category ?? ""} onChange={(v) => set("qbit_music_category", v)} placeholder="music" />
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Music download folder</label>
+              <select value={settings.music_download_path_id ?? ""} onChange={(e) => set("music_download_path_id", e.target.value)} className={FIELD}>
+                <option value="">A folder named "Music" (else the default)</option>
+                {paths.filter((p) => p.downloads !== false).map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+              </select>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Add it under Folders first; an artist can also pick its own.</p>
+            </div>
           </div>
           <div className="mt-4 flex items-center gap-3">
             <button onClick={handleTestQbit} disabled={testing}

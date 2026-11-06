@@ -145,6 +145,9 @@ class WatchlistOut(BaseModel):
     # Movies, filled in by GET /watchlist: waiting | looking | downloading | downloaded | paused
     movie_state: Optional[str] = None
     removes_at: Optional[datetime] = None
+    # Artists: MusicBrainz id and album counts {wanted, grabbed, have, ignored, total, next}
+    mbid: Optional[str] = None
+    albums: Optional[dict] = None
 
     model_config = {"from_attributes": True}
 

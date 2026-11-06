@@ -55,6 +55,8 @@ class WatchlistItem(Base):
     release_date = Column(String, nullable=True)        # YYYY-MM-DD: when good releases appear
     release_kind = Column(String, nullable=True)        # digital | physical | estimated
     completed_at = Column(DateTime, nullable=True)      # the movie's download finished
+    # Music: "artist" items follow an artist (MusicBrainz id); albums in music_albums.
+    mbid = Column(String, nullable=True, index=True)
     keep = Column(Boolean, default=False, server_default="0")
 
     episodes = relationship(
@@ -139,6 +141,31 @@ class Download(Base):
     last_progress_at = Column(DateTime, nullable=True)
     # How many automatic re-searches led to this download (0 = original grab).
     retry_count = Column(Integer, default=0, server_default="0")
+    music_album_id = Column(Integer, ForeignKey("music_albums.id"), nullable=True)
+
+
+class MusicAlbum(Base):
+    """An album of an artist on the Watchlist (MusicBrainz release group).
+
+    status: wanted (look for it once released) | grabbed (downloading) | have |
+    ignored (older albums when following "new releases only", or skipped by hand).
+    """
+    __tablename__ = "music_albums"
+
+    id = Column(Integer, primary_key=True, index=True)
+    watchlist_id = Column(Integer, ForeignKey("watchlist.id", ondelete="CASCADE"), nullable=False, index=True)
+    mbid = Column(String, nullable=False)
+    title = Column(String, nullable=False)
+    album_type = Column(String, nullable=True)           # Album | EP
+    release_date = Column(String, nullable=True)         # YYYY[-MM[-DD]]
+    status = Column(String, nullable=False, default="wanted", server_default="wanted")
+    torrent_name = Column(String, nullable=True)
+    quality = Column(String, nullable=True)              # flac | mp3-320 | ...
+    grabbed_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("watchlist_id", "mbid", name="uq_music_album"),)
 
 
 class DownloadPath(Base):

@@ -50,6 +50,16 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
             item.last_checked = datetime.now(timezone.utc)
             db.commit()
 
+            if item.kind == "artist":
+                try:
+                    from . import music
+                    for r in music.scan_artist(db, item, settings):
+                        if r["status"] == "started":
+                            logger.info("Auto-downloaded album: %s", r.get("title"))
+                except Exception as e:
+                    logger.error("Error processing watchlist artist %d: %s", item.id, e)
+                continue
+
             if item.kind == "movie":
                 try:
                     from . import movies

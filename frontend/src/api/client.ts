@@ -59,6 +59,23 @@ export interface TorrentResult {
   url?: string;
 }
 
+export interface ArtistAlbums {
+  wanted: number; grabbed: number; have: number; ignored: number; total: number;
+  next: { title: string; date: string | null } | null;
+}
+
+export interface MusicArtist {
+  mbid: string; name: string; disambiguation: string; country: string; type: string; begin: string; score: number;
+}
+
+export type AlbumStatus = "wanted" | "grabbed" | "have" | "ignored";
+
+export interface MusicAlbum {
+  id: number; mbid: string; title: string; type: string | null; release_date: string | null;
+  status: AlbumStatus; released: boolean; torrent_name: string | null; quality: string | null;
+  cover_url: string; completed_at: string | null;
+}
+
 export interface WatchlistItem {
   id: number;
   title: string;
@@ -88,8 +105,11 @@ export interface WatchlistItem {
   /** Rename & organise folder: null = from the age rating. */
   audience?: "general" | "mature" | null;
   /** "tv" follows episodes; "movie" waits for its release and downloads once. */
-  kind?: "tv" | "movie";
+  kind?: "tv" | "movie" | "artist";
   tmdb_id?: number | null;
+  /** Artists: MusicBrainz id, and album counts. */
+  mbid?: string | null;
+  albums?: ArtistAlbums | null;
   year?: number | null;
   /** When good releases appear (YYYY-MM-DD); release_kind says how we know. */
   release_date?: string | null;
@@ -804,6 +824,18 @@ export const api = {
     const p = new URLSearchParams({ q, indexer, codec, filter_adult: String(filterAdult) });
     if (quality && quality !== "Any") p.set("quality", quality);
     return req<TorrentResult[]>(`/search?${p}`);
+  },
+
+  music: {
+    searchArtists: (q: string) => req<MusicArtist[]>(`/music/artists/search?q=${encodeURIComponent(q)}`),
+    follow: (body: { mbid: string; start: "new" | "latest" | "all"; include_eps?: boolean; download_path_id?: number | null }) =>
+      req<WatchlistItem>("/watchlist/from-musicbrainz", { method: "POST", body: JSON.stringify(body) }),
+    albums: (itemId: number) => req<MusicAlbum[]>(`/watchlist/${itemId}/albums`),
+    refreshAlbums: (itemId: number) => req<{ new: number; albums: ArtistAlbums }>(`/watchlist/${itemId}/albums/refresh`, { method: "POST" }),
+    setAlbum: (albumId: number, status: "wanted" | "ignored" | "have") =>
+      req<MusicAlbum>(`/music/albums/${albumId}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+    searchAlbum: (albumId: number) =>
+      req<{ status: string; message: string }>(`/music/albums/${albumId}/search`, { method: "POST" }),
   },
 
   watchlist: {

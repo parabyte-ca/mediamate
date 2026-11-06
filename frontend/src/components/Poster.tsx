@@ -55,11 +55,13 @@ export function PosterLightbox({ url, title, onClose }: { url: string; title: st
 
 /** Show poster that degrades to a placeholder icon when missing or broken.
  *  Clicking it opens a larger preview unless `zoomable` is false. */
-export default function Poster({ url, title, className = "h-16 w-11", zoomable = true }: {
+export default function Poster({ url, title, className = "h-16 w-11", zoomable = true, icon: Icon = Tv }: {
   url?: string | null;
   title: string;
   className?: string;
   zoomable?: boolean;
+  /** Shown when there's no picture (a TV by default). */
+  icon?: typeof Tv;
 }) {
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
@@ -69,7 +71,7 @@ export default function Poster({ url, title, className = "h-16 w-11", zoomable =
         className={`flex shrink-0 items-center justify-center rounded-md bg-gray-100 dark:bg-gray-800 text-gray-300 dark:text-gray-600 ${className}`}
         aria-hidden
       >
-        <Tv className="h-1/3 w-1/3" />
+        <Icon className="h-1/3 w-1/3" />
       </div>
     );
   }

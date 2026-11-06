@@ -59,6 +59,8 @@ def get_paths(db: Session = Depends(get_db)):
 def _target_summary(dp: DownloadPath) -> str:
     from ..services.media import targets
     kind = dp.target or "auto"
+    if kind == "music":
+        return "Music: FLAC kept as it is; never encoded"
     if kind == "auto":
         return "H.265; TV 720p–1080p, movies 1080p–4K (by file name)"
     t = targets.folder_target(kind, dp.target_min, dp.target_max, dp.target_shrink, "", dp.name)

@@ -107,3 +107,163 @@ def search_album_now(album_id: int, db: Session = Depends(get_db)):
     except Exception as exc:
         logger.error("Album grab failed for %r: %s", album.title, exc)
         raise HTTPException(status_code=502, detail=f"Could not start the download: {exc}")
+
+
+# ── the music library ───────────────────────────────────────────────────────
+
+import json  # noqa: E402
+import os  # noqa: E402
+import threading  # noqa: E402
+
+from fastapi import Body  # noqa: E402
+from fastapi.responses import FileResponse  # noqa: E402
+
+from ..models import MusicLibAlbum, MusicTrack  # noqa: E402
+from ..services import music_library  # noqa: E402
+
+_scan = {"running": False, "last": None}
+
+
+def _lib_album_out(a: MusicLibAlbum) -> dict:
+    return {"id": a.id, "folder": a.folder, "artist": a.artist, "title": a.title, "year": a.year,
+            "format": a.format, "tracks": a.tracks, "size_bytes": a.size_bytes, "duration_sec": a.duration_sec,
+            "has_cover": bool(a.cover), "mb_release_group_id": a.mb_release_group_id,
+            "issues": json.loads(a.issues or "[]"), "rating": a.rating,
+            "collections": json.loads(a.collections or "[]"), "plex_dirty": a.plex_dirty,
+            "scanned_at": a.scanned_at.isoformat() if a.scanned_at else None}
+
+
+def _lib_album(db: Session, album_id: int) -> MusicLibAlbum:
+    a = db.get(MusicLibAlbum, album_id)
+    if a is None:
+        raise HTTPException(status_code=404, detail="Album not found")
+    return a
+
+
+@router.get("/music/library/albums")
+def library_albums(db: Session = Depends(get_db)):
+    rows = db.query(MusicLibAlbum).order_by(MusicLibAlbum.artist, MusicLibAlbum.year, MusicLibAlbum.title).all()
+    return [_lib_album_out(a) for a in rows]
+
+
+@router.get("/music/library/albums/{album_id}")
+def library_album(album_id: int, db: Session = Depends(get_db)):
+    a = _lib_album(db, album_id)
+    tracks = (db.query(MusicTrack).filter(MusicTrack.album_id == a.id)
+              .order_by(MusicTrack.disc_no, MusicTrack.track_no, MusicTrack.path).all())
+    return {**_lib_album_out(a), "track_list": [
+        {"id": t.id, "title": t.title or os.path.splitext(os.path.basename(t.path))[0], "artist": t.artist,
+         "track_no": t.track_no, "disc_no": t.disc_no, "format": t.format, "bitrate": t.bitrate,
+         "lossless": t.lossless, "duration_sec": t.duration_sec, "size_bytes": t.size_bytes,
+         "file": os.path.basename(t.path)} for t in tracks]}
+
+
+@router.get("/music/library/albums/{album_id}/cover")
+def library_cover(album_id: int, db: Session = Depends(get_db)):
+    a = _lib_album(db, album_id)
+    path = os.path.join(a.folder, a.cover) if a.cover else None
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="No cover")
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/music/library/tracks/{track_id}/stream")
+def library_stream(track_id: int, db: Session = Depends(get_db)):
+    t = db.get(MusicTrack, track_id)
+    if t is None or not os.path.isfile(t.path):
+        raise HTTPException(status_code=404, detail="Track not found")
+    return FileResponse(t.path)
+
+
+@router.post("/music/library/scan")
+def library_scan():
+    if _scan["running"]:
+        return {"ok": True, "running": True}
+
+    def run():
+        try:
+            _scan["last"] = music_library.scan()
+        except Exception as exc:
+            logger.exception("Music scan failed")
+            _scan["last"] = {"ok": False, "msg": str(exc)}
+        finally:
+            _scan["running"] = False
+    _scan["running"] = True
+    if music_library.IMPORT_SYNC:
+        run()
+    else:
+        threading.Thread(target=run, name="music-scan", daemon=True).start()
+    return {"ok": True, "running": _scan["running"]}
+
+
+@router.get("/music/library/status")
+def library_status(db: Session = Depends(get_db)):
+    return {"running": _scan["running"], "last": _scan["last"], "roots": music_library.roots(db),
+            "music_dir": music_library.music_dir(db)}
+
+
+def _album_files(db: Session, a: MusicLibAlbum) -> list[str]:
+    return [t.path for t in db.query(MusicTrack).filter(MusicTrack.album_id == a.id).order_by(MusicTrack.path)
+            if os.path.isfile(t.path)]
+
+
+@router.post("/music/library/albums/{album_id}/fix-tags")
+def library_fix_tags(album_id: int, db: Session = Depends(get_db)):
+    a = _lib_album(db, album_id)
+    files = _album_files(db, a)
+    if not files:
+        raise HTTPException(status_code=404, detail="The album's files are gone; scan again")
+    try:
+        res = music_library.fix_tags(files, a.artist or "", a.title or "", a.mb_release_group_id)
+    except musicbrainz.MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz is unavailable right now ({exc})")
+    music_library.scan_folder(db, a.folder)
+    music_library.mark_duplicates(db)
+    db.commit()
+    return res
+
+
+@router.post("/music/library/albums/{album_id}/organise")
+def library_organise(album_id: int, db: Session = Depends(get_db)):
+    a = _lib_album(db, album_id)
+    root = music_library.music_dir(db)
+    if not root or not os.path.isdir(root):
+        raise HTTPException(status_code=400, detail="Set the music library folder in Settings → Music first")
+    files = _album_files(db, a)
+    res = music_library.organise(db, files, root, keep_source=music_library.in_download_folder(db, a.folder))
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("msg"))
+    old = a.folder
+    if res["folder"] != old:
+        music_library.scan_folder(db, old)
+    music_library.scan_folder(db, os.path.normpath(res["folder"]))
+    music_library.mark_duplicates(db)
+    db.commit()
+    return res
+
+
+@router.post("/music/library/albums/{album_id}/rating")
+def library_rate(album_id: int, body: dict = Body(default={})):
+    from ..services import plex_sync
+    stars = body.get("stars")
+    try:
+        return plex_sync.edit(album_id, rating=None if stars in (None, "", 0) else stars, kind="music")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Album not found")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/music/library/albums/{album_id}/collections")
+def library_collections(album_id: int, body: dict = Body(default={})):
+    from ..services import plex_sync
+    try:
+        return plex_sync.edit(album_id, add=body.get("add") or [], remove=body.get("remove") or [], kind="music")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Album not found")
+
+
+@router.get("/music/library/collections")
+def library_collection_names():
+    from ..services import plex_sync
+    return {"names": plex_sync.collection_names("music")}

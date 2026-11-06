@@ -121,20 +121,30 @@ def _collections(c: dict, section: str) -> dict[str, list[str]]:
     return members
 
 
-def index(c: dict | None = None, force: bool = False) -> tuple[list[PlexItem], list[str]]:
-    """Every movie and episode file Plex has, and every collection name. Cached 10 min."""
+def index(c: dict | None = None, force: bool = False) -> tuple[list[PlexItem], dict[str, list[str]]]:
+    """Every movie, episode and music track file Plex has (a track stands for its album),
+    and the collection names {"video": [...], "music": [...]}. Cached 10 min."""
     c = c or conf()
     if (not force and _cache["items"] is not None and _cache["conf"] == (c["url"], c["token"])
             and time.monotonic() - _cache["at"] < CACHE_SECONDS):
         return _cache["items"], _cache["collections"]
     items: list[PlexItem] = []
-    names: set[str] = set()
+    names: dict[str, set[str]] = {"video": set(), "music": set()}
     for d in _get(c, "/library/sections").iter("Directory"):
         sec, typ = d.get("key"), d.get("type")
-        if not sec or typ not in ("movie", "show"):
+        if not sec or typ not in ("movie", "show", "artist"):
             continue
         colls = _collections(c, sec)
-        names.update(colls[""])
+        names["music" if typ == "artist" else "video"].update(colls[""])
+        if typ == "artist":
+            ratings = {a.get("ratingKey"): _stars(a.get("userRating"))
+                       for a in _get(c, f"/library/sections/{sec}/all", type=9).iter("Directory")}
+            for t in _get(c, f"/library/sections/{sec}/all", type=10).iter("Track"):
+                album = t.get("parentRatingKey") or ""
+                for path, size in _parts(t):
+                    items.append(PlexItem(album, sec, "album", path, size, ratings.get(album),
+                                          album, 9, sorted(colls.get(album, []))))
+            continue
         if typ == "movie":
             for v in _get(c, f"/library/sections/{sec}/all", type=1).iter("Video"):
                 for path, size in _parts(v):
@@ -146,7 +156,8 @@ def index(c: dict | None = None, force: bool = False) -> tuple[list[PlexItem], l
                 for path, size in _parts(v):
                     items.append(PlexItem(v.get("ratingKey"), sec, "episode", path, size, _stars(v.get("userRating")),
                                           show, 2, sorted(colls.get(show, []))))
-    _cache.update(at=time.monotonic(), conf=(c["url"], c["token"]), items=items, collections=sorted(names))
+    _cache.update(at=time.monotonic(), conf=(c["url"], c["token"]), items=items,
+                  collections={k: sorted(v) for k, v in names.items()})
     return items, _cache["collections"]
 
 
@@ -162,9 +173,11 @@ def _split(path: str) -> list[str]:
 
 
 class Matcher:
-    def __init__(self, items: list[PlexItem]):
+    def __init__(self, items: list[PlexItem], kind: str = "video"):
         self.by_name: dict[str, list[PlexItem]] = {}
         for it in items:
+            if (it.kind == "album") != (kind == "music"):
+                continue
             self.by_name.setdefault(os.path.basename(it.file.replace("\\", "/")).lower(), []).append(it)
 
     def find(self, path: str, size: int | None) -> PlexItem | None:
@@ -223,10 +236,50 @@ def _row_state(row) -> dict:
     return _state(row["rating"], json.loads(row["collections"] or "[]"))
 
 
-def _save(file_id: int, st: dict, *, dirty: int, key=None, seen: dict | None = None, keep_key=False) -> None:
+TABLES = {"video": "media_files", "music": "music_lib_albums"}
+
+
+def _rows(kind: str) -> list:
+    if kind == "video":
+        return store.get_all_files()
+    with store.connect() as conn:
+        return conn.execute("SELECT * FROM music_lib_albums").mappings().all()
+
+
+def _get_row(kind: str, row_id: int):
+    if kind == "video":
+        return store.get_file(row_id)
+    with store.connect() as conn:
+        return conn.execute("SELECT * FROM music_lib_albums WHERE id=:id", {"id": row_id}).mappings().fetchone()
+
+
+def _album_tracks() -> dict[int, list[tuple[str, int]]]:
+    out: dict[int, list[tuple[str, int]]] = {}
+    with store.connect() as conn:
+        for r in conn.execute("SELECT album_id, path, size_bytes FROM music_tracks ORDER BY path").mappings():
+            out.setdefault(r["album_id"], []).append((r["path"], r["size_bytes"] or 0))
+    return out
+
+
+def _locate(kind: str, row, match: "Matcher", tracks: dict | None = None) -> PlexItem | None:
+    if kind == "video":
+        return match.find(row["path"], row["size_bytes"])
+    for path, size in (tracks if tracks is not None else _album_tracks()).get(row["id"], [])[:5]:
+        it = match.find(path, size)
+        if it is not None:
+            return it
+    return None
+
+
+def _label(kind: str, row) -> str:
+    return row["filename"] if kind == "video" else f"{row['artist']} – {row['title']}"
+
+
+def _save(file_id: int, st: dict, *, dirty: int, key=None, seen: dict | None = None, keep_key=False,
+          kind: str = "video") -> None:
     sets = {"r": st["rating"], "c": json.dumps(st["collections"]) if st["collections"] else None,
             "d": dirty, "id": file_id}
-    sql = "UPDATE media_files SET rating=:r, collections=:c, plex_dirty=:d"
+    sql = f"UPDATE {TABLES[kind]} SET rating=:r, collections=:c, plex_dirty=:d"
     if not keep_key:
         sql += ", plex_key=:k"
         sets["k"] = key
@@ -274,10 +327,11 @@ def _push(c: dict, it: PlexItem, st: dict) -> None:
 
 
 def edit(file_id: int, *, rating: int | None | str = "keep", add: list[str] = (), remove: list[str] = (),
-         collections: list[str] | None = None) -> dict:
-    """Change a file's stars and/or collections, then try to send it to Plex.
+         collections: list[str] | None = None, kind: str = "video") -> dict:
+    """Change a file's (or, kind="music", an album's) stars and/or collections, then try
+    to send it to Plex.
     Returns {"ok", "rating", "collections", "plex": "sent" | "queued" | "off" | "local", "msg"}."""
-    row = store.get_file(file_id)
+    row = _get_row(kind, file_id)
     if row is None:
         raise KeyError(file_id)
     st = _row_state(row)
@@ -290,21 +344,22 @@ def edit(file_id: int, *, rating: int | None | str = "keep", add: list[str] = ()
         names |= {n.strip() for n in add if n and n.strip()}
         names -= {n.strip() for n in remove}
         st["collections"] = sorted(names)
-    why = blocked(row["path"])
+    why = blocked(row["path"]) if kind == "video" else None
     if why and st["collections"]:
         raise ValueError(f"Not added to a collection: {why}")
     if why:
-        _save(file_id, st, dirty=0, keep_key=True)
+        _save(file_id, st, dirty=0, keep_key=True, kind=kind)
         return {"ok": True, **st, "plex": "local", "msg": f"Kept in ScreenMate only: {why}"}
-    _save(file_id, st, dirty=1, keep_key=True)
+    _save(file_id, st, dirty=1, keep_key=True, kind=kind)
     c = conf()
     if not ready(c):
         return {"ok": True, **st, "plex": "off", "msg": "Saved (Plex sync is off)"}
     try:
         items, _ = index(c)
-        it = Matcher(items).find(row["path"], row["size_bytes"])
+        it = _locate(kind, row, Matcher(items, kind))
         if it is None:
-            return {"ok": True, **st, "plex": "queued", "msg": "Saved; Plex hasn't found this file yet"}
+            return {"ok": True, **st, "plex": "queued",
+                    "msg": f"Saved; Plex hasn't found this {'file' if kind == 'video' else 'album'} yet"}
         # Only what was edited here is sent; the rest follows Plex.
         if rating == "keep":
             st["rating"] = it.rating
@@ -312,7 +367,7 @@ def edit(file_id: int, *, rating: int | None | str = "keep", add: list[str] = ()
             names = set(it.collections) | {n.strip() for n in add if n and n.strip()}
             st["collections"] = sorted(names - {n.strip() for n in remove})
         _push(c, it, st)
-        _save(file_id, st, dirty=0, key=it.key, seen=st)
+        _save(file_id, st, dirty=0, key=it.key, seen=st, kind=kind)
         return {"ok": True, **st, "plex": "sent", "msg": "Saved and sent to Plex"}
     except (PlexError, httpx.HTTPError, ET.ParseError) as exc:
         logger.warning("Plex sync: couldn't send now (%s); will retry", exc)
@@ -345,15 +400,27 @@ def _now() -> str:
 
 def _sync(c: dict) -> dict:
     items, _ = index(c, force=True)
-    match = Matcher(items)
     check = _guard()
     counts = {"matched": 0, "unmatched": 0, "pulled": 0, "pushed": 0, "skipped": 0}
-    errors = []
-    for row in store.get_all_files():
-        if check(row["path"]):
+    errors: list[str] = []
+    _sync_kind(c, "video", items, check, counts, errors)
+    _sync_kind(c, "music", items, check, counts, errors)
+    result = {"ok": not errors, "at": _now(), **counts, "errors": errors[:5],
+              "msg": f"{counts['matched']} matched, {counts['pulled']} updated from Plex, "
+                     f"{counts['pushed']} sent to Plex"}
+    store.set_setting(LAST_KEY, json.dumps(result))
+    logger.info("Plex sync: %s", result["msg"])
+    return result
+
+
+def _sync_kind(c: dict, kind: str, items, check, counts: dict, errors: list) -> None:
+    match = Matcher(items, kind)
+    tracks = _album_tracks() if kind == "music" else None
+    for row in _rows(kind):
+        if kind == "video" and check(row["path"]):
             counts["skipped"] += 1
             continue
-        it = match.find(row["path"], row["size_bytes"])
+        it = _locate(kind, row, match, tracks)
         if it is None:
             counts["unmatched"] += 1
             continue
@@ -368,19 +435,13 @@ def _sync(c: dict) -> dict:
             try:
                 _push(c, it, local)
                 counts["pushed"] += 1
-                _save(row["id"], local, dirty=0, key=it.key, seen=local)
+                _save(row["id"], local, dirty=0, key=it.key, seen=local, kind=kind)
             except (PlexError, httpx.HTTPError) as exc:
-                errors.append(f"{row['filename']}: {exc}")
+                errors.append(f"{_label(kind, row)}: {exc}")
             continue
         if local != plex:
             counts["pulled"] += 1
-        _save(row["id"], plex, dirty=0, key=it.key, seen=plex)   # Plex wins
-    result = {"ok": not errors, "at": _now(), **counts, "errors": errors[:5],
-              "msg": f"{counts['matched']} matched, {counts['pulled']} updated from Plex, "
-                     f"{counts['pushed']} sent to Plex"}
-    store.set_setting(LAST_KEY, json.dumps(result))
-    logger.info("Plex sync: %s", result["msg"])
-    return result
+        _save(row["id"], plex, dirty=0, key=it.key, seen=plex, kind=kind)   # Plex wins
 
 
 def status() -> dict:
@@ -390,19 +451,20 @@ def status() -> dict:
     except ValueError:
         last = None
     with store.connect() as conn:
-        pending = conn.execute("SELECT COUNT(*) AS n FROM media_files WHERE plex_dirty=1").mappings().fetchone()["n"]
+        pending = sum(conn.execute(f"SELECT COUNT(*) AS n FROM {t} WHERE plex_dirty=1").mappings().fetchone()["n"]
+                      for t in TABLES.values())
     return {"enabled": ready(), "last": last, "pending": pending}
 
 
-def collection_names() -> list[str]:
+def collection_names(kind: str = "video") -> list[str]:
     """Plex's collection names (when reachable) plus every name used in the Library."""
     names: set[str] = set()
     if ready():
         try:
-            names.update(index()[1])
+            names.update(index()[1].get(kind, []))
         except (PlexError, httpx.HTTPError, ET.ParseError):
             pass
-    for row in store.get_all_files():
+    for row in _rows(kind):
         if row["collections"]:
             names.update(json.loads(row["collections"]))
     return sorted(names, key=str.lower)

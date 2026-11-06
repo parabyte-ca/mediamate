@@ -168,6 +168,50 @@ class MusicAlbum(Base):
     __table_args__ = (UniqueConstraint("watchlist_id", "mbid", name="uq_music_album"),)
 
 
+class MusicLibAlbum(Base):
+    """An album folder in the music library (services/music_library.py). Stars and
+    collections live here and sync with Plex like the video Library's."""
+    __tablename__ = "music_lib_albums"
+
+    id = Column(Integer, primary_key=True, index=True)
+    folder = Column(String, unique=True, nullable=False)
+    artist = Column(String, nullable=True)               # album artist
+    title = Column(String, nullable=True)
+    year = Column(Integer, nullable=True)
+    format = Column(String, nullable=True)               # flac | mp3 | m4a | mixed ...
+    tracks = Column(Integer, nullable=False, default=0, server_default="0")
+    size_bytes = Column(BigInteger, nullable=False, default=0, server_default="0")
+    duration_sec = Column(Float, nullable=False, default=0, server_default="0")
+    cover = Column(String, nullable=True)                # image file in the folder
+    mb_release_group_id = Column(String, nullable=True)
+    issues = Column(String, nullable=True)               # JSON list: untagged, missing_tracks, low_bitrate, duplicate
+    rating = Column(Integer, nullable=True)
+    collections = Column(String, nullable=True)
+    plex_key = Column(String, nullable=True)
+    plex_seen = Column(String, nullable=True)
+    plex_dirty = Column(Integer, nullable=False, default=0, server_default="0")
+    scanned_at = Column(DateTime, nullable=True)
+
+
+class MusicTrack(Base):
+    __tablename__ = "music_tracks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    album_id = Column(Integer, ForeignKey("music_lib_albums.id", ondelete="CASCADE"), nullable=False, index=True)
+    path = Column(String, unique=True, nullable=False)
+    title = Column(String, nullable=True)
+    artist = Column(String, nullable=True)
+    track_no = Column(Integer, nullable=True)
+    track_total = Column(Integer, nullable=True)
+    disc_no = Column(Integer, nullable=True)
+    format = Column(String, nullable=True)
+    bitrate = Column(Integer, nullable=True)             # kbps
+    lossless = Column(Boolean, nullable=False, default=False, server_default=text("0"))
+    duration_sec = Column(Float, nullable=True)
+    size_bytes = Column(BigInteger, nullable=True)
+    mtime = Column(Float, nullable=True)
+
+
 class DownloadPath(Base):
     """A folder ScreenMate knows about. One list serves both halves of the app:
 

@@ -721,6 +721,15 @@ def run_movie_housekeeping() -> None:
         db.close()
 
 
+def run_music_scan() -> None:
+    """Index the music library (new albums, changed tags, checks)."""
+    from . import music_library
+    try:
+        music_library.scan()
+    except Exception:
+        logger.exception("Music library scan failed")
+
+
 def run_plex_sync() -> None:
     """Stars and collections, both ways, when Plex sync is on."""
     from . import plex_sync
@@ -796,6 +805,12 @@ def start_scheduler() -> None:
         run_movie_housekeeping,
         trigger=CronTrigger(hour=5, minute=11, timezone="UTC"),
         id="movie_housekeeping",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        run_music_scan,
+        trigger=CronTrigger(hour=4, minute=41, timezone="UTC"),
+        id="music_scan",
         replace_existing=True,
     )
     _scheduler.add_job(

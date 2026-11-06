@@ -92,3 +92,40 @@ def albums(mbid: str, include_eps: bool = False) -> list[dict]:
         if not groups or offset >= int(data.get("release-group-count") or 0) or offset >= 500:
             break
     return sorted(out, key=lambda g: (g["date"] or "9999", g["title"].lower()))
+
+
+def find_release_group(artist_name: str, album_title: str) -> str | None:
+    """The best-matching release group's id for an artist and album title, or None."""
+    q = f'releasegroup:"{album_title}" AND artist:"{artist_name}"'
+    groups = _get("/release-group", query=q, limit=5).get("release-groups", [])
+    groups = [g for g in groups if int(g.get("score") or 0) >= 90]
+    return groups[0]["id"] if groups else None
+
+
+def releases(release_group_mbid: str) -> list[dict]:
+    """The group's releases with their track lists:
+    [{mbid, title, date, artist, tracks: [{disc, no, title, artist}]}]."""
+    data = _get("/release", **{"release-group": release_group_mbid, "inc": "recordings+artist-credits",
+                               "limit": 25})
+    out = []
+    for r in data.get("releases", []):
+        credit = "".join(c.get("name", "") + c.get("joinphrase", "") for c in r.get("artist-credit") or [])
+        tracks = []
+        for disc_no, medium in enumerate(r.get("media") or [], 1):
+            for t in medium.get("tracks") or []:
+                tc = "".join(c.get("name", "") + c.get("joinphrase", "") for c in t.get("artist-credit") or [])
+                tracks.append({"disc": disc_no, "no": int(t.get("position") or 0), "title": t.get("title", ""),
+                               "artist": tc or credit})
+        out.append({"mbid": r["id"], "title": r.get("title", ""), "date": r.get("date") or "",
+                    "artist": credit, "discs": len(r.get("media") or []), "tracks": tracks})
+    return out
+
+
+def cover_bytes(release_group_mbid: str) -> bytes | None:
+    """The front cover (500 px) from the Cover Art Archive, or None."""
+    try:
+        with _client() as http:
+            r = http.get(COVER.format(mbid=release_group_mbid).replace("-250", "-500"), follow_redirects=True)
+        return r.content if r.is_success and r.content else None
+    except httpx.HTTPError:
+        return None

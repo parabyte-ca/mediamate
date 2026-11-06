@@ -96,6 +96,7 @@ const TARGET_KINDS: [FolderTarget, string, string][] = [
   ["tv", "TV shows", "H.265, 720p–1080p"],
   ["movies", "Movies", "H.265, 1080p–4K"],
   ["custom", "Custom", "H.265 at the sizes you choose"],
+  ["music", "Music", "Albums: listed in Library → Music, never encoded"],
 ];
 
 const CHECK_ICON = {
@@ -1274,6 +1275,17 @@ export default function Settings() {
         </Section>
 
         {/* Plex */}
+        <div id="music">
+        <Section title="Music">
+          <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+            Follow artists on the Watchlist's Music tab. Finished albums are tagged from MusicBrainz and linked into this
+            folder as <code>Artist/Album (Year)/01 - Title.flac</code> (the torrent keeps seeding). Point a Plex Music library at it.
+          </p>
+          <Field label="Music library folder" hint="As ScreenMate sees it, e.g. /mnt/video/music. It must be mounted into the container."
+                 value={settings.organise_music_dir ?? ""} onChange={(v) => set("organise_music_dir", v)} placeholder="/mnt/video/music" />
+        </Section>
+        </div>
+
         <Section title="Plex Media Server">
           <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
             Optional. ScreenMate will refresh your Plex library whenever a download completes.

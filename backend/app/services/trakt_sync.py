@@ -1,4 +1,4 @@
-"""Add shows from a Trakt watchlist to the ScreenMate watchlist."""
+"""Add shows from a Trakt watchlist to the MediaMate watchlist."""
 import json
 import logging
 import re
@@ -150,7 +150,7 @@ async def sync(db, now: datetime | None = None) -> dict:
 
     if result["added"]:
         more = f" ({result['deferred']} more waiting)" if result["deferred"] else ""
-        notify(_setting(db, "apprise_url"), title="ScreenMate — Trakt sync",
+        notify(_setting(db, "apprise_url"), title="MediaMate — Trakt sync",
                body="Added from your Trakt watchlist: " + ", ".join(result["added"]) + more)
     logger.info("Trakt sync: %d on list, %d added, %d existing, %d unmatched, %d deferred",
                 result["checked"], len(result["added"]), result["existing"],

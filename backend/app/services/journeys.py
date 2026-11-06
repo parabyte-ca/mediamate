@@ -1,4 +1,4 @@
-"""Journeys — one item's trip through ScreenMate, for the Activity page.
+"""Journeys — one item's trip through MediaMate, for the Activity page.
 
 A Journey row only records identity and links (download_id / media jobs). Its
 steps are derived on demand from the rows that already hold the truth — the

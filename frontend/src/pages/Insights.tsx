@@ -6,7 +6,7 @@ import { useEvent } from "../events";
 import { BarList, ColumnChart, TableView, type Datum } from "../components/charts";
 import { fmtSize } from "../utils";
 
-// What ScreenMate has done for the library, and what's left to gain.
+// What MediaMate has done for the library, and what's left to gain.
 
 const RANGES = [7, 30, 90] as const;
 

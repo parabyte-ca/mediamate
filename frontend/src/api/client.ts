@@ -25,10 +25,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error("Session expired. Please log in.");
   }
   if (!res.ok) {
-    // A proxy in front of ScreenMate answers with HTML while the container restarts.
+    // A proxy in front of MediaMate answers with HTML while the container restarts.
     const err = await res.json().catch(() => ({
       detail: res.status >= 502 && res.status <= 504
-        ? `ScreenMate isn't responding (HTTP ${res.status}). It may be restarting.`
+        ? `MediaMate isn't responding (HTTP ${res.status}). It may be restarting.`
         : `Request failed (HTTP ${res.status}).`,
     }));
     throw new Error(err.detail ?? err.msg ?? "Request failed");
@@ -110,6 +110,10 @@ export interface AlbumTags {
   tracks: TagRow[];
 }
 export interface NameGuess { path: string; title: string | null; track_no: number | null; disc_no: number | null; artist: string | null }
+export interface MusicBatch {
+  running: boolean; action: string | null; label: string | null; done: number; total: number;
+  changed: number; failed: string[]; msg: string | null; finished_at: string | null;
+}
 export interface CoverCandidate { mbid: string; title: string; artist: string; date: string; type: string; cover: string }
 
 export interface WatchlistItem {
@@ -230,7 +234,7 @@ export interface DownloadPath {
   is_default: boolean;
   /** Path here when it differs and no path mapping covers it; null = worked out. */
   local_path?: string | null;
-  /** Where ScreenMate sees the folder (local_path or the mapped path). */
+  /** Where MediaMate sees the folder (local_path or the mapped path). */
   local?: string;
   exists_here?: boolean;
   /** qBittorrent may save here. */
@@ -690,7 +694,7 @@ export interface FolderSuggestion {
   path: string;          // as qBittorrent sees it
   name: string;
   why: string[];
-  local: string;         // where ScreenMate would find it
+  local: string;         // where MediaMate would find it
   visible_here: boolean;
   how: "same path" | "path mapping" | "found by name";
 }
@@ -899,6 +903,11 @@ export const api = {
       req<{ ok: boolean; msg: string }>(`/music/library/albums/${id}/cover/musicbrainz`, {
         method: "POST", body: JSON.stringify({ mbid, embed }) }),
     embedCover: (id: number) => req<{ ok: boolean; msg: string }>(`/music/library/albums/${id}/cover/embed`, { method: "POST" }),
+    bulk: (body: { action: "covers" | "fix_tags" | "organise" | "embed" | "rate" | "collect"; album_ids: number[];
+                   stars?: number; add?: string[]; remove?: string[] }) =>
+      req<MusicBatch & { done: number; sent?: number; errors?: string[]; ok?: boolean }>("/music/library/bulk", {
+        method: "POST", body: JSON.stringify(body) }),
+    bulkStatus: () => req<MusicBatch>("/music/library/bulk/status"),
     getCover: (id: number) => req<{ ok: boolean; source: string | null; msg: string }>(`/music/library/albums/${id}/cover`, { method: "POST" }),
     organise: (id: number) => req<{ ok: boolean; folder: string; msg: string }>(`/music/library/albums/${id}/organise`, { method: "POST" }),
     rateAlbum: (id: number, stars: number) =>

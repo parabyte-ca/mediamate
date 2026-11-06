@@ -110,7 +110,7 @@ TPDB_API_KEY: str = os.environ.get("TPDB_API_KEY", "")
 
 
 # ── Runtime settings ──────────────────────────────────────────────────────────
-# Settings that can be changed from the UI and are persisted in ScreenMate's
+# Settings that can be changed from the UI and are persisted in MediaMate's
 # `settings` table. Keys match FileSplitter's, so imported databases carry over.
 # Track clean-up (services/media/tracks.py): which audio/subtitle languages an encode keeps.
 TRACK_CLEANUP: str = os.environ.get("TRACK_CLEANUP", "true").lower()

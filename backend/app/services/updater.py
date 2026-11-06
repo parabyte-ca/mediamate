@@ -352,7 +352,7 @@ def check_now_rate_limited() -> bool:
 
 # ── Source URL parsing ────────────────────────────────────────────────────────
 
-_DEFAULT_SOURCE = "https://github.com/parabyte-ca/screenmate"
+_DEFAULT_SOURCE = "https://github.com/parabyte-ca/mediamate"
 _GH_RE = re.compile(r"github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?(?:/|$)")
 
 
@@ -366,7 +366,7 @@ def parse_gh_repo(url: str) -> Optional[tuple[str, str]]:
 async def _fetch_latest_release(owner: str, repo: str) -> dict:
     version = get_current_version()
     headers = {
-        "User-Agent": f"ScreenMate/{version}",
+        "User-Agent": f"MediaMate/{version}",
         "Accept": "application/vnd.github.v3+json",
     }
     url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
@@ -507,7 +507,7 @@ def _maybe_notify(db, version: str) -> None:
     if apprise_url:
         notify(
             apprise_url,
-            title="ScreenMate — New Release Available",
+            title="MediaMate — New Release Available",
             body=f"Version {version} is available. Open Settings → Updates to upgrade.",
         )
 
@@ -624,7 +624,7 @@ def request_upgrade(db, version: str, requested_by: str, rollback: bool = False)
     if apprise_url:
         notify(
             apprise_url,
-            title="ScreenMate — Rollback Requested" if rollback else "ScreenMate — Upgrade Requested",
+            title="MediaMate — Rollback Requested" if rollback else "MediaMate — Upgrade Requested",
             body=f"{'Rollback' if rollback else 'Upgrade'} {current} → {version} requested by {requested_by}.",
         )
     logger.info("%s requested: %s → %s by %s", "Rollback" if rollback else "Upgrade", current, version, requested_by)

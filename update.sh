@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# update.sh — Pull latest changes and redeploy ScreenMate.
+# update.sh — Pull latest changes and redeploy MediaMate.
 #
 # Usage (manual):
 #   sudo bash update.sh

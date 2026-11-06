@@ -1,12 +1,12 @@
-# ScreenMate
+# MediaMate
 
-**[Latest release](https://github.com/parabyte-ca/screenmate/releases/latest)** · the version you run is shown at the bottom of the sidebar.
+**[Latest release](https://github.com/parabyte-ca/mediamate/releases/latest)** · the version you run is shown at the bottom of the sidebar.
 
 A self-hosted media pipeline. It finds shows and movies, downloads them through qBittorrent, then encodes them to x265, splits anthologies, trims intros, renames, and refreshes Plex/Jellyfin, all without you touching a file.
 
-ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search, watchlist, downloads) and [FileSplitter](https://github.com/parabyte-ca/filesplitter) (scan, encode, split) into one app with one UI, one login, one database and one container.
+MediaMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search, watchlist, downloads) and [FileSplitter](https://github.com/parabyte-ca/filesplitter) (scan, encode, split) into one app with one UI, one login, one database and one container.
 
-> **Status:** parity sign-off. Every AuTorrent and FileSplitter feature is in ScreenMate. [docs/PARITY.md](docs/PARITY.md) lists each one, where it is now, and the test that proves it. Next comes 1.0.0. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> **Status:** parity sign-off. Every AuTorrent and FileSplitter feature is in MediaMate. [docs/PARITY.md](docs/PARITY.md) lists each one, where it is now, and the test that proves it. Next comes 1.0.0. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ---
 
@@ -23,8 +23,8 @@ ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search,
 - **Track clean-up:** encodes keep English plus the original-language audio, and English and forced subtitles, and drop the rest. This often saves another 10–20%. The languages are set in Settings → Media engine.
 - **Library doctor:** a weekly check (Library → Library doctor, or Check now) for sample clips, leftover files, empty folders, unplayable files, missing files, duplicates (the best copy is kept) and files not named for Plex. The first three are fixed automatically. The rest get Fix buttons. Removed files go to the 30-day trash.
 - **Music:** follow an artist on the Watchlist's **Music** tab (found through MusicBrainz, free, no key). Each new album downloads once it's out, in FLAC; MP3 320 is taken if no FLAC turns up within two days, and low-bitrate copies never. When you follow, choose new releases only, the latest album too, or everything. Each album can be wanted, skipped or downloaded now. Albums use their own qBittorrent category (`music`) and download folder (Settings → qBittorrent).
-- **Music library:** Library → **Music** lists albums from the music library folder (Settings → Music) and folders with the **Music** target. Finished album downloads get missing tags and cover art from MusicBrainz, then are linked into the music library as `Artist/Album (Year)/01 - Title.flac`, so the torrent keeps seeding. Play tracks, rate albums and add them to collections; these sync with Plex like videos. **Fix tags** and **Organise for Plex** work on any album. Albums without a cover get one: from the artwork inside the files first, otherwise from MusicBrainz. This happens on import, in the daily scan, or with **Get cover**. Existing pictures are never replaced. **Edit tags** lets you change album and track tags by hand: fill them from file names (including etree-style `d1t03` bootleg names), number tracks in order, and set live-recording details (show date, venue and city become the album title and a comment). **Change cover** uploads a picture or picks one from MusicBrainz, and can also put it inside every track. Albums with missing tags, missing tracks, low-bitrate copies (lossy under 220 kbps) or duplicates are flagged.
-- **Stars and collections, synced with Plex:** rate files (1–5 stars) and add them to collections in the Library, one at a time or in bulk, then filter by either. Turn on *Sync star ratings & collections with Plex* (Settings → Plex) and they show up in Plex. Ratings and collections set in Plex appear in the Library too (every 30 minutes, or Sync now). If both sides change, Plex wins. Files are matched by name, so Plex's paths don't need to match ScreenMate's. An episode's collections are its show's, because Plex only collects movies and shows. Protected folders are never sent.
+- **Music library:** Library → **Music** lists albums from the music library folder (Settings → Music) and folders with the **Music** target. Finished album downloads get missing tags and cover art from MusicBrainz, then are linked into the music library as `Artist/Album (Year)/01 - Title.flac`, so the torrent keeps seeding. Play tracks, rate albums and add them to collections; these sync with Plex like videos. **Fix tags** and **Organise for Plex** work on any album. Albums without a cover get one: from the artwork inside the files first, otherwise from MusicBrainz. This happens on import, in the daily scan, or with **Get cover**. Existing pictures are never replaced. **Edit tags** lets you change album and track tags by hand: fill them from file names (including etree-style `d1t03` bootleg names), number tracks in order, and set live-recording details (show date, venue and city become the album title and a comment). **Change cover** uploads a picture or picks one from MusicBrainz, and can also put it inside every track. Switch between **tiles** and a **list**, and tick several albums to **Find artwork**, **Fix tags**, **Organise for Plex**, **Put covers in files**, rate them or add them to a collection in one go. Long jobs run in the background with a progress bar; *select N without artwork* picks every album still missing a cover. Albums with missing tags, missing tracks, low-bitrate copies (lossy under 220 kbps) or duplicates are flagged.
+- **Stars and collections, synced with Plex:** rate files (1–5 stars) and add them to collections in the Library, one at a time or in bulk, then filter by either. Turn on *Sync star ratings & collections with Plex* (Settings → Plex) and they show up in Plex. Ratings and collections set in Plex appear in the Library too (every 30 minutes, or Sync now). If both sides change, Plex wins. Files are matched by name, so Plex's paths don't need to match MediaMate's. An episode's collections are its show's, because Plex only collects movies and shows. Protected folders are never sent.
 - **Adult content stays out of Plex:** mark a folder **Protected** (Settings → Folders; Bellesa is protected automatically) and nothing ever renames or moves its files. Rename & organise also refuses any file that looks like adult content (studio and site names such as Vixen, Tushy, OnlyFans, FrolicMe, wherever it is), so neither the Library, the Library doctor nor the auto pipeline can put one in a TV or Movies folder. The Library doctor's **Adult content in a Plex folder** check finds files moved there earlier and moves them back; Library → **Move to folder** handles anything else.
 - **Target formats per folder:** each folder in Settings → Folders has a target, all H.265: TV shows 720p–1080p, Movies 1080p–4K, Custom (e.g. Bellesa: 720p, shrinking bigger files when they're encoded), or Auto (by file name). Files already H.265 show as **on target** instead of pending, so "Encode all pending" leaves them alone. H.265 files bigger than the target are never shrunk without asking: the Library doctor lists them ("Larger than target", with a Shrink button), along with files "Lower than preferred". New TV shows download 1080p (720p fallback) and new movies 4K (1080p fallback) by default (Settings → Quality Profiles).
 - **Movies on the Watchlist:** TV shows and movies have their own tabs and badges. Add a movie from Browse (Coming soon, In theatres, Popular) or with **Add → Movie**: it waits for the digital release date from TMDB (or the disc date, or about 90 days after cinemas), downloads the best release once, and leaves the Watchlist 30 days after the download finishes (Settings → Auto-scanner; pin a movie to keep it). The file stays in the Library.
@@ -38,8 +38,8 @@ ScreenMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search,
 **Requirements:** Docker with the Compose plugin, and git.
 
 ```bash
-git clone https://github.com/parabyte-ca/screenmate.git
-cd screenmate
+git clone https://github.com/parabyte-ca/mediamate.git
+cd mediamate
 ./setup.sh
 ```
 
@@ -63,27 +63,27 @@ Media folders are mounted at the same path inside the container. When qBittorren
 
 **Folders** (in Settings) is one list for both halves of the app. Each folder can take downloads, be scanned and encoded, or both. The folders you give `setup.sh --media` appear there automatically. A folder qBittorrent sees under a different path (another container, another machine) is linked by a path mapping or its "Path here" field. When you upgrade from an earlier version, the old download folders and media folders are merged into this list automatically, and nothing that was scanned before stops being scanned.
 
-Each folder has a **Test** button (and **Test all**). It checks that ScreenMate can see, read and write the folder, how much space is free, and, for download folders on qBittorrent 5 or later, that qBittorrent can see it too. When something fails, it says how to fix it, such as the volume line to add to `docker-compose.override.yml`. When qBittorrent is connected, the folders it saves into (its default folder, each category's folder and the folders its torrents are in) that aren't in the list yet appear under **Found in qBittorrent**. Each one shows where ScreenMate sees it, and **Add** adds it in one click.
+Each folder has a **Test** button (and **Test all**). It checks that MediaMate can see, read and write the folder, how much space is free, and, for download folders on qBittorrent 5 or later, that qBittorrent can see it too. When something fails, it says how to fix it, such as the volume line to add to `docker-compose.override.yml`. When qBittorrent is connected, the folders it saves into (its default folder, each category's folder and the folders its torrents are in) that aren't in the list yet appear under **Found in qBittorrent**. Each one shows where MediaMate sees it, and **Add** adds it in one click.
 
 **Coming from AuTorrent or FileSplitter?** The setup wizard (or **Settings → Data management**) imports your old `autorrent.db` and `filesplitter.db` with one upload each.
 
 ---
 
-## Updating ScreenMate
+## Updating MediaMate
 
-ScreenMate is automatically built and published to GitHub Container Registry on every push to `main`.
+MediaMate is automatically built and published to GitHub Container Registry on every push to `main`.
 
 To update your running instance:
 
 ```bash
-cd /path/to/screenmate
+cd /path/to/mediamate   # an install from before the rename still lives in .../screenmate
 ./update.sh
 ```
 
 Or manually:
 
 ```bash
-docker pull ghcr.io/parabyte-ca/screenmate:latest
+docker compose pull
 docker compose up -d
 ```
 
@@ -101,16 +101,26 @@ You can also update from inside the app: the **Updates** page shows when a new r
 
 Your data is stored in `./data/` and is not affected by updates.
 
-> **First-time setup:** After the first successful GitHub Actions build, the package visibility must be set to **Public** so the image can be pulled without authentication. Go to `https://github.com/parabyte-ca?tab=packages`, find the `screenmate` package, and set its visibility to Public.
+> **First-time setup:** After the first successful GitHub Actions build, the package visibility must be set to **Public** so the image can be pulled without authentication. Go to `https://github.com/parabyte-ca?tab=packages`, open each package (`mediamate`, and `screenmate` while both are published), and set its visibility to Public.
+
+### ScreenMate is now MediaMate
+
+The app was renamed when it gained music. An install from before the rename moves over by itself on the next upgrade (Updates page or `./update.sh`):
+
+- The container is now called `mediamate` (`docker logs mediamate`). Your data in `./data` stays where it is.
+- Existing installs keep the qBittorrent category `screenmate`; new installs use `mediamate`.
+- Some internal names stay as they were so upgrades and rollbacks keep working: the `SCREENMATE_VERSION` and `SCREENMATE_PORT` lines in `.env`, the compose service name, the `screenmate.db` file and the folder you installed into.
+- Images are published as both `ghcr.io/parabyte-ca/mediamate` and `ghcr.io/parabyte-ca/screenmate` for now. `docker-compose.yml` still pulls `screenmate`, and will switch once the `mediamate` package is public.
+- The repository is now `parabyte-ca/mediamate`. GitHub redirects the old address, so `git pull` keeps working.
 
 ---
 
 ## Moving from AuTorrent and FileSplitter
 
-ScreenMate runs on its own port (4260), so you can keep the old apps running until you're happy.
+MediaMate runs on its own port (4260), so you can keep the old apps running until you're happy.
 
-1. Install ScreenMate with `./setup.sh`. Give it the same media folders FileSplitter used (`--media /path`, repeat for each).
-2. In the setup wizard, or later in **Settings → Data management → Import**, upload `autorrent.db` and `filesplitter.db` from each app's `data/` folder. Nothing changes until you press **Import**. Before that, ScreenMate shows you:
+1. Install MediaMate with `./setup.sh`. Give it the same media folders FileSplitter used (`--media /path`, repeat for each).
+2. In the setup wizard, or later in **Settings → Data management → Import**, upload `autorrent.db` and `filesplitter.db` from each app's `data/` folder. Nothing changes until you press **Import**. Before that, MediaMate shows you:
    - what each file contains,
    - the settings that differ from this install, one choice per setting (versions and update details are never imported),
    - where your old files and qBittorrent folders are on this server, with suggested path mappings.
@@ -169,7 +179,7 @@ The very first release is the version written in the source (`backend/app/router
 
 ## Revision history
 
-Releases after 0.8.0 are listed on the [Releases page](https://github.com/parabyte-ca/screenmate/releases).
+Releases after 0.8.0 are listed on the [Releases page](https://github.com/parabyte-ca/mediamate/releases).
 
 | Version | What came in |
 |---|---|

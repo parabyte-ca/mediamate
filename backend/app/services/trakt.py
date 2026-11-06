@@ -1,6 +1,6 @@
 """Minimal Trakt client: read a user's public watchlist of shows.
 
-Trakt has no webhook for a personal watchlist, so ScreenMate polls it.  Public
+Trakt has no webhook for a personal watchlist, so MediaMate polls it.  Public
 watchlists need only an app *client ID* (no OAuth).
 """
 import asyncio
@@ -40,7 +40,7 @@ def _headers(client_id: str) -> dict[str, str]:
         "trakt-api-version": "2",
         "trakt-api-key": client_id,
         "Content-Type": "application/json",
-        "User-Agent": f"ScreenMate/{os.environ.get('APP_VERSION', 'dev')}",
+        "User-Agent": f"MediaMate/{os.environ.get('APP_VERSION', 'dev')}",
     }
 
 

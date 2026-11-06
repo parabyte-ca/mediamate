@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["favicon.ico", "logo.svg", "apple-touch-icon.png", "icons/*.png"],
       manifest: {
-        name: "ScreenMate",
-        short_name: "ScreenMate",
+        name: "MediaMate",
+        short_name: "MediaMate",
         description: "Find, download, encode and organise your media",
         theme_color: "#0f172a",
         background_color: "#0f172a",

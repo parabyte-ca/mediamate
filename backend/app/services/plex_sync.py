@@ -1,13 +1,13 @@
 """Star ratings and collections, kept in step with Plex (both ways).
 
-* ScreenMate stores a file's stars (1-5) and collection names on its Library row.
+* MediaMate stores a file's stars (1-5) and collection names on its Library row.
 * Library files are matched to Plex items by file name (then size, then the most
-  matching parent folders), so Plex's own paths don't need to match ScreenMate's.
-* An edit in ScreenMate is sent to Plex straight away; if Plex can't be reached it's
+  matching parent folders), so Plex's own paths don't need to match MediaMate's.
+* An edit in MediaMate is sent to Plex straight away; if Plex can't be reached it's
   kept (``plex_dirty``) and sent on the next sync.
 * A sync (every 30 min, or "Sync now") reads Plex's values. When a file was edited
   here *and* changed in Plex since the last sync, Plex wins.
-* Plex ratings are 0-10; ScreenMate's stars are half that. The admin token is used,
+* Plex ratings are 0-10; MediaMate's stars are half that. The admin token is used,
   so ratings are the server owner's.
 * Plex only allows collections on movies and shows, so an episode's collections are
   its show's.
@@ -349,7 +349,7 @@ def edit(file_id: int, *, rating: int | None | str = "keep", add: list[str] = ()
         raise ValueError(f"Not added to a collection: {why}")
     if why:
         _save(file_id, st, dirty=0, keep_key=True, kind=kind)
-        return {"ok": True, **st, "plex": "local", "msg": f"Kept in ScreenMate only: {why}"}
+        return {"ok": True, **st, "plex": "local", "msg": f"Kept in MediaMate only: {why}"}
     _save(file_id, st, dirty=1, keep_key=True, kind=kind)
     c = conf()
     if not ready(c):

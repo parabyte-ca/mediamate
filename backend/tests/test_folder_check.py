@@ -68,7 +68,7 @@ def test_a_good_folder_passes_and_counts_its_videos(client, Session, tmp_path):
     assert c["visible"]["status"] == c["read"]["status"] == c["write"]["status"] == "ok"
     assert c["read"]["detail"].startswith("2 videos")
     assert "set as Path here" in c["path"]["detail"]
-    assert not any(n.startswith(".screenmate-write-test") for n in os.listdir(tv))
+    assert not any(n.startswith(".mediamate-write-test") for n in os.listdir(tv))
 
 
 def test_a_missing_folder_names_what_does_exist_and_how_to_mount_it(client, Session, tmp_path):
@@ -112,7 +112,7 @@ def test_a_read_only_folder_is_reported(Session, tmp_path, monkeypatch):
     real_open = open
 
     def ro_open(path, mode="r", *a, **k):
-        if "w" in mode and ".screenmate-write-test" in str(path):
+        if "w" in mode and ".mediamate-write-test" in str(path):
             raise OSError(30, "Read-only file system")
         return real_open(path, mode, *a, **k)
     monkeypatch.setattr("builtins.open", ro_open)
@@ -245,7 +245,7 @@ def test_a_suggestion_does_not_reuse_a_folders_name(client, Session, tmp_path, m
 
 
 def test_qbittorrent_sees_it_but_screenmate_does_not(client, Session, monkeypatch):
-    # Downloads finish inside qBittorrent's mount, which ScreenMate doesn't have.
+    # Downloads finish inside qBittorrent's mount, which MediaMate doesn't have.
     monkeypatch.setattr(qbittorrent, "directory_exists", lambda p: True)
     fid = add(Session, path="/mnt/video/tv shows", downloads=True)
     r = client.post(f"/api/paths/{fid}/test").json()

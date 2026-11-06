@@ -141,7 +141,7 @@ def retry(journey_id: int, db: Session = Depends(get_db)):
     settings = {s.key: s.value for s in db.query(Setting).all()}
     try:
         info_hash = add_torrent(dl.magnet_link, dl.download_path or "/downloads",
-                                settings.get("qbit_category", "screenmate"))
+                                settings.get("qbit_category", "mediamate"))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"qBittorrent: {exc}")
     dl.torrent_hash = info_hash or dl.torrent_hash

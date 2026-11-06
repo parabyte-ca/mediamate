@@ -231,7 +231,7 @@ function OrganiseSection() {
       <h3 className="mb-1 text-sm font-semibold text-gray-900 dark:text-gray-100">Rename &amp; organise</h3>
       <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
         Used by the <b>Rename &amp; organise</b> rule step and the Library's <b>Rename &amp; organise</b> action.
-        Files get Plex-style names in these folders (paths as ScreenMate sees them). Downloads are removed from
+        Files get Plex-style names in these folders (paths as MediaMate sees them). Downloads are removed from
         qBittorrent first (stops seeding, keeps the file). Matching subtitles move too; nothing is ever overwritten.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -415,14 +415,14 @@ export default function PipelineSettings() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-gray-600 dark:text-gray-400">
-        When a download finishes, ScreenMate checks your rules from top to bottom and runs the first one that matches —
+        When a download finishes, MediaMate checks your rules from top to bottom and runs the first one that matches —
         then refreshes Plex/Jellyfin and notifies you. Progress shows on the Activity page.
       </p>
 
       <div className="space-y-3">
         <Toggle k="pipeline_enabled" label="Run rules on finished downloads" hint="Turn off to pause all automatic processing." />
         <Toggle k="pipeline_remove_torrent" label="Remove the torrent before processing (files are kept)"
-                hint="Changing a file while it's still seeding breaks the torrent. If off, ScreenMate waits until the torrent is removed." />
+                hint="Changing a file while it's still seeding breaks the torrent. If off, MediaMate waits until the torrent is removed." />
         <Toggle k="pipeline_on_scan" label="Also run rules on new files found by a library scan"
                 hint="Off by default so a first scan doesn't queue your whole library — use the dry run below instead." />
       </div>
@@ -482,7 +482,7 @@ export default function PipelineSettings() {
       <div>
         <h3 className="mb-1 text-sm font-semibold text-gray-900 dark:text-gray-100">Path mapping</h3>
         <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
-          Only needed if qBittorrent sees your downloads under a different path than ScreenMate does
+          Only needed if qBittorrent sees your downloads under a different path than MediaMate does
           (e.g. qBittorrent saves to <code>/downloads</code>, mounted here as <code>/mnt/nas/downloads</code>).
         </p>
         <div className="space-y-2">
@@ -491,7 +491,7 @@ export default function PipelineSettings() {
               <input className={input} placeholder="qBittorrent path, e.g. /downloads" value={m.remote_prefix}
                      onChange={(e) => setMappings((ms) => ms.map((x, j) => (j === i ? { ...x, remote_prefix: e.target.value } : x)))} />
               <span className="text-gray-400">→</span>
-              <input className={input} placeholder="ScreenMate path, e.g. /mnt/nas/downloads" value={m.local_prefix}
+              <input className={input} placeholder="MediaMate path, e.g. /mnt/nas/downloads" value={m.local_prefix}
                      onChange={(e) => setMappings((ms) => ms.map((x, j) => (j === i ? { ...x, local_prefix: e.target.value } : x)))} />
               <button aria-label="Remove mapping" onClick={() => setMappings((ms) => ms.filter((_, j) => j !== i))}
                       className="rounded p-1.5 text-gray-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500"><Trash2 className="h-4 w-4" /></button>

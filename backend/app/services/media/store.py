@@ -4,8 +4,8 @@ Same function names, arguments and return shapes as the original, so scanner.py,
 worker.py and the router port across unchanged. Rows come back as SQLAlchemy
 RowMappings, which support row["col"] and dict(row) exactly like sqlite3.Row.
 
-Tables live in ScreenMate's database (models.MediaFile / models.MediaJob, created
-by run_migrations); settings share ScreenMate's `settings` table.
+Tables live in MediaMate's database (models.MediaFile / models.MediaJob, created
+by run_migrations); settings share MediaMate's `settings` table.
 """
 import os
 from contextlib import contextmanager
@@ -16,7 +16,7 @@ from sqlalchemy import text
 from ... import database
 from .. import events, journeys
 
-# Tests point this at their own engine; production uses ScreenMate's.
+# Tests point this at their own engine; production uses MediaMate's.
 engine = None
 
 
@@ -385,7 +385,7 @@ def dequeue_next_job():
     return job
 
 
-# --- Settings (ScreenMate's shared settings table) ---
+# --- Settings (MediaMate's shared settings table) ---
 
 def get_setting(key: str, default: str = "") -> str:
     with connect() as conn:

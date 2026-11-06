@@ -1,6 +1,6 @@
-# Parity sign-off: AuTorrent + FileSplitter → ScreenMate
+# Parity sign-off: AuTorrent + FileSplitter → MediaMate
 
-Every feature of the two apps ScreenMate replaces, where it lives now, and what proves it works.
+Every feature of the two apps MediaMate replaces, where it lives now, and what proves it works.
 **Tests** are backend pytest files (`backend/tests/…`); **Smoke** is the browser run
 `node frontend/tests/smoke.cjs` (28 checks: every page in light and dark, plus the flows named below).
 
@@ -8,7 +8,7 @@ Status as of v0.8.1: **every item is present**. One FileSplitter bug was found a
 
 ## AuTorrent
 
-| Feature | In ScreenMate | Evidence |
+| Feature | In MediaMate | Evidence |
 |---|---|---|
 | Search: NYAA, TPB, EZTV, YTS, TorrentGalaxy, 1337x | Search page, "All sources" or one source | `test_sources_packs_profiles.py` (TPB), `test_parity_gaps.py` (NYAA, EZTV, YTS, TorrentGalaxy, 1337x parsing) |
 | Jackett / Prowlarr | Settings → Indexers, Test button | `test_sources_packs_profiles.py`, `test_secret_settings.py` (test with the saved key) |
@@ -35,7 +35,7 @@ Status as of v0.8.1: **every item is present**. One FileSplitter bug was found a
 
 ## FileSplitter
 
-| Feature | In ScreenMate | Evidence |
+| Feature | In MediaMate | Evidence |
 |---|---|---|
 | Scan and classification (codec, duration, size, keyword, anthology) | Library → Scan | `media/test_engine_e2e.py`, `media/test_media_routes.py`, `media/test_codec_detector.py`; Smoke (scan finds the clip) |
 | x265 on the CPU | Library → Encode | `media/test_engine_e2e.py`; Smoke (encode finishes as HEVC) |
@@ -62,4 +62,4 @@ Status as of v0.8.1: **every item is present**. One FileSplitter bug was found a
 
 - AuTorrent's **Downloads** page and FileSplitter's **Active jobs** tab are now one **Activity** page; `/downloads` still redirects there.
 - FileSplitter's separate login and port are gone: one app, one login, port 4260.
-- Settings import from the old apps copies only settings ScreenMate has, never versions, update state or repository URLs, and lets you compare before importing.
+- Settings import from the old apps copies only settings MediaMate has, never versions, update state or repository URLs, and lets you compare before importing.

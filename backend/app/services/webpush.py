@@ -1,7 +1,7 @@
-"""Web Push: notifications on phones and desktops that installed/opened ScreenMate.
+"""Web Push: notifications on phones and desktops that installed/opened MediaMate.
 
 VAPID keys are generated on first use and kept in the settings table. Every
-notification ScreenMate sends goes through apprise_notify.notify(), which fans out
+notification MediaMate sends goes through apprise_notify.notify(), which fans out
 to Apprise (if configured) and to every subscribed device here.
 """
 import base64
@@ -21,7 +21,7 @@ PUBLIC_KEY = "vapid_public_key"
 # Push services (Google, Mozilla, Apple) want a contact for the sender; it goes to
 # them only. Must be a mailto: or a bare https:// host, and Apple rejects localhost.
 # Overridable with the push_contact setting.
-DEFAULT_SUBJECT = "mailto:screenmate@users.noreply.github.com"
+DEFAULT_SUBJECT = "mailto:mediamate@users.noreply.github.com"
 MAX_FAILURES = 5
 _key_lock = threading.Lock()
 

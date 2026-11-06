@@ -1,4 +1,4 @@
-"""Insights: what ScreenMate has done for the library, and what's left to gain.
+"""Insights: what MediaMate has done for the library, and what's left to gain.
 
 Everything is computed from tables that already exist (media_jobs, media_files,
 download_history, settings) — there is no separate ledger to drift.

@@ -49,7 +49,7 @@ export default function PushSettings() {
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(cfg!.public_key) });
       await api.push.subscribe(sub.toJSON(), deviceLabel());
-      setMsg("This device will now get ScreenMate notifications.");
+      setMsg("This device will now get MediaMate notifications.");
       await load();
     } catch (e) {
       const m = (e as Error).message;
@@ -94,14 +94,14 @@ export default function PushSettings() {
         <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Push notifications</h3>
         <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
           Get the same alerts as Apprise straight on this phone or computer — no extra service needed.
-          On iPhone, add ScreenMate to the Home Screen first (Share → Add to Home Screen).
+          On iPhone, add MediaMate to the Home Screen first (Share → Add to Home Screen).
         </p>
       </div>
       {!supported ? (
         <p className="text-sm text-gray-500">This browser doesn't support push notifications.</p>
       ) : !secure ? (
         <p className="rounded-lg bg-amber-50 dark:bg-amber-950/30 p-3 text-xs text-amber-800 dark:text-amber-200">
-          Browsers only allow push notifications over HTTPS. Open ScreenMate through your HTTPS address
+          Browsers only allow push notifications over HTTPS. Open MediaMate through your HTTPS address
           (e.g. a Cloudflare Tunnel or reverse proxy) to turn them on for this device.
         </p>
       ) : (

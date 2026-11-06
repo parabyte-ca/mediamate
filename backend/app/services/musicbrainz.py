@@ -28,7 +28,7 @@ class MusicBrainzUnavailable(Exception):
 def _agent() -> str:
     import os
     v = os.environ.get("APP_VERSION", "0.8.0")
-    return f"ScreenMate/{v} ( https://github.com/parabyte-ca/screenmate )"
+    return f"MediaMate/{v} ( https://github.com/parabyte-ca/mediamate )"
 
 
 def _client() -> httpx.Client:

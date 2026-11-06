@@ -5,7 +5,7 @@ import { marked } from "marked";
 
 marked.setOptions({ async: false });
 
-/** An upgrade started from this browser. ScreenMate restarts during it, so the
+/** An upgrade started from this browser. MediaMate restarts during it, so the
  *  page keeps reconnecting until the new version answers (survives a refresh). */
 type Pending = { from: string; to: string; at: number; phase?: UpgradePhase };
 const PENDING_KEY = "sm-upgrade-pending";
@@ -63,7 +63,7 @@ function readLastMs(): number | null {
 function writeLastMs(ms: number) {
   try { localStorage.setItem(LAST_KEY, String(Math.round(ms))); } catch { /* not remembered */ }
 }
-/** The server's typical upgrade time, kept here too: while ScreenMate restarts the
+/** The server's typical upgrade time, kept here too: while MediaMate restarts the
  *  page can't ask for it, and that's when the bar needs it most. */
 const TYPICAL_KEY = "sm-upgrade-typical";
 function readTypical(): { sec: number; n: number } | null {
@@ -146,7 +146,7 @@ function UpgradeProgress({ pending, everyMinutes, now, typicalSec, basedOn }: {
       </div>
 
       <p className="text-xs opacity-80">
-        ScreenMate stops answering for a minute or two while it restarts. This page reconnects by itself.
+        MediaMate stops answering for a minute or two while it restarts. This page reconnects by itself.
       </p>
       {elapsed > SLOW_MS && (
         <p className="text-xs opacity-90">
@@ -228,7 +228,7 @@ export default function Updates() {
       }
     } catch (e) {
       setError((e as Error).message);
-      // Once the helper has started, losing ScreenMate means it is restarting.
+      // Once the helper has started, losing MediaMate means it is restarting.
       const p = readPending();
       if (p && stepIndex(p.phase) >= stepIndex("started")) {
         const next = { ...p, phase: furthest(p.phase, "restarting") };
@@ -241,7 +241,7 @@ export default function Updates() {
   }, []);
 
   // Poll while an upgrade is in progress, while one started here hasn't finished
-  // (ScreenMate stops answering while it restarts), and while the page can't load.
+  // (MediaMate stops answering while it restarts), and while the page can't load.
   useEffect(() => {
     const inProgress = status?.upgrade_state === "requested" || status?.upgrade_state === "running"
       || !!pending || (!status && !!error);
@@ -294,7 +294,7 @@ export default function Updates() {
       setStatus(s);
     } catch (e) {
       const msg = (e as Error).message;
-      // Refused by ScreenMate itself (a JSON reason): nothing was started.
+      // Refused by MediaMate itself (a JSON reason): nothing was started.
       if (!/isn't responding|Failed to fetch|NetworkError|Load failed/i.test(msg)) {
         writePending(null);
         setPending(null);
@@ -331,7 +331,7 @@ export default function Updates() {
             <>
               <div className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
                 <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />
-                Can't reach ScreenMate
+                Can't reach MediaMate
               </div>
               <p className="text-sm text-gray-600 dark:text-gray-400">{error}</p>
             </>

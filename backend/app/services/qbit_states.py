@@ -18,7 +18,7 @@ DOWNLOADING_STATES = {
     "forcedDL",          # force-started download
     "checkingDL",        # integrity check mid-download
     "metaDL",            # fetching torrent metadata
-    "queuedDL",          # waiting in download queue (0% but not stuck in ScreenMate)
+    "queuedDL",          # waiting in download queue (0% but not stuck in MediaMate)
     "pausedDL",          # paused by user in qBittorrent
     "allocating",        # allocating disk space before downloading
     "checkingResumeData",  # rechecking on qBittorrent restart

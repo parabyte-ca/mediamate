@@ -37,7 +37,7 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
     try:
         settings = {s.key: s.value for s in db.query(Setting).all()}
         min_seeds = int(settings.get("min_seeds", "3"))
-        category = settings.get("qbit_category", "screenmate")
+        category = settings.get("qbit_category", "mediamate")
         apprise_url = settings.get("apprise_url", "")
 
         query = db.query(WatchlistItem).filter(WatchlistItem.enabled == True)
@@ -280,7 +280,7 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                 if settings.get("notify_on_grab", "true").strip().lower() == "true":
                     notify(
                         apprise_url,
-                        title=f"ScreenMate — {item.title}",
+                        title=f"MediaMate — {item.title}",
                         body=f"⬇️ Downloaded: {best['title']}",
                     )
 
@@ -336,7 +336,7 @@ async def _check_statuses_async(db, *, item_id: int | None = None) -> None:
                 )
                 notify(
                     apprise_url,
-                    title=f"ScreenMate — {item.title}",
+                    title=f"MediaMate — {item.title}",
                     body=f"{item.title} has ended — auto-paused on watchlist.",
                 )
             else:
@@ -713,7 +713,7 @@ def run_movie_housekeeping() -> None:
         gone = movies.cleanup_finished(db)
         if gone:
             row = db.query(Setting).filter(Setting.key == "apprise_url").first()
-            notify(row.value if row else "", title="ScreenMate — Watchlist",
+            notify(row.value if row else "", title="MediaMate — Watchlist",
                    body=f"Removed {len(gone)} finished movie{'s' if len(gone) != 1 else ''}: {', '.join(gone)}")
     except Exception:
         logger.exception("Movie housekeeping failed")

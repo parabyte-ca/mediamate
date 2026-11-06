@@ -214,7 +214,7 @@ class MusicTrack(Base):
 
 
 class DownloadPath(Base):
-    """A folder ScreenMate knows about. One list serves both halves of the app:
+    """A folder MediaMate knows about. One list serves both halves of the app:
 
     * ``downloads``: qBittorrent may save into it; ``path`` is that folder as
       qBittorrent sees it.
@@ -295,7 +295,7 @@ class DownloadHistory(Base):
 class TraktSeen(Base):
     """Trakt watchlist entries the sync has already dealt with.
 
-    Remembering them stops a show you deliberately removed from ScreenMate being
+    Remembering them stops a show you deliberately removed from MediaMate being
     re-added on the next sync.  Unmatched shows are retried after a week.
     """
     __tablename__ = "trakt_seen"
@@ -362,7 +362,7 @@ class MediaJob(Base):
 
 
 class Journey(Base):
-    """One item's trip through ScreenMate (found → download → encode/split/trim → …).
+    """One item's trip through MediaMate (found → download → encode/split/trim → …).
 
     Steps are not stored here: they are derived from the Download row and the
     MediaJob rows pointing at this journey (services/journeys.py), so they can

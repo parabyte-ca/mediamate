@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup.sh — first-time ScreenMate install (safe to run again to change settings).
+# setup.sh — first-time MediaMate install (safe to run again to change settings).
 #
 # Usage:
 #   ./setup.sh                      interactive: asks a few questions
@@ -7,7 +7,7 @@
 #
 # Options:
 #   --port <n>         Web UI port on this host (default 4260)
-#   --media <path>     A media folder to give ScreenMate (repeat for more). It is
+#   --media <path>     A media folder to give MediaMate (repeat for more). It is
 #                      mounted at the same path inside the container, so paths
 #                      match what qBittorrent reports when it runs on this host.
 #   --tz <zone>        Time zone, e.g. America/Toronto (default: this host's)
@@ -88,7 +88,7 @@ get_env() {
     sed -n "s/^${1}=//p" "$ENV_FILE" | tail -1
 }
 
-echo "=== ScreenMate setup ==="
+echo "=== MediaMate setup ==="
 
 # ── Requirements ───────────────────────────────────────────────────────────────
 command -v docker >/dev/null 2>&1 || die "Docker is not installed — see https://docs.docker.com/engine/install/"
@@ -114,7 +114,7 @@ TZ_VALUE="${TZ_OPT:-$(ask "Time zone" "$default_tz")}"
 if [[ ${#MEDIA[@]} -eq 0 ]]; then
     existing="$(get_env MEDIA_PATHS)"
     if [[ "$INTERACTIVE" == true ]]; then
-        echo "Media folders ScreenMate may scan, encode and split (the folder qBittorrent"
+        echo "Media folders MediaMate may scan, encode and split (the folder qBittorrent"
         echo "saves to, and your library). Comma-separated, e.g. /mnt/nas/tv,/mnt/nas/movies"
     fi
     answer="$(ask "Media folders" "${existing:-none}")"
@@ -200,7 +200,7 @@ else
     info "Pulling the image"
     docker compose pull
 fi
-info "Starting ScreenMate"
+info "Starting MediaMate"
 docker compose up -d --remove-orphans
 
 info "Waiting for it to come up"
@@ -211,7 +211,7 @@ for _ in $(seq 1 60); do
 done
 if [[ "$healthy" != true ]]; then
     docker compose ps || true
-    die "ScreenMate didn't answer on port $PORT within 2 minutes — check 'docker compose logs screenmate'"
+    die "MediaMate didn't answer on port $PORT within 2 minutes — check 'docker logs mediamate'"
 fi
 
 # ── Upgrade helper ─────────────────────────────────────────────────────────────
@@ -233,11 +233,11 @@ fi
 
 host_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo ""
-echo "=== ScreenMate is running ==="
+echo "=== MediaMate is running ==="
 echo "Open: http://${host_ip:-localhost}:$PORT"
 echo ""
 echo "Next:"
 echo "  • The setup wizard connects qBittorrent — or imports your AuTorrent/FileSplitter data."
 echo "  • Settings → Auto pipeline: add a rule (e.g. 'Shrink to x265') and, if qBittorrent sees"
-echo "    downloads under a different path than ScreenMate, a path mapping."
+echo "    downloads under a different path than MediaMate, a path mapping."
 echo "  • ./update.sh installs new versions; ./setup.sh changes these settings."

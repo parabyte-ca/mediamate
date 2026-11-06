@@ -42,12 +42,12 @@ test("shows the pushed title, body and link", async () => {
 test("plain-text pushes still show, with defaults", async () => {
   const sw = load();
   await sw.fire("push", { data: { json: () => { throw new Error("not json"); }, text: () => "hello" } });
-  assert.equal(sw.shown[0].title, "ScreenMate");
+  assert.equal(sw.shown[0].title, "MediaMate");
   assert.equal(sw.shown[0].body, "hello");
   assert.equal(sw.shown[0].data.url, "/activity");
 });
 
-test("tapping focuses an open ScreenMate window and navigates it", async () => {
+test("tapping focuses an open MediaMate window and navigates it", async () => {
   const navigated = [];
   let focused = false;
   const win = { url: "https://screenmate.example/library", navigate: async (u) => navigated.push(u), focus: async () => { focused = true; } };

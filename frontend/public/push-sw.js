@@ -1,5 +1,5 @@
 /* Push handling, imported into the generated service worker (vite.config.ts →
-   workbox.importScripts). Shows ScreenMate notifications and opens the right page
+   workbox.importScripts). Shows MediaMate notifications and opens the right page
    when one is tapped. */
 self.addEventListener("push", (event) => {
   let data = {};
@@ -8,7 +8,7 @@ self.addEventListener("push", (event) => {
   } catch {
     data = { body: event.data ? event.data.text() : "" };
   }
-  const title = data.title || "ScreenMate";
+  const title = data.title || "MediaMate";
   event.waitUntil(
     self.registration.showNotification(title, {
       body: data.body || "",

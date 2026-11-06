@@ -9,7 +9,7 @@ import { ArrowLeft, ArrowRight, X } from "lucide-react";
 export const TOUR_KEY = "sm-tour";
 /** Bump when the tour changes enough that everyone should see it again. */
 export const TOUR_VERSION = "2";
-export const TOUR_EVENT = "screenmate:tour";
+export const TOUR_EVENT = "mediamate:tour";
 
 type Step = {
   /** data-tour values to try, first visible one wins (desktop vs phone). */
@@ -20,8 +20,8 @@ type Step = {
 
 const STEPS: Step[] = [
   {
-    title: "Welcome to ScreenMate",
-    body: "ScreenMate finds shows and movies, downloads them, and gets them ready to watch. Here's a quick look around.",
+    title: "Welcome to MediaMate",
+    body: "MediaMate finds shows and movies, downloads them, and gets them ready to watch. Here's a quick look around.",
   },
   {
     targets: ["nav-search"],
@@ -56,7 +56,7 @@ const STEPS: Step[] = [
   {
     targets: ["nav-library"],
     title: "Library",
-    body: "Everything ScreenMate has found. Tap a picture to play it.",
+    body: "Everything MediaMate has found. Tap a picture to play it.",
   },
   {
     targets: ["jump"],

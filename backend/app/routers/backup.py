@@ -1,5 +1,5 @@
 """
-backup.py — Export and restore ScreenMate configuration and data.
+backup.py — Export and restore MediaMate configuration and data.
 
 Data included in every backup ZIP
 ──────────────────────────────────
@@ -76,7 +76,7 @@ def export_backup(db: Session = Depends(get_db)):
         zf.writestr("backup_meta.json", json.dumps(meta, indent=2))
 
     buf.seek(0)
-    filename = f"screenmate-backup-{now_utc.strftime('%Y-%m-%d')}.zip"
+    filename = f"mediamate-backup-{now_utc.strftime('%Y-%m-%d')}.zip"
     return StreamingResponse(
         buf,
         media_type="application/zip",

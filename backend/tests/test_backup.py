@@ -129,7 +129,7 @@ class TestExportBackup:
         resp = client.get("/backup/export")
         assert resp.status_code == 200
         cd = resp.headers.get("content-disposition", "")
-        assert "screenmate-backup-" in cd
+        assert "mediamate-backup-" in cd
         assert ".zip" in cd
 
 

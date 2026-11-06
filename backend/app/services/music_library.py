@@ -60,7 +60,7 @@ def read(path: str) -> dict:
     out = {"path": path, "format": ext.lstrip("."), "lossless": ext in LOSSLESS_EXTS, "size_bytes": None,
            "mtime": None, "duration_sec": None, "bitrate": None, "title": None, "artist": None,
            "album_artist": None, "album": None, "year": None, "track_no": None, "track_total": None,
-           "disc_no": None, "mb_release_group_id": None}
+           "disc_no": None, "mb_release_group_id": None, "date": None, "genre": None, "comment": None}
     try:
         st = os.stat(path)
         out["size_bytes"], out["mtime"] = st.st_size, st.st_mtime
@@ -89,13 +89,37 @@ def read(path: str) -> dict:
         out["track_total"] = _num(_first(tags, "tracktotal") or _first(tags, "totaltracks"))[0]
     out["disc_no"] = _num(_first(tags, "discnumber"))[0]
     out["mb_release_group_id"] = _first(tags, "musicbrainz_releasegroupid")
+    out["date"] = _first(tags, "date")
+    out["genre"] = _first(tags, "genre")
+    out["comment"] = _first(tags, "comment") or _first(tags, "description")
     return out
 
 
+def _register_id3_comment() -> None:
+    """EasyID3 has no "comment" key; map it to the COMM frame so MP3s take comments too."""
+    from mutagen.easyid3 import EasyID3
+    if "comment" in EasyID3.valid_keys:
+        return
+    from mutagen.id3 import COMM
+
+    def get(id3, key):
+        return [t for fr in id3.getall("COMM") for t in fr.text]
+
+    def set_(id3, key, value):
+        id3.delall("COMM")
+        id3.add(COMM(encoding=3, lang="eng", desc="", text=value))
+
+    def delete(id3, key):
+        id3.delall("COMM")
+    EasyID3.RegisterKey("comment", get, set_, delete)
+
+
 def write(path: str, values: dict) -> bool:
-    """Set tags (title, artist, albumartist, album, date, tracknumber, discnumber,
-    musicbrainz_releasegroupid). True if saved."""
+    """Set tags (title, artist, albumartist, album, date, genre, comment, tracknumber,
+    discnumber, musicbrainz_releasegroupid). None leaves a tag alone; "" removes it.
+    True if saved."""
     import mutagen
+    _register_id3_comment()
     try:
         f = mutagen.File(path, easy=True)
         if f is None:
@@ -103,10 +127,14 @@ def write(path: str, values: dict) -> bool:
         if f.tags is None:
             f.add_tags()
         for k, v in values.items():
-            if v in (None, ""):
+            if v is None:
                 continue
             try:
-                f[k] = [str(v)]
+                if str(v).strip() == "":
+                    if k in f:
+                        del f[k]
+                else:
+                    f[k] = [str(v).strip()]
             except (KeyError, ValueError, TypeError):
                 continue                          # a key this format can't hold
         f.save()
@@ -457,6 +485,185 @@ def fill_covers(db, limit: int = SCAN_LOOKUPS) -> dict:
             lookups += 1
     db.commit()
     return found
+
+
+# ── editing by hand ─────────────────────────────────────────────────────────
+
+ALBUM_FIELDS = ("album_artist", "album", "date", "genre", "comment")
+_TAG_KEY = {"album_artist": "albumartist", "album": "album", "date": "date", "genre": "genre", "comment": "comment"}
+
+
+def album_tags(files: list[str]) -> dict:
+    """What the tag editor shows: album fields (the value all tracks share, else the
+    most common, with ``mixed`` listing fields that differ) and one row per track."""
+    from collections import Counter
+    infos = _order([read(f) for f in files])
+    album, mixed = {}, []
+    for field in ALBUM_FIELDS:
+        vals = [i[field] if field != "album_artist" else (i["album_artist"] or i["artist"]) for i in infos]
+        counted = Counter(v for v in vals if v)
+        album[field] = counted.most_common(1)[0][0] if counted else ""
+        if len(set(vals)) > 1:
+            mixed.append(field)
+    tracks = [{"path": i["path"], "file": os.path.basename(i["path"]), "title": i["title"] or "",
+               "artist": i["artist"] or "", "track_no": i["track_no"], "disc_no": i["disc_no"]} for i in infos]
+    return {"album": album, "mixed": mixed, "tracks": tracks}
+
+
+def live_title(date: str, venue: str, city: str) -> str:
+    """Album title for a live recording: "2019-08-14 Red Rocks, Morrison CO"."""
+    place = ", ".join(p for p in (venue.strip(), city.strip()) if p)
+    return " ".join(p for p in (date.strip(), place) if p)
+
+
+def save_album_tags(album: dict, tracks: list[dict], live: dict | None = None) -> dict:
+    """Write the editor's values. ``album`` holds the shared fields (None = leave alone,
+    "" = remove); ``tracks`` [{path, title, artist, track_no, disc_no}].
+    ``live`` {date, venue, city} fills date, comment and (when blank) the album title.
+    Track totals are worked out per disc. Returns {"ok", "saved", "failed"}."""
+    album = dict(album or {})
+    if live and any((live.get(k) or "").strip() for k in ("date", "venue", "city")):
+        date, venue, city = ((live.get(k) or "").strip() for k in ("date", "venue", "city"))
+        if not (album.get("album") or "").strip():
+            album["album"] = live_title(date, venue, city)
+        if date:
+            album["date"] = date
+        album["comment"] = "Live at " + live_title("", venue, city) + (f" on {date}" if date else "")
+    discs = {t.get("disc_no") or 1 for t in tracks}
+    per_disc: dict[int, int] = {}
+    for t in tracks:
+        per_disc[t.get("disc_no") or 1] = per_disc.get(t.get("disc_no") or 1, 0) + 1
+    shared = {_TAG_KEY[k]: v for k, v in album.items() if k in _TAG_KEY}
+    saved, failed = 0, []
+    for t in tracks:
+        values = dict(shared)
+        if t.get("title") is not None:
+            values["title"] = t["title"]
+        if t.get("artist") is not None:
+            values["artist"] = t["artist"] or album.get("album_artist") or ""
+        if t.get("track_no"):
+            values["tracknumber"] = f"{int(t['track_no'])}/{per_disc[t.get('disc_no') or 1]}"
+        elif "track_no" in t:
+            values["tracknumber"] = ""
+        if len(discs) > 1 and t.get("disc_no"):
+            values["discnumber"] = f"{int(t['disc_no'])}/{len(discs)}"
+        if write(t["path"], values):
+            saved += 1
+        else:
+            failed.append(os.path.basename(t["path"]))
+    return {"ok": not failed, "saved": saved, "failed": failed}
+
+
+_NAME_PATTERNS = [
+    re.compile(r"^(?:.*?[^a-z])?d(?P<disc>\d{1,2})t(?P<no>\d{2,3})(?:[\s._-]+(?P<title>.+))?$", re.I),  # gd1977-05-08d2t01 (etree)
+    re.compile(r"^(?:d|cd|disc)\s*(?P<disc>\d{1,2})\s*[-_. ]?\s*t?(?P<no>\d{1,3})[\s._-]+(?P<title>.+)$", re.I),  # d1t03 Title
+    re.compile(r"^(?P<disc>\d)[-.](?P<no>\d{2})[\s._-]+(?P<title>.+)$"),                                 # 1-03 Title
+    re.compile(r"^(?P<no>\d{1,3})\s*[-._)]\s*(?:(?P<artist>.+?)\s+-\s+)?(?P<title>.+)$"),                  # 03 - Title / 03. Artist - Title
+    re.compile(r"^(?P<no>\d{1,3})\s+(?P<title>.+)$"),                                                       # 03 Title
+    re.compile(r"^(?P<artist>.+?)\s+-\s+(?P<no>\d{1,3})\s+-\s+(?P<title>.+)$"),                              # Artist - 03 - Title
+]
+
+
+def from_name(filename: str) -> dict:
+    """Title, track (and disc, artist) guessed from a file name like "03 - Song.flac"."""
+    stem = os.path.splitext(os.path.basename(filename))[0].replace("_", " ").strip()
+    for pat in _NAME_PATTERNS:
+        m = pat.match(stem)
+        if m:
+            g = m.groupdict()
+            title = re.sub(r"\s+", " ", (g.get("title") or "").strip(" -._")).strip()
+            return {"title": title or None, "track_no": int(g["no"]),
+                    "disc_no": int(g["disc"]) if g.get("disc") else None,
+                    "artist": (g.get("artist") or "").strip() or None}
+    return {"title": stem, "track_no": None, "disc_no": None, "artist": None}
+
+
+# ── artwork by hand ─────────────────────────────────────────────────────────
+
+
+def image_kind(data: bytes) -> str | None:
+    """".jpg" or ".png" when ``data`` is a real image Pillow can open, else None."""
+    import io
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as im:
+            im.verify()
+            fmt = (im.format or "").upper()
+    except Exception:
+        return None
+    return {"JPEG": ".jpg", "PNG": ".png"}.get(fmt)
+
+
+def replace_cover(folder: str, data: bytes) -> str:
+    """Make ``data`` the album's cover (cover.jpg/png), removing the old cover image.
+    Raises ValueError for anything that isn't a JPEG or PNG."""
+    ext = image_kind(data)
+    if ext is None:
+        raise ValueError("That isn't a JPEG or PNG image")
+    old = cover_in(folder)
+    name = "cover" + ext
+    tmp = os.path.join(folder, f".{name}.new")
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+    os.replace(tmp, os.path.join(folder, name))
+    if old and old != name and os.path.splitext(old)[0].lower() in IMAGE_NAMES:
+        try:
+            os.remove(os.path.join(folder, old))
+        except OSError:
+            pass
+    return name
+
+
+def embed_cover(files: list[str], data: bytes) -> dict:
+    """Put the cover inside each audio file (FLAC, MP3, M4A, Ogg/Opus), replacing
+    artwork already there. Returns {"embedded", "skipped"}."""
+    import base64
+    import mutagen
+    from mutagen.flac import FLAC, Picture
+    ext = image_kind(data)
+    if ext is None:
+        raise ValueError("That isn't a JPEG or PNG image")
+    mime = "image/png" if ext == ".png" else "image/jpeg"
+    done, skipped = 0, []
+    for path in files:
+        try:
+            f = mutagen.File(path)
+            if f is None:
+                skipped.append(os.path.basename(path))
+                continue
+            if isinstance(f, FLAC):
+                f.clear_pictures()
+                pic = Picture()
+                pic.type, pic.mime, pic.desc, pic.data = 3, mime, "Cover", data
+                f.add_picture(pic)
+            elif path.lower().endswith(".mp3"):
+                from mutagen.id3 import APIC, ID3, ID3NoHeaderError
+                try:
+                    tags = ID3(path)
+                except ID3NoHeaderError:
+                    tags = ID3()
+                tags.delall("APIC")
+                tags.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=data))
+                tags.save(path)
+                done += 1
+                continue
+            elif path.lower().endswith((".m4a", ".mp4", ".aac", ".alac")):
+                from mutagen.mp4 import MP4Cover
+                fmt = MP4Cover.FORMAT_PNG if ext == ".png" else MP4Cover.FORMAT_JPEG
+                f["covr"] = [MP4Cover(data, imageformat=fmt)]
+            elif path.lower().endswith((".ogg", ".oga", ".opus")):
+                pic = Picture()
+                pic.type, pic.mime, pic.desc, pic.data = 3, mime, "Cover", data
+                f["metadata_block_picture"] = [base64.b64encode(pic.write()).decode("ascii")]
+            else:
+                skipped.append(os.path.basename(path))
+                continue
+            f.save()
+            done += 1
+        except Exception as exc:
+            logger.warning("Couldn't embed the cover in %s: %s", path, exc)
+            skipped.append(os.path.basename(path))
+    return {"embedded": done, "skipped": skipped}
 
 
 # ── organising ──────────────────────────────────────────────────────────────

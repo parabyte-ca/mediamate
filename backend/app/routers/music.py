@@ -284,3 +284,131 @@ def library_collections(album_id: int, body: dict = Body(default={})):
 def library_collection_names():
     from ..services import plex_sync
     return {"names": plex_sync.collection_names("music")}
+
+
+# ── editing tags and artwork by hand ────────────────────────────────────────
+
+from fastapi import File, Form, UploadFile  # noqa: E402
+
+MAX_COVER_BYTES = 15 * 1024 * 1024
+
+
+class TagSave(BaseModel):
+    album: dict = {}
+    tracks: list[dict] = []
+    live: dict | None = None
+
+
+class CoverPick(BaseModel):
+    mbid: str
+    embed: bool = False
+
+
+def _paths_ok(db: Session, a: MusicLibAlbum, paths: list[str]) -> None:
+    allowed = {t.path for t in db.query(MusicTrack).filter(MusicTrack.album_id == a.id)}
+    if any(p not in allowed for p in paths):
+        raise HTTPException(status_code=400, detail="Those files aren't part of this album; scan again")
+
+
+def _rescan(db: Session, a: MusicLibAlbum) -> None:
+    music_library.scan_folder(db, a.folder)
+    music_library.mark_duplicates(db)
+    db.commit()
+
+
+@router.get("/music/library/albums/{album_id}/tags")
+def album_tags(album_id: int, db: Session = Depends(get_db)):
+    a = _lib_album(db, album_id)
+    files = _album_files(db, a)
+    if not files:
+        raise HTTPException(status_code=404, detail="The album's files are gone; scan again")
+    return music_library.album_tags(files)
+
+
+@router.get("/music/library/albums/{album_id}/from-names")
+def album_from_names(album_id: int, db: Session = Depends(get_db)):
+    """Titles and track numbers guessed from the file names (nothing is saved)."""
+    a = _lib_album(db, album_id)
+    return [{"path": p, **music_library.from_name(p)} for p in _album_files(db, a)]
+
+
+@router.put("/music/library/albums/{album_id}/tags")
+def save_album_tags(album_id: int, body: TagSave, db: Session = Depends(get_db)):
+    a = _lib_album(db, album_id)
+    _paths_ok(db, a, [t.get("path") for t in body.tracks])
+    for t in body.tracks:
+        for k in ("track_no", "disc_no"):
+            v = t.get(k)
+            if v not in (None, "") and (not str(v).isdigit() or not 0 < int(v) < 1000):
+                raise HTTPException(status_code=422, detail=f"{k.replace('_no', '')} numbers must be 1 to 999")
+            t[k] = int(v) if v not in (None, "") else None
+    res = music_library.save_album_tags(body.album, body.tracks, body.live)
+    _rescan(db, a)
+    res["msg"] = (f"Saved tags on {res['saved']} track{'s' if res['saved'] != 1 else ''}"
+                  + (f"; couldn't write {', '.join(res['failed'][:3])}" if res["failed"] else ""))
+    return res
+
+
+def _apply_cover(db: Session, a: MusicLibAlbum, data: bytes, embed: bool) -> dict:
+    try:
+        name = music_library.replace_cover(a.folder, data)
+        emb = music_library.embed_cover(_album_files(db, a), data) if embed else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Couldn't save the cover: {exc}")
+    _rescan(db, a)
+    msg = f"Cover saved as {name}"
+    if emb:
+        msg += f" and put in {emb['embedded']} track{'s' if emb['embedded'] != 1 else ''}"
+        if emb["skipped"]:
+            msg += f" ({len(emb['skipped'])} file type{'s' if len(emb['skipped']) != 1 else ''} can't hold art)"
+    return {"ok": True, "cover": name, "msg": msg}
+
+
+@router.post("/music/library/albums/{album_id}/cover/upload")
+async def upload_cover(album_id: int, file: UploadFile = File(...), embed: bool = Form(False),
+                       db: Session = Depends(get_db)):
+    a = _lib_album(db, album_id)
+    data = await file.read(MAX_COVER_BYTES + 1)
+    if len(data) > MAX_COVER_BYTES:
+        raise HTTPException(status_code=413, detail="That image is over 15 MB")
+    return _apply_cover(db, a, data, embed)
+
+
+@router.get("/music/library/albums/{album_id}/cover/candidates")
+def cover_candidates(album_id: int, q: str | None = None, db: Session = Depends(get_db)):
+    a = _lib_album(db, album_id)
+    try:
+        return musicbrainz.search_release_groups(a.artist, a.title, (q or "").strip() or None)
+    except musicbrainz.MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz is unavailable right now ({exc})")
+
+
+@router.post("/music/library/albums/{album_id}/cover/musicbrainz")
+def cover_from_musicbrainz(album_id: int, body: CoverPick, db: Session = Depends(get_db)):
+    a = _lib_album(db, album_id)
+    data = musicbrainz.cover_bytes(body.mbid)
+    if not data:
+        raise HTTPException(status_code=404, detail="That release has no cover on MusicBrainz; pick another")
+    res = _apply_cover(db, a, data, body.embed)
+    a.mb_release_group_id = a.mb_release_group_id or body.mbid
+    db.commit()
+    return res
+
+
+@router.post("/music/library/albums/{album_id}/cover/embed")
+def embed_current_cover(album_id: int, db: Session = Depends(get_db)):
+    """Put the album's current cover image inside its tracks."""
+    a = _lib_album(db, album_id)
+    if not a.cover or not os.path.isfile(os.path.join(a.folder, a.cover)):
+        raise HTTPException(status_code=404, detail="This album has no cover to put in the files")
+    with open(os.path.join(a.folder, a.cover), "rb") as fh:
+        data = fh.read()
+    try:
+        emb = music_library.embed_cover(_album_files(db, a), data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    _rescan(db, a)
+    return {"ok": True, "msg": f"Cover put in {emb['embedded']} track{'s' if emb['embedded'] != 1 else ''}",
+            **emb}

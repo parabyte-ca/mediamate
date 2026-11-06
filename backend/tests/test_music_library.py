@@ -358,3 +358,118 @@ def test_get_cover_route(root, mbz):
     assert r["ok"] and r["source"] in ("musicbrainz", "existing")
     assert client.get("/api/music/library/albums").json()[0]["has_cover"]
     assert client.post(f"/api/music/library/albums/{aid}/cover").json()["source"] == "existing"
+
+
+# ── editing tags and artwork by hand ────────────────────────────────────────
+
+
+def _png():
+    import io
+    from PIL import Image
+    b = io.BytesIO()
+    Image.new("RGB", (8, 8), (200, 30, 90)).save(b, "PNG")
+    return b.getvalue()
+
+
+def _jpeg():
+    import io
+    from PIL import Image
+    b = io.BytesIO()
+    Image.new("RGB", (8, 8), (20, 30, 200)).save(b, "JPEG")
+    return b.getvalue()
+
+
+@pytest.mark.parametrize("name,expect", [
+    ("03 - Song Name.flac", ("Song Name", 3, None)),
+    ("d1t03 Jam.flac", ("Jam", 3, 1)),
+    ("gd1977-05-08d2t01.flac", (None, 1, 2)),
+    ("2-05 Encore.flac", ("Encore", 5, 2)),
+    ("01_Opening_Theme.mp3", ("Opening Theme", 1, None)),
+    ("Intro.flac", ("Intro", None, None)),
+])
+def test_names_to_tags(name, expect):
+    g = ml.from_name(name)
+    assert (g["title"], g["track_no"], g["disc_no"]) == expect
+
+
+@pytest.fixture
+def bootleg(root):
+    client, Session, music = root
+    folder = music / "incoming" / "gd77-05-08"
+    for n in ("gd77-05-08d1t01 Minglewood.flac", "gd77-05-08d1t02 Loser.mp3", "gd77-05-08d2t01 Scarlet.flac"):
+        clip(folder / n)
+    ml.scan()
+    with Session() as db:
+        aid = db.query(MusicLibAlbum).one().id
+    return client, Session, music, folder, aid
+
+
+def test_tag_editor_round_trip_with_live_fields(bootleg):
+    client, Session, music, folder, aid = bootleg
+    tags = client.get(f"/api/music/library/albums/{aid}/tags").json()
+    assert len(tags["tracks"]) == 3 and tags["album"]["album"] == ""
+    guesses = {g["path"]: g for g in client.get(f"/api/music/library/albums/{aid}/from-names").json()}
+    tracks = [{"path": t["path"], "title": guesses[t["path"]]["title"], "artist": "",
+               "track_no": guesses[t["path"]]["track_no"], "disc_no": guesses[t["path"]]["disc_no"]}
+              for t in tags["tracks"]]
+    r = client.put(f"/api/music/library/albums/{aid}/tags", json={
+        "album": {"album_artist": "Grateful Dead", "album": "", "genre": "Rock"},
+        "tracks": tracks, "live": {"date": "1977-05-08", "venue": "Barton Hall", "city": "Ithaca NY"}}).json()
+    assert r["ok"] and r["saved"] == 3
+    infos = {os.path.basename(p): ml.read(str(p)) for p in folder.iterdir() if p.suffix in (".flac", ".mp3")}
+    d1 = infos["gd77-05-08d1t01 Minglewood.flac"]
+    assert d1["album"] == "1977-05-08 Barton Hall, Ithaca NY" and d1["album_artist"] == "Grateful Dead"
+    assert d1["artist"] == "Grateful Dead" and d1["genre"] == "Rock" and d1["date"] == "1977-05-08"
+    assert (d1["track_no"], d1["track_total"], d1["disc_no"]) == (1, 2, 1)
+    assert d1["comment"] == "Live at Barton Hall, Ithaca NY on 1977-05-08"
+    mp3 = infos["gd77-05-08d1t02 Loser.mp3"]
+    assert mp3["title"] == "Loser" and mp3["comment"] == d1["comment"]           # MP3 comments work too
+    assert infos["gd77-05-08d2t01 Scarlet.flac"]["disc_no"] == 2
+    a = client.get("/api/music/library/albums").json()[0]
+    assert a["title"] == "1977-05-08 Barton Hall, Ithaca NY" and "untagged" not in a["issues"]
+    # an empty value removes the tag
+    client.put(f"/api/music/library/albums/{aid}/tags", json={"album": {"genre": ""}, "tracks": [
+        {"path": t["path"]} for t in tags["tracks"]]})
+    assert ml.read(str(folder / "gd77-05-08d1t01 Minglewood.flac"))["genre"] is None
+
+
+def test_tag_editor_rejects_other_files_and_bad_numbers(bootleg, tmp_path):
+    client, Session, music, folder, aid = bootleg
+    outside = clip(tmp_path / "x.flac")
+    r = client.put(f"/api/music/library/albums/{aid}/tags", json={"album": {}, "tracks": [{"path": str(outside)}]})
+    assert r.status_code == 400
+    p = str(next(folder.glob("*.flac")))
+    r = client.put(f"/api/music/library/albums/{aid}/tags", json={"album": {}, "tracks": [{"path": p, "track_no": "x"}]})
+    assert r.status_code == 422
+
+
+def test_upload_cover_replaces_and_embeds(bootleg):
+    client, Session, music, folder, aid = bootleg
+    (folder / "folder.jpg").write_bytes(_jpeg())
+    ml.scan()
+    r = client.post(f"/api/music/library/albums/{aid}/cover/upload", data={"embed": "true"},
+                    files={"file": ("art.png", _png(), "image/png")}).json()
+    assert r["ok"] and r["cover"] == "cover.png" and "3 tracks" in r["msg"]
+    assert (folder / "cover.png").exists() and not (folder / "folder.jpg").exists()
+    for f in folder.iterdir():
+        if f.suffix in (".flac", ".mp3"):
+            assert ml.embedded_cover(str(f)) == (_png(), ".png")
+    a = client.get("/api/music/library/albums").json()[0]
+    assert a["has_cover"] and client.get(f"/api/music/library/albums/{aid}/cover").content == _png()
+    bad = client.post(f"/api/music/library/albums/{aid}/cover/upload", files={"file": ("x.png", b"nope", "image/png")})
+    assert bad.status_code == 400 and "JPEG or PNG" in bad.json()["detail"]
+
+
+def test_cover_from_musicbrainz_choice(bootleg, monkeypatch):
+    client, Session, music, folder, aid = bootleg
+    monkeypatch.setattr(musicbrainz, "search_release_groups", lambda a, b, q=None: [
+        {"mbid": "rg-live", "title": "Cornell 5/8/77", "artist": "Grateful Dead", "date": "2017-05-05",
+         "type": "Album · Live", "cover": "https://coverartarchive.org/release-group/rg-live/front-250"}])
+    monkeypatch.setattr(musicbrainz, "cover_bytes", lambda rg: _jpeg() if rg == "rg-live" else None)
+    c = client.get(f"/api/music/library/albums/{aid}/cover/candidates", params={"q": "cornell 77"}).json()
+    assert c[0]["type"] == "Album · Live"
+    r = client.post(f"/api/music/library/albums/{aid}/cover/musicbrainz", json={"mbid": "rg-live"}).json()
+    assert r["cover"] == "cover.jpg" and (folder / "cover.jpg").read_bytes() == _jpeg()
+    assert client.post(f"/api/music/library/albums/{aid}/cover/musicbrainz", json={"mbid": "rg-none"}).status_code == 404
+    r = client.post(f"/api/music/library/albums/{aid}/cover/embed").json()
+    assert r["embedded"] == 3

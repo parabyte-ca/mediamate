@@ -337,7 +337,7 @@ def render_html(sections: dict[str, list], week_label: str) -> str:
         '<html lang="en">\n<head>\n'
         '<meta charset="UTF-8">\n'
         '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
-        "<title>ScreenMate Weekly Digest</title>\n"
+        "<title>MediaMate Weekly Digest</title>\n"
         "</head>\n"
         '<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'
         "'Segoe UI',sans-serif;background:#f9fafb\">\n"
@@ -345,7 +345,7 @@ def render_html(sections: dict[str, list], week_label: str) -> str:
         '<tr><td align="center" style="padding:32px 16px">\n'
         '<table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%">\n'
         '<tr><td style="background:#1d4ed8;border-radius:12px 12px 0 0;padding:24px 28px">'
-        '<div style="font-size:22px;font-weight:700;color:#ffffff">ScreenMate Weekly Digest</div>'
+        '<div style="font-size:22px;font-weight:700;color:#ffffff">MediaMate Weekly Digest</div>'
         f'<div style="font-size:13px;color:#bfdbfe;margin-top:4px">{_esc(week_label)} &middot; '
         f"{total} new title{'s' if total != 1 else ''}</div>"
         "</td></tr>\n"
@@ -354,7 +354,7 @@ def render_html(sections: dict[str, list], week_label: str) -> str:
         + "".join(body_parts)
         + "</table></td></tr>\n"
         '<tr><td style="padding:20px 0;text-align:center;font-size:11px;color:#9ca3af">'
-        "Sent by ScreenMate &middot; Manage digest settings in your ScreenMate configuration"
+        "Sent by MediaMate &middot; Manage digest settings in your MediaMate configuration"
         "</td></tr>\n"
         "</table>\n</td></tr>\n</table>\n</body>\n</html>"
     )
@@ -369,7 +369,7 @@ def send_email(smtp_cfg: dict, recipients: list[str], html: str, week_label: str
     from_addr = smtp_cfg.get("from_email", "") or user
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"ScreenMate Weekly Digest — {week_label}"
+    msg["Subject"] = f"MediaMate Weekly Digest — {week_label}"
     msg["From"]    = from_addr
     msg["To"]      = ", ".join(recipients)
     msg.attach(MIMEText(html, "html"))

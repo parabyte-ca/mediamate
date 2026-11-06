@@ -51,7 +51,7 @@ function AddDialog({ show, onClose, onAdded }: {
             </p>
           </div>
         </div>
-        <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Where should ScreenMate start?</p>
+        <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">Where should MediaMate start?</p>
         <div className="space-y-2">
           {option("next", "Next new episode", "Only download episodes from now on.")}
           {option("beginning", "From the beginning", "Download every episode, starting with season 1.")}
@@ -167,7 +167,7 @@ function MovieBrowse() {
       {addError && <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">{addError}</p>}
       {list === "upcoming" && !query && movies !== null && movies.length > 0 && (
         <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-          Add one to your watchlist and ScreenMate downloads it when it's released digitally.
+          Add one to your watchlist and MediaMate downloads it when it's released digitally.
         </p>
       )}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

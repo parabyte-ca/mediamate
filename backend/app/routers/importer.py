@@ -1,4 +1,4 @@
-"""/api/import — bring an AuTorrent and/or FileSplitter database into ScreenMate."""
+"""/api/import — bring an AuTorrent and/or FileSplitter database into MediaMate."""
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 

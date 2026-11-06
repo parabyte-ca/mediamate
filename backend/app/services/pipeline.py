@@ -492,7 +492,7 @@ def _finalize(bind, plan_id: int) -> None:
                 name = row["filename"] if row else "file"
                 body = f"🎬 {name}: {steps} done" + (f", saved {saved / 1e9:.2f} GB" if saved else "")
                 from .apprise_notify import notify
-                notify(url, "ScreenMate — Processing complete", body, url=f"/activity?open={plan.journey_id}")
+                notify(url, "MediaMate — Processing complete", body, url=f"/activity?open={plan.journey_id}")
                 plan.notify_status = "done"
             else:
                 plan.notify_status = "skipped"

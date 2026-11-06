@@ -44,7 +44,7 @@ def _set(db: Session, key: str, value: str) -> None:
 
 
 def local_of(db: Session, dp: DownloadPath) -> str:
-    """Where this folder is inside ScreenMate's container."""
+    """Where this folder is inside MediaMate's container."""
     if dp.local_path:
         return _norm(dp.local_path)
     from .pipeline import map_path
@@ -178,7 +178,7 @@ _SCAN_CAP = 5000
 
 
 def _source(db: Session, dp: DownloadPath) -> str:
-    """Where ScreenMate's path for this folder comes from, in words."""
+    """Where MediaMate's path for this folder comes from, in words."""
     if dp.local_path:
         return "set as Path here"
     from ..models import PathMapping
@@ -243,12 +243,12 @@ def _mount_root(path: str) -> str:
 
 
 def _same_as_qbit_hint(qbit_path: str, local: str) -> dict:
-    """qBittorrent can see the folder and ScreenMate can't: downloads land in
-    qBittorrent's mount, so give ScreenMate the same host folder at the same path."""
+    """qBittorrent can see the folder and MediaMate can't: downloads land in
+    qBittorrent's mount, so give MediaMate the same host folder at the same path."""
     root = _mount_root(qbit_path) if local == qbit_path else _mount_root(local)
     return {
         "kind": "same-as-qbit",
-        "text": (f"qBittorrent saves into {qbit_path} inside its own container, and ScreenMate doesn't have that "
+        "text": (f"qBittorrent saves into {qbit_path} inside its own container, and MediaMate doesn't have that "
                  f"folder mounted, so downloads finish where only qBittorrent can see them. Find the host folder "
                  f"qBittorrent mounts at {root} (step 1; on TrueNAS it's also under the qBittorrent app's Storage "
                  f"settings), put it on the left of the volume line, add that line under volumes in "
@@ -257,13 +257,13 @@ def _same_as_qbit_hint(qbit_path: str, local: str) -> dict:
         "steps": [
             {"label": "1. Show qBittorrent's mounts (on the host; use your qBittorrent container's name)",
              "copy": "docker inspect qbittorrent --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{println}}{{end}}'"},
-            {"label": "2. Volume line for ScreenMate", "copy": _volume_line("/host/folder/from/step/1", root)},
+            {"label": "2. Volume line for MediaMate", "copy": _volume_line("/host/folder/from/step/1", root)},
         ],
     }
 
 
 def check(db: Session, dp: DownloadPath, low_threshold: int = 0) -> dict:
-    """Can ScreenMate (and qBittorrent) use this folder? A checklist plus the likeliest fix."""
+    """Can MediaMate (and qBittorrent) use this folder? A checklist plus the likeliest fix."""
     from .disk_space import is_low
 
     local = local_of(db, dp)
@@ -278,21 +278,21 @@ def check(db: Session, dp: DownloadPath, low_threshold: int = 0) -> dict:
     visible = bool(local) and os.path.isdir(local)
     if not visible:
         parent = _nearest_existing(local or "/")
-        add("visible", "Visible to ScreenMate", "fail",
-            f"{local} doesn't exist in ScreenMate's container"
+        add("visible", "Visible to MediaMate", "fail",
+            f"{local} doesn't exist in MediaMate's container"
             + (f"; {parent} does" if parent not in ("/", "") else ""))
         mapped = _source(db, dp).startswith("from the path mapping")
         hint = ({"kind": "mapping",
                  "text": f"Check the path mapping: it turns {dp.path} into {local}, which doesn't exist here."}
                 if mapped else
                 {"kind": "mount",
-                 "text": "Mount the folder into ScreenMate: add this under volumes in docker-compose.override.yml, "
+                 "text": "Mount the folder into MediaMate: add this under volumes in docker-compose.override.yml, "
                          "replacing the left side with the folder's path on the host, then run: docker compose up -d",
                  "steps": [{"label": "Volume line", "copy": _volume_line("/path/on/host", local)}]})
         for key, label in (("read", "Readable"), ("write", "Writable"), ("space", "Free space")):
             add(key, label, "skip", "Not checked: the folder isn't visible")
     else:
-        add("visible", "Visible to ScreenMate", "ok", "Found")
+        add("visible", "Visible to MediaMate", "ok", "Found")
         try:
             n, capped = _count_videos(local)
             add("read", "Readable", "ok",
@@ -300,14 +300,14 @@ def check(db: Session, dp: DownloadPath, low_threshold: int = 0) -> dict:
         except OSError as e:
             add("read", "Readable", "fail", f"Can't list it: {e.strerror or e}")
             hint = hint or {"kind": "permissions",
-                            "text": f"ScreenMate runs as user {os.getuid()}; give that user read access on the host."}
+                            "text": f"MediaMate runs as user {os.getuid()}; give that user read access on the host."}
 
-        probe = os.path.join(local, f".screenmate-write-test-{uuid.uuid4().hex[:8]}")
+        probe = os.path.join(local, f".mediamate-write-test-{uuid.uuid4().hex[:8]}")
         try:
             with open(probe, "w") as f:
                 f.write("ok")
             os.remove(probe)
-            add("write", "Writable", "ok", "ScreenMate can create and delete files here")
+            add("write", "Writable", "ok", "MediaMate can create and delete files here")
         except OSError as e:
             needs = dp.scan or dp.downloads
             add("write", "Writable", "fail" if needs else "warn",
@@ -353,7 +353,7 @@ COMMON_MOUNTS = ("/media", "/data", "/downloads", "/mnt", "/storage", "/srv")
 
 def suggestions(db: Session) -> dict:
     """qBittorrent's folders that aren't in the list yet, with where each one is
-    inside ScreenMate (through a path mapping, or found by its folder names)."""
+    inside MediaMate (through a path mapping, or found by its folder names)."""
     from . import qbittorrent
     from .path_suggest import _locate
     from .pipeline import map_path

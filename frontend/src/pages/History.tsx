@@ -138,7 +138,7 @@ export default function History() {
       a.href = url;
       const cd = res.headers.get("content-disposition") ?? "";
       const match = cd.match(/filename="([^"]+)"/);
-      a.download = match?.[1] ?? `screenmate-history-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = match?.[1] ?? `mediamate-history-${new Date().toISOString().slice(0, 10)}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -242,7 +242,7 @@ export default function History() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">History</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            All downloads initiated through ScreenMate.
+            All downloads initiated through MediaMate.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">

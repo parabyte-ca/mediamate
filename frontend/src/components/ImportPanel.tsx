@@ -3,7 +3,7 @@ import { AlertCircle, CheckCircle2, Database, FolderSync, Loader2, Upload } from
 import { api, type ImportInspect, type ImportPathSuggestions, type ImportRunResult, type SettingsComparison } from "../api/client";
 import { fmtSize } from "../utils";
 
-// Bring an AuTorrent and/or FileSplitter database into ScreenMate. Used by the
+// Bring an AuTorrent and/or FileSplitter database into MediaMate. Used by the
 // setup wizard and Settings → Data management.
 
 const LABEL: Record<string, string> = {
@@ -174,7 +174,7 @@ export default function ImportPanel({ onImported }: { onImported?: (r: ImportRun
 
       {paths && paths.mappings.length > 0 && (
         <div className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30 p-3 text-xs text-blue-900 dark:text-blue-100">
-          <p className="mb-2 flex items-center gap-1.5 font-medium"><FolderSync className="h-4 w-4" />qBittorrent saves to folders ScreenMate sees under another path</p>
+          <p className="mb-2 flex items-center gap-1.5 font-medium"><FolderSync className="h-4 w-4" />qBittorrent saves to folders MediaMate sees under another path</p>
           <p className="mb-2">Add these path mappings so finished downloads can be encoded and split. Your own mappings are never replaced.</p>
           <ul className="space-y-1.5">
             {paths.mappings.map((m) => (
@@ -198,7 +198,7 @@ export default function ImportPanel({ onImported }: { onImported?: (r: ImportRun
       )}
       {paths && paths.folders_missing > 0 && paths.mappings.length === 0 && (
         <p className="rounded-lg bg-amber-50 dark:bg-amber-950/30 p-3 text-xs text-amber-800 dark:text-amber-200">
-          {paths.folders_missing} of AuTorrent's download folder{paths.folders_missing === 1 ? " isn't" : "s aren't"} visible to ScreenMate.
+          {paths.folders_missing} of AuTorrent's download folder{paths.folders_missing === 1 ? " isn't" : "s aren't"} visible to MediaMate.
           Mount {paths.folders_missing === 1 ? "it" : "them"} (<code>./setup.sh --media /path</code>), or add a path mapping in Settings → Auto pipeline after importing.
         </p>
       )}

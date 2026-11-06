@@ -33,7 +33,7 @@ def valid_key(key: str | None) -> bool:
 
 
 def _auth(key: str) -> tuple[dict[str, str], dict[str, str]]:
-    headers = {"Accept": "application/json", "User-Agent": f"ScreenMate/{os.environ.get('APP_VERSION', 'dev')}"}
+    headers = {"Accept": "application/json", "User-Agent": f"MediaMate/{os.environ.get('APP_VERSION', 'dev')}"}
     params: dict[str, str] = {}
     if _V3_KEY.fullmatch(key):
         params["api_key"] = key

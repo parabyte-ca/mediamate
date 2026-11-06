@@ -397,7 +397,7 @@ def files_bulk(body: dict = Body(default={})):
             dp = s.get(DownloadPath, int(body.get("folder_id") or 0))
             dest_root = folder_service.local_of(s, dp) if dp else None
         if not dest_root or not os.path.isdir(dest_root):
-            return _err("Pick a folder ScreenMate can see", 400)
+            return _err("Pick a folder MediaMate can see", 400)
     done, skipped, errors = 0, 0, []
     for fid in ids:
         row = db.get_file(int(fid))

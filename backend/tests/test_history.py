@@ -197,7 +197,7 @@ class TestExportHistoryCsv:
     def test_content_disposition_has_filename(self, client):
         resp = client.get("/history/export")
         cd = resp.headers.get("content-disposition", "")
-        assert "screenmate-history-" in cd
+        assert "mediamate-history-" in cd
         assert ".csv" in cd
 
     def test_csv_has_header_row(self, client):

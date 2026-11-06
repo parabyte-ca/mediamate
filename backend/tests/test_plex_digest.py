@@ -61,7 +61,7 @@ def test_sending_uses_starttls_and_logs_in(monkeypatch):
     sender, to, body = server.sendmail.call_args.args
     assert (sender, to) == ("f@x", ["a@x", "b@x"])
     subject = str(make_header(decode_header(message_from_string(body)["Subject"])))
-    assert subject == "ScreenMate Weekly Digest — Week 1"
+    assert subject == "MediaMate Weekly Digest — Week 1"
 
 
 def test_port_465_uses_implicit_tls(monkeypatch):

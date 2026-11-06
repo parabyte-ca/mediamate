@@ -142,7 +142,7 @@ def retry_download(db, dl, settings: dict, reason: str) -> str:
     ep_tag = f"S{season:02d}E{episode:02d}"
     max_attempts = _int(settings, "retry_max_attempts", 3)
     min_seeds = _int(settings, "min_seeds", 3)
-    category = settings.get("qbit_category", "screenmate")
+    category = settings.get("qbit_category", "mediamate")
 
     with WATCHLIST_LOCK:
         excluded = failed_hashes(db, item.id, season, episode)
@@ -253,7 +253,7 @@ def _fail_download(db, dl, settings: dict, reason: str, alert_key: str, flag_att
     body = f"{icon} {dl.title} — {reason}."
     if outcome:
         body += f"\n{outcome}"
-    _alert(settings, alert_key, "ScreenMate — Download problem", body)
+    _alert(settings, alert_key, "MediaMate — Download problem", body)
 
 
 def process_download_events() -> None:
@@ -323,7 +323,7 @@ def process_download_events() -> None:
         for dl in db.query(Download).filter(
             Download.status.in_(_DONE_STATUSES), Download.notified_complete == False  # noqa: E712
         ).all():
-            _alert(settings, "notify_on_complete", "ScreenMate — Download complete",
+            _alert(settings, "notify_on_complete", "MediaMate — Download complete",
                    f"✅ {dl.title}")
             dl.notified_complete = True
         db.commit()

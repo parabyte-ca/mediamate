@@ -137,7 +137,7 @@ def client(Session):
 def test_api_adds_folders_and_keeps_the_media_engine_in_step(client, disk):
     tv = client.post("/api/paths", json={"name": "TV", "path": f"{disk}/tv", "is_default": True}).json()
     assert (tv["downloads"], tv["scan"], tv["local"], tv["exists_here"]) == (True, True, f"{disk}/tv", True)
-    assert tv["total_bytes"]                                         # measured where ScreenMate sees it
+    assert tv["total_bytes"]                                         # measured where MediaMate sees it
 
     lib = client.post("/api/paths", json={"name": "Library", "path": f"{disk}/library",
                                           "downloads": False}).json()

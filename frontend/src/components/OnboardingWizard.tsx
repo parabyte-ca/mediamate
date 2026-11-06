@@ -145,9 +145,9 @@ export default function OnboardingWizard({ onClose }: { onClose: () => void }) {
         {name === "Welcome" && (
           <>
             <AppLogo className="mb-3 h-11 w-11" />
-            <h2 id="onb-title" className="text-xl font-semibold text-gray-900 dark:text-gray-100">Welcome to ScreenMate</h2>
+            <h2 id="onb-title" className="text-xl font-semibold text-gray-900 dark:text-gray-100">Welcome to MediaMate</h2>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              ScreenMate watches the shows you pick, downloads new episodes through qBittorrent and tidies them into your library. A few quick steps get you going:
+              MediaMate watches the shows, movies and artists you pick, downloads new episodes, films and albums through qBittorrent and tidies them into your library. A few quick steps get you going:
             </p>
             <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-gray-700 dark:text-gray-300">
               <li>Optionally import your AuTorrent / FileSplitter data</li>
@@ -162,8 +162,8 @@ export default function OnboardingWizard({ onClose }: { onClose: () => void }) {
           <>
             <h2 id="onb-title" className="text-lg font-semibold text-gray-900 dark:text-gray-100">Connect to qBittorrent</h2>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Turn on the Web UI in qBittorrent (Options → Web UI) and enter its address below. If ScreenMate runs in
-              Docker, <span className="font-mono">localhost</span> means the ScreenMate container itself — use your
+              Turn on the Web UI in qBittorrent (Options → Web UI) and enter its address below. If MediaMate runs in
+              Docker, <span className="font-mono">localhost</span> means the MediaMate container itself — use your
               server's IP address or the qBittorrent container's name instead.
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -247,7 +247,7 @@ export default function OnboardingWizard({ onClose }: { onClose: () => void }) {
           <>
             <h2 id="onb-title" className="text-xl font-semibold text-gray-900 dark:text-gray-100">You're set</h2>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              Next, tell ScreenMate what to download. Browse what's airing this week and add a show with one click, or
+              Next, tell MediaMate what to download. Browse what's airing this week and add a show with one click, or
               add shows from the Watchlist. Everything here can be changed in Settings.
             </p>
             <ul className="mt-3 space-y-1 text-sm text-gray-700 dark:text-gray-300">

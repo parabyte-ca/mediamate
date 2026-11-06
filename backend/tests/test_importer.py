@@ -46,7 +46,7 @@ FILESPLITTER_OWN = {"app_version": "2.7.0", "update_release_cache": "{}", "media
 
 
 def make_autorrent(path):
-    """An AuTorrent database: ScreenMate's original tables, minus a later column."""
+    """An AuTorrent database: MediaMate's original tables, minus a later column."""
     eng = create_engine(f"sqlite:///{path}")
     Base.metadata.create_all(eng, tables=[Base.metadata.tables[t] for t in AUTORRENT_TABLES])
     with eng.begin() as c:
@@ -101,7 +101,7 @@ def test_rejects_non_sqlite_and_screenmate_files(target, tmp_path):
     with pytest.raises(importer.ImportFailed, match="isn't a SQLite"):
         importer.save_upload(io.BytesIO(b"hello"))
     token = _upload(tmp_path / "screenmate.db")
-    with pytest.raises(importer.ImportFailed, match="ScreenMate database"):
+    with pytest.raises(importer.ImportFailed, match="MediaMate database"):
         importer.inspect_upload(token)
     with pytest.raises(importer.ImportFailed, match="Unknown upload"):
         importer.upload_path("../etc/passwd")
@@ -144,7 +144,7 @@ def test_full_import_merges_both(target, tmp_path):
         assert s["scan_interval_minutes"] == "30"     # new ones added
         assert s["x265_crf"] == "22" and s["total_saved_bytes"] == "1000"
         # Nothing about the old apps themselves: versions, update state, repo URLs, caches.
-        # media_paths is ScreenMate's own list (derived from its Folders), never FileSplitter's.
+        # media_paths is MediaMate's own list (derived from its Folders), never FileSplitter's.
         assert not ((set(AUTORRENT_OWN) | set(FILESPLITTER_OWN)) - {"media_paths"}) & set(s), set(s)
         assert s.get("media_paths") != FILESPLITTER_OWN["media_paths"]
         wl = c.execute(text("SELECT id, download_path_id, profile_id FROM watchlist")).one()

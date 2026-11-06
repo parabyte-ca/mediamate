@@ -1,10 +1,10 @@
-"""Import an AuTorrent and/or FileSplitter database into ScreenMate.
+"""Import an AuTorrent and/or FileSplitter database into MediaMate.
 
 Uploads land in a private temp folder under a random token (inspect), then
 run() copies them in. The kind of each file is recognised by its tables, so the
 user can drop both files in one go.
 
-AuTorrent's schema is ScreenMate's own (ScreenMate grew out of it), so the
+AuTorrent's schema is MediaMate's own (MediaMate grew out of it), so the
 uploaded copy is first brought up to date with run_migrations() and then copied
 table by table. FileSplitter's files/jobs map onto media_files/media_jobs.
 Every table is merged, never replaced: ids are remapped, duplicates are skipped
@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "screenmate-import")
+UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "mediamate-import")
 UPLOAD_TTL_SEC = 3600
 _TOKEN_RE = re.compile(r"^[a-f0-9]{32}$")
 SQLITE_MAGIC = b"SQLite format 3\x00"
@@ -35,15 +35,15 @@ FILESPLITTER_TABLES = ("files", "jobs", "settings")
 
 # Never copied: they belong to this install.
 SKIP_SETTINGS = {"session_secret", "secret_key"}
-# AuTorrent settings are copied only when ScreenMate has the same setting (its
+# AuTorrent settings are copied only when MediaMate has the same setting (its
 # defaults list), minus ones that describe AuTorrent itself rather than your
 # preferences. Version, update and upgrade state, caches and "last run" markers
-# are not settings ScreenMate knows, so they never come across.
+# are not settings MediaMate knows, so they never come across.
 AUTORRENT_NEVER = {
-    "app_source_url",   # AuTorrent's repo: ScreenMate would check the wrong releases
-    "qbit_category",    # keep ScreenMate's own label, so the two apps' torrents stay apart
+    "app_source_url",   # AuTorrent's repo: MediaMate would check the wrong releases
+    "qbit_category",    # keep MediaMate's own label, so the two apps' torrents stay apart
 }
-# FileSplitter settings that ScreenMate keeps under the same key.
+# FileSplitter settings that MediaMate keeps under the same key.
 FS_SETTING_KEYS = {
     "scene_threshold", "min_scene_duration", "scene_method", "x265_crf", "x265_preset",
     "target_resolution", "encoder_backend", "max_workers", "ffprobe_timeout",
@@ -110,7 +110,7 @@ def _tables(path: str) -> set[str]:
 def detect_kind(path: str) -> str:
     tables = _tables(path)
     if "media_files" in tables or "journeys" in tables:
-        raise ImportFailed("This looks like a ScreenMate database — use Settings → Data management → Restore instead")
+        raise ImportFailed("This looks like a MediaMate database — use Settings → Data management → Restore instead")
     if all(t in tables for t in AUTORRENT_TABLES):
         return "autorrent"
     if all(t in tables for t in FILESPLITTER_TABLES):
@@ -404,7 +404,7 @@ def _import_filesplitter(db: Session, path: str, overwrite_settings: bool,
                 continue
             if r.get("status") in ("queued", "running"):
                 r["status"] = "cancelled"
-                r["log_tail"] = "Not finished before the move to ScreenMate"
+                r["log_tail"] = "Not finished before the move to MediaMate"
             r = {**r, "file_id": fid, "reason": IMPORTED_JOB_REASON, "journey_id": None}
             _insert(db, "media_jobs", r, job_cols)
             jobs += 1

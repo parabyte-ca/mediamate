@@ -150,7 +150,7 @@ def get_downloads(db: Session = Depends(get_db)):
 
                 if qs is None:
                     # qBittorrent is reachable but this torrent is gone from it.
-                    # It was removed (by qBit's own remove-on-complete, by ScreenMate's
+                    # It was removed (by qBit's own remove-on-complete, by MediaMate's
                     # scheduler, or manually) before the Downloads page saw its
                     # finished state.  Mark it done so it stops showing as Downloading.
                     if d.status == "downloading":
@@ -262,7 +262,7 @@ def add_download(payload: DownloadCreate, db: Session = Depends(get_db)):
     save_path = dp.path if dp else "/downloads"
 
     settings = {s.key: s.value for s in db.query(Setting).all()}
-    category = settings.get("qbit_category", "screenmate")
+    category = settings.get("qbit_category", "mediamate")
 
     # Duplicate detection — derive hash from the magnet link.
     torrent_hash = _hash_from_magnet(payload.magnet)

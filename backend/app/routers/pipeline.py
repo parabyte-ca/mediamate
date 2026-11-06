@@ -71,7 +71,7 @@ def _organise_status(db: Session, values: dict) -> dict:
         if not path:
             continue
         if not os.path.isdir(path):
-            warnings[key] = f"{path} doesn't exist in ScreenMate's container. Mount it, or check Settings → Folders → Test."
+            warnings[key] = f"{path} doesn't exist in MediaMate's container. Mount it, or check Settings → Folders → Test."
         elif not any(path == r or path.startswith(r.rstrip("/") + "/") for r in roots):
             warnings[key] = (f"{path} isn't inside a folder with Scan & encode on, so the Library would lose "
                              f"track of organised {label.lower()} files. Add it in Settings → Folders.")

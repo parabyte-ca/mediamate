@@ -221,7 +221,7 @@ function fmtClock(sec: number): string {
 }
 
 /** Plays the original file when the browser can; otherwise (or on request) a version
- *  ScreenMate converts on the fly. The converted stream has no timeline, so this
+ *  MediaMate converts on the fly. The converted stream has no timeline, so this
  *  dialog shows its own seek bar and restarts the conversion from the chosen point. */
 function PreviewDialog({ file, onClose }: { file: MediaFile; onClose: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -246,7 +246,7 @@ function PreviewDialog({ file, onClose }: { file: MediaFile; onClose: () => void
     let timer: ReturnType<typeof setTimeout> | undefined;
     const onMeta = () => {
       timer = setTimeout(() => {
-        if (v.videoWidth === 0) convert(v.currentTime, "This browser can't show this file's video, so ScreenMate is converting it.");
+        if (v.videoWidth === 0) convert(v.currentTime, "This browser can't show this file's video, so MediaMate is converting it.");
       }, 2500);
     };
     v.addEventListener("loadedmetadata", onMeta);
@@ -266,8 +266,8 @@ function PreviewDialog({ file, onClose }: { file: MediaFile; onClose: () => void
         playsInline
         className="max-h-[65vh] w-full rounded bg-black"
         onError={() => mode === "original"
-          ? convert(videoRef.current?.currentTime ?? 0, "This browser can't play this file directly, so ScreenMate is converting it.")
-          : setNote("ScreenMate couldn't convert this file. Try Download instead.")}
+          ? convert(videoRef.current?.currentTime ?? 0, "This browser can't play this file directly, so MediaMate is converting it.")
+          : setNote("MediaMate couldn't convert this file. Try Download instead.")}
         onTimeUpdate={(e) => mode === "converted" && setPos(offset + e.currentTarget.currentTime)}
       />
 

@@ -1,9 +1,9 @@
 """Work out where the old apps' folders live on this server, from the imported data.
 
 FileSplitter stored full file paths; AuTorrent stored the folders qBittorrent saves
-into. When ScreenMate runs in a different container, the same files usually sit
+into. When MediaMate runs in a different container, the same files usually sit
 under a different prefix (/media/tv → /mnt/nas/tv). We find that prefix by looking
-for each old path's tail (…/tv/Show/ep.mkv) under ScreenMate's media folders, then
+for each old path's tail (…/tv/Show/ep.mkv) under MediaMate's media folders, then
 let the most common answer win. Nothing here writes anything.
 """
 import os

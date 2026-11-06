@@ -110,7 +110,7 @@ def export_history_csv(db: Session = Depends(get_db)):
 
     buf.seek(0)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    filename = f"screenmate-history-{today}.csv"
+    filename = f"mediamate-history-{today}.csv"
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv",

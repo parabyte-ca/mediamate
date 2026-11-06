@@ -64,6 +64,15 @@ async def lifespan(app: FastAPI):
 
     db = SessionLocal()
     try:
+        from .services import rename
+        rename.carry_over(db)
+    except Exception:
+        logging.getLogger(__name__).exception("Carrying settings over to MediaMate failed")
+    finally:
+        db.close()
+
+    db = SessionLocal()
+    try:
         journeys.backfill(db)
     except Exception:
         logging.getLogger(__name__).exception("Journey backfill failed")
@@ -96,7 +105,7 @@ async def lifespan(app: FastAPI):
     stop_scheduler()
 
 
-app = FastAPI(title="ScreenMate", lifespan=lifespan)
+app = FastAPI(title="MediaMate", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

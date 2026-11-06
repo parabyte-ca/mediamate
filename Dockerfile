@@ -11,7 +11,7 @@ RUN npm run build
 # ── Stage 2: Python backend + compiled frontend ────────────────────────────────
 FROM python:3.11-slim
 
-LABEL org.opencontainers.image.source="https://github.com/parabyte-ca/screenmate"
+LABEL org.opencontainers.image.source="https://github.com/parabyte-ca/mediamate"
 LABEL org.opencontainers.image.description="Self-hosted media pipeline: find, download, encode, split"
 LABEL org.opencontainers.image.licenses="MIT"
 

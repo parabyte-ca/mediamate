@@ -1,4 +1,4 @@
-# ScreenMate: merging AuTorrent and FileSplitter
+# MediaMate: merging AuTorrent and FileSplitter
 
 ## Context
 Two self-hosted apps cover different halves of one workflow:
@@ -7,7 +7,7 @@ Two self-hosted apps cover different halves of one workflow:
 
 Today a file leaves AuTorrent and only reaches FileSplitter on a later scan. That means two UIs, two logins, two updaters, two databases and two Docker stacks.
 
-**ScreenMate** (`parabyte-ca/screenmate`, currently empty) combines them into one app. Goals:
+**MediaMate** (`parabyte-ca/screenmate`, currently empty) combines them into one app. Goals:
 - full feature parity with both apps
 - one streamlined UI
 - an automated pipeline from finding media to a library-ready file
@@ -36,7 +36,7 @@ frontend/src/pages/  Activity, Library, Search, Watchlist, Calendar, Browse, His
 ```
 
 Code to reuse rather than rewrite:
-- **FileSplitter media modules** (`codec_detector.py`, `encoder.py`, `scene_detector.py`, `splitter.py`, `trimmer.py`, `scene_namer.py`, `trash.py`, `scanner.py`): copied almost unchanged. They are pure functions built around `subprocess` with `progress_cb` and `cancel_event` hooks, which is exactly what the new worker needs. The only change is swapping `config.py` lookups for ScreenMate's settings service.
+- **FileSplitter media modules** (`codec_detector.py`, `encoder.py`, `scene_detector.py`, `splitter.py`, `trimmer.py`, `scene_namer.py`, `trash.py`, `scanner.py`): copied almost unchanged. They are pure functions built around `subprocess` with `progress_cb` and `cancel_event` hooks, which is exactly what the new worker needs. The only change is swapping `config.py` lookups for MediaMate's settings service.
 - **FileSplitter `worker.py`**: its thread pool, pause/resume and cancel logic become `pipeline/worker.py`. It reads its queue from the `Job` table through SQLAlchemy instead of `db.py`.
 - **AuTorrent `services/download_events.py` and `qbit_states.py`**: the completion detector already exists. It gains one hook: on completion, call `pipeline.on_download_complete(download)`.
 - **AuTorrent `migrations.py`, `routers/backup.py`, `routers/auth.py`, `routers/onboarding.py`, `services/updater.py`**: reused as they are. Onboarding gets an import step.
@@ -78,10 +78,10 @@ Code to reuse rather than rewrite:
 Each phase is a pull request on `claude/great-wright-2btctp` or a follow-up branch, with CI green before merging.
 
 0. **Scaffold.**
-   - Import the AuTorrent tree without its git history and rename the app to ScreenMate.
+   - Import the AuTorrent tree without its git history and rename the app to MediaMate.
    - Dockerfile gains ffmpeg, with an NVENC compose profile.
    - Merge the CI workflows (autorrent `build.yml` builds to GHCR; filesplitter `ci.yml` runs bash tests).
-   - Port 4260 by default, so ScreenMate can run alongside the old apps during migration.
+   - Port 4260 by default, so MediaMate can run alongside the old apps during migration.
 1. **Media engine port.**
    - Copy the FileSplitter modules to `services/media/` and add the `MediaFile` and `Job` models plus a worker.
    - Port `tests/test_encoder.py`, `test_codec_detector.py`, `test_trash*.py` and the related suites to pytest under `backend/tests/media/`.
@@ -150,15 +150,15 @@ Each phase is a pull request on `claude/great-wright-2btctp` or a follow-up bran
 # Phase 1: Media engine port (current step)
 
 ## Context
-Phase 0 (scaffold) is merged to `main` through the PR. Phase 1 brings FileSplitter's ffmpeg engine into ScreenMate as a backend that works through its API. Settings and data go into ScreenMate's SQLAlchemy database. The UI comes in Phase 4 (Library page); until then the engine is usable through FastAPI's `/docs`. The work goes on a new branch from `main` (`claude/great-wright-2btctp` was merged, so I'll restart it from `main`), with a new draft PR.
+Phase 0 (scaffold) is merged to `main` through the PR. Phase 1 brings FileSplitter's ffmpeg engine into MediaMate as a backend that works through its API. Settings and data go into MediaMate's SQLAlchemy database. The UI comes in Phase 4 (Library page); until then the engine is usable through FastAPI's `/docs`. The work goes on a new branch from `main` (`claude/great-wright-2btctp` was merged, so I'll restart it from `main`), with a new draft PR.
 
 ## Approach: port with as few changes as possible
 FileSplitter's modules read module-level `config.X` values, which are changed at runtime when settings are saved. They talk to storage only through `db.<function>()` calls. Two choices keep those modules close to unchanged:
 
 1. **`backend/app/services/media/config.py`**: a port of FileSplitter's `config.py` with the same attribute names and the same environment-variable defaults.
-   - Dropped, because ScreenMate already has these: `FLASK_PORT`/`_find_free_port`, `VERSION`, `DATABASE_PATH`, `FLASK_SECRET_KEY`, `DASHBOARD_PASSWORD`, `APP_SOURCE_URL`, `APP_UPDATE_CHECK`, `APP_UPGRADE_DIR`.
+   - Dropped, because MediaMate already has these: `FLASK_PORT`/`_find_free_port`, `VERSION`, `DATABASE_PATH`, `FLASK_SECRET_KEY`, `DASHBOARD_PASSWORD`, `APP_SOURCE_URL`, `APP_UPDATE_CHECK`, `APP_UPGRADE_DIR`.
    - Added: `SETTINGS_MAP` (moved from FileSplitter's `app._SETTINGS_MAP`), `apply(key, value)` (the cast logic from `api_post_settings`, including the special cases for `SPLIT_KEYWORDS` and booleans), and `load_from_db(session)` (from `_reload_settings_from_db`).
-   - Settings keep **the same key names** (`x265_crf`, `scene_threshold`, and so on) in ScreenMate's existing `settings` table. That makes the Phase 5 importer a straight copy.
+   - Settings keep **the same key names** (`x265_crf`, `scene_threshold`, and so on) in MediaMate's existing `settings` table. That makes the Phase 5 importer a straight copy.
    - `media_paths` becomes a setting you can edit, falling back to the `MEDIA_PATHS` environment variable.
 2. **`backend/app/services/media/store.py`**: a replacement for `db.py` with **the same function names and return shapes** (dicts that behave like `sqlite3.Row`). It uses SQLAlchemy.
    - Functions: `upsert_file`, `set_file_status`, `set_anthology_override`, `get_file(_by_path)`, `get_all_files`, `get_stats`, `create_job`, `get_active_jobs`, `get_active_job_for_file`, `get_job`, `dequeue_next_job`, `update_job_progress`, `set_job_status`, `update_file_size`, `rename_file`, `delete_file`, `purge_missing_files`, `clear_finished_jobs`, `get_recent_jobs`, `get/set_setting`, `increment/set_saved_bytes`.
@@ -195,7 +195,7 @@ Other edits:
 ## Tests (`backend/tests/media/`)
 - **Ported, imports changed only:** `test_codec_detector.py`, `test_encoder.py`, `test_trash.py`.
 - **Rewritten for FastAPI's TestClient:** `test_trash_routes.py`.
-- **Not ported:** `test_updates_routes.py`, `test_release_cache.py`, `test_versioning.py`, `test_upgrade_state.py`, `test_agent_status.py`. These cover FileSplitter's updater, and ScreenMate's own updater tests already cover the same ground.
+- **Not ported:** `test_updates_routes.py`, `test_release_cache.py`, `test_versioning.py`, `test_upgrade_state.py`, `test_agent_status.py`. These cover FileSplitter's updater, and MediaMate's own updater tests already cover the same ground.
 - **New:**
   - `test_store.py`: dequeue order and no double-claiming, crash recovery, saved-bytes accounting, the anthology override.
   - `test_media_config.py`: SETTINGS_MAP casts, including the bool/int trap that FileSplitter documents in its code comments.

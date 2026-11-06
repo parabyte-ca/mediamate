@@ -50,7 +50,7 @@ def check_and_alert(db, settings: dict) -> list[str]:
 
     for dp in db.query(DownloadPath).all():
         try:
-            free = shutil.disk_usage(local_of(db, dp)).free  # measured where ScreenMate sees it
+            free = shutil.disk_usage(local_of(db, dp)).free  # measured where MediaMate sees it
         except Exception:
             continue
 
@@ -70,7 +70,7 @@ def check_and_alert(db, settings: dict) -> list[str]:
         if last_dt is None or now - last_dt >= _REWARN_AFTER:
             notify(
                 settings.get("apprise_url", ""),
-                title="ScreenMate — Low disk space",
+                title="MediaMate — Low disk space",
                 body=f"⚠️ {dp.name} ({dp.path}) has only {free / _GB:.1f} GB free "
                      f"(warning threshold {threshold / _GB:.0f} GB).",
             )

@@ -1,7 +1,7 @@
 """Turn a .torrent download URL into a magnet link (and its info-hash).
 
 Indexer proxies such as Prowlarr/Jackett often return only a download URL for
-private trackers.  qBittorrent can fetch URLs itself, but then ScreenMate would
+private trackers.  qBittorrent can fetch URLs itself, but then MediaMate would
 not know the info-hash, which duplicate detection, status tracking and the
 retry queue all rely on.  Resolving to a magnet up front keeps one code path.
 """

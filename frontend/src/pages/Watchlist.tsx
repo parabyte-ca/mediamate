@@ -474,7 +474,7 @@ function FormModal({ initial, initialKind = "tv", paths, profiles, defaultProfil
             )}
             {movie && !initial && (
               <p className="mt-1.5 text-xs text-gray-400 dark:text-gray-500">
-                ScreenMate waits for the digital release, downloads it once, and removes it from the watchlist a while after.
+                MediaMate waits for the digital release, downloads it once, and removes it from the watchlist a while after.
               </p>
             )}
           </div>
@@ -879,7 +879,7 @@ function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSele
             <EpisodeGuide watchlistId={item.id} onChanged={() => { fetchEpisodes(); onRefresh(); }} />
             {episodes !== null && episodes.length > 0 && (
               <div className="border-t border-gray-100 dark:border-gray-800 pt-2 text-xs font-medium text-gray-400 dark:text-gray-500">
-                Downloaded by ScreenMate — click to remove a record
+                Downloaded by MediaMate — click to remove a record
               </div>
             )}
             {/* Loading */}
@@ -1204,7 +1204,7 @@ export default function Watchlist() {
         <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Watchlist</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            ScreenMate downloads new episodes of these shows, each movie once it's out, and new albums by these artists.
+            MediaMate downloads new episodes of these shows, each movie once it's out, and new albums by these artists.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

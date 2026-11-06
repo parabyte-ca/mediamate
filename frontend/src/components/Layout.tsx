@@ -172,7 +172,7 @@ export default function Layout() {
           {!collapsed && (
             <>
               <span className="flex-1 text-lg font-bold text-gray-900 dark:text-gray-100">
-                ScreenMate
+                MediaMate
               </span>
               <button
                 onClick={toggle}
@@ -193,7 +193,7 @@ export default function Layout() {
         {/* Command palette */}
         <div className={collapsed ? "pt-2" : "px-3 pt-2"}>
           <button
-            onClick={() => window.dispatchEvent(new Event("screenmate:palette"))}
+            onClick={() => window.dispatchEvent(new Event("mediamate:palette"))}
             title={`Search or jump to… (${isMac ? "⌘" : "Ctrl+"}K)`}
             data-tour="jump"
             className={`flex w-full items-center rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400 hover:border-blue-300 dark:hover:border-blue-700 ${
@@ -298,7 +298,7 @@ export default function Layout() {
             ))}
             {installEvt && (
               <button
-                title="Install ScreenMate as an app"
+                title="Install MediaMate as an app"
                 onClick={async () => { await installEvt.prompt(); setInstallEvt(null); }}
                 className="rounded-md p-1.5 text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-blue-600"
               >
@@ -327,7 +327,7 @@ export default function Layout() {
       <main className="flex-1 overflow-y-auto main-scroll">
         <div className="sticky top-0 z-30 flex items-center justify-center gap-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/90 px-4 py-2 backdrop-blur md:hidden">
           <span data-tour="status"><StatusPill /></span>
-          <button aria-label="Search or jump to…" data-tour="jump" onClick={() => window.dispatchEvent(new Event("screenmate:palette"))}
+          <button aria-label="Search or jump to…" data-tour="jump" onClick={() => window.dispatchEvent(new Event("mediamate:palette"))}
                   className="rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-1.5 text-gray-500">
             <Command className="h-3.5 w-3.5" />
           </button>

@@ -42,7 +42,7 @@ def grab_episode(db, item, season: int, episode: int) -> dict:
         min_seeds = int(settings.get("min_seeds", "3"))
     except ValueError:
         min_seeds = 3
-    category = settings.get("qbit_category", "screenmate")
+    category = settings.get("qbit_category", "mediamate")
 
     with WATCHLIST_LOCK:
         candidates = find_with_fallback(
@@ -93,7 +93,7 @@ def grab_episode(db, item, season: int, episode: int) -> dict:
             return {"status": "already_downloaded", "message": f"{ep_tag} was just downloaded."}
 
     if settings.get("notify_on_grab", "true").strip().lower() == "true":
-        notify(settings.get("apprise_url", ""), title=f"ScreenMate — {item.title}",
+        notify(settings.get("apprise_url", ""), title=f"MediaMate — {item.title}",
                body=f"⬇️ Downloaded: {best['title']}")
     logger.info("Manual grab: %s", best["title"])
     return {"status": "started", "title": best["title"], "message": f"Started: {best['title']}"}

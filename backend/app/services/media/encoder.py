@@ -121,7 +121,7 @@ def recheck_nvenc() -> bool:
 
 
 # FileSplitter probed at import time, which could block for up to
-# NVENC_PROBE_MAX_WAIT seconds. ScreenMate probes in the background instead so the
+# NVENC_PROBE_MAX_WAIT seconds. MediaMate probes in the background instead so the
 # API (and /health) come up immediately; workers wait on PROBE_DONE before running
 # an nvenc job so nothing silently falls back to CPU during the boot window.
 NVENC_AVAILABLE: bool = False

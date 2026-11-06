@@ -306,7 +306,7 @@ def grab(db, item, album, settings: dict | None = None, *, force: bool = False) 
         db.commit()
 
     if settings.get("notify_on_grab", "true").strip().lower() == "true":
-        notify(settings.get("apprise_url", ""), title=f"ScreenMate — {item.title}",
+        notify(settings.get("apprise_url", ""), title=f"MediaMate — {item.title}",
                body=f"🎵 Downloading: {best['title']}")
     logger.info("Album grabbed: %s", best["title"])
     return {"status": "started", "title": best["title"], "message": f"Started: {best['title']}"}

@@ -22,7 +22,7 @@ DEFAULTS: dict[str, str] = {
     "qbit_port": "8080",
     "qbit_username": "admin",
     "qbit_password": "",
-    "qbit_category": "screenmate",
+    "qbit_category": "mediamate",
     "scan_interval_minutes": "60",
     "min_seeds": "3",
     # Finished watchlist movies leave the watchlist after this many days (0 = never).
@@ -82,12 +82,13 @@ DEFAULTS: dict[str, str] = {
     # Security
     "ui_password": "",
     # Updates
-    "app_source_url": "https://github.com/parabyte-ca/screenmate",
+    "app_source_url": "https://github.com/parabyte-ca/mediamate",
 }
 
 # Keys stored in the DB but never sent to the frontend (secrets are masked separately)
 _PRIVATE_KEYS = set(SERVER_ONLY_KEYS) | {
     "session_secret",
+    "rename_mediamate_v1",
     "last_digest_sent_at",
     "update_release_cache",
     "update_notified_version",

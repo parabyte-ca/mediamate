@@ -34,7 +34,7 @@ export default function Login() {
         <div className="mb-8 flex flex-col items-center gap-3">
           <AppLogo className="h-12 w-12" />
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">ScreenMate</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">MediaMate</h1>
             <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Sign in to continue</p>
           </div>
         </div>

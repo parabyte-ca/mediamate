@@ -41,7 +41,7 @@ def _with_disk_usage(db: Session, dp: DownloadPath, threshold: int = 0) -> dict:
         "protected": bool(dp.protected),
     }
     try:
-        usage = shutil.disk_usage(local)  # measured here, where ScreenMate sees the folder
+        usage = shutil.disk_usage(local)  # measured here, where MediaMate sees the folder
         out["free_bytes"] = usage.free
         out["total_bytes"] = usage.total
         out["low_space"] = is_low(usage.free, threshold)

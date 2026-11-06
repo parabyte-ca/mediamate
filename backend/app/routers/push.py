@@ -43,7 +43,7 @@ def remove_device(device_id: int, db: Session = Depends(get_db)):
 
 @router.post("/test")
 def test(db: Session = Depends(get_db)):
-    sent = webpush.send_all("ScreenMate", "Push notifications are working 🎉", "/activity", db=db)
+    sent = webpush.send_all("MediaMate", "Push notifications are working 🎉", "/activity", db=db)
     if not sent:
         raise HTTPException(status_code=400, detail="No device accepted the notification — enable it on this device first")
     return {"ok": True, "sent": sent}

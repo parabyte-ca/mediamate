@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# upgrade-agent.sh — ScreenMate host-side upgrade helper.
+# upgrade-agent.sh — MediaMate host-side upgrade helper.
 # Runs as a cron job on the host (as root).  Writes a heartbeat to agent.json
 # so the app can confirm the helper is connected, and processes upgrade
 # requests written by the app into the shared upgrade folder.

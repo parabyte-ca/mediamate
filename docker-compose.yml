@@ -1,10 +1,12 @@
 services:
+  # The service key, SCREENMATE_* variables and screenmate.db keep their old names on
+  # purpose: existing installs, their .env and override file, and rollbacks rely on them.
   screenmate:
     # update.sh pins SCREENMATE_VERSION (in .env) to the release it installs, so a
     # bad release can be rolled back to the exact previous image. Unset = latest.
     image: ghcr.io/parabyte-ca/screenmate:${SCREENMATE_VERSION:-latest}
     # build: .        # uncomment to build locally instead of pulling from registry
-    container_name: screenmate
+    container_name: mediamate
     ports:
       # Port on this host: SCREENMATE_PORT in .env (setup.sh sets it), default 4260
       - "${SCREENMATE_PORT:-4260}:8000"

@@ -154,7 +154,7 @@ def grab(db, item, settings: dict | None = None, *, force: bool = False) -> dict
             return {"status": "duplicate", "message": f"{label} looks like it was already downloaded."}
         dp = download_folder(db, item.download_path_id)
         save_path = dp.path if dp else "/downloads"
-        info_hash = add_torrent(best["magnet"], save_path, settings.get("qbit_category", "screenmate"))
+        info_hash = add_torrent(best["magnet"], save_path, settings.get("qbit_category", "mediamate"))
         db.add(Download(title=best["title"], torrent_hash=info_hash, magnet_link=best["magnet"],
                         size_bytes=best.get("size_bytes"), status="downloading",
                         download_path=save_path, watchlist_id=item.id))
@@ -165,7 +165,7 @@ def grab(db, item, settings: dict | None = None, *, force: bool = False) -> dict
         db.commit()
 
     if settings.get("notify_on_grab", "true").strip().lower() == "true":
-        notify(settings.get("apprise_url", ""), title=f"ScreenMate — {item.title}",
+        notify(settings.get("apprise_url", ""), title=f"MediaMate — {item.title}",
                body=f"⬇️ Downloaded: {best['title']}")
     logger.info("Movie grabbed: %s", best["title"])
     return {"status": "started", "title": best["title"], "message": f"Started: {best['title']}"}

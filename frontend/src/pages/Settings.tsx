@@ -118,7 +118,7 @@ function FolderTestResult({ result }: { result: FolderTest }) {
       ? "border-green-200 dark:border-green-900 bg-green-50/60 dark:bg-green-950/20"
       : "border-red-200 dark:border-red-900 bg-red-50/60 dark:bg-red-950/20"}`} role="status">
       <p className={`mb-1.5 font-semibold ${result.ok ? "text-green-700 dark:text-green-300" : "text-red-700 dark:text-red-300"}`}>
-        {result.ok ? "ScreenMate can use this folder" : "ScreenMate can't use this folder yet"}
+        {result.ok ? "MediaMate can use this folder" : "MediaMate can't use this folder yet"}
       </p>
       <ul className="space-y-1">
         {result.checks.map((c) => (
@@ -210,7 +210,7 @@ function PathModal({ initial, onClose, onSave }: {
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Path here (optional)</label>
               <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">
-                Leave blank when ScreenMate sees the folder at the same path, or when a path mapping covers it.
+                Leave blank when MediaMate sees the folder at the same path, or when a path mapping covers it.
                 {initial?.local && !initial.local_path && <> Now: <code>{initial.local}</code></>}
               </p>
               <input value={form.local_path} onChange={(e) => set("local_path", e.target.value)}
@@ -318,7 +318,7 @@ function AppearanceSection() {
                 className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800">
           <Compass className="h-4 w-4" />Take the tour
         </button>
-        <span className="text-xs text-gray-500 dark:text-gray-400">A one-minute look at what each part of ScreenMate does.</span>
+        <span className="text-xs text-gray-500 dark:text-gray-400">A one-minute look at what each part of MediaMate does.</span>
       </div>
     </Section>
   );
@@ -671,7 +671,7 @@ export default function Settings() {
     } finally { setTraktBusy(null); }
   };
   const forgetTrakt = async () => {
-    if (!confirm("Forget which Trakt shows were already handled? The next sync will consider every show on your watchlist again, including ones you removed from ScreenMate.")) return;
+    if (!confirm("Forget which Trakt shows were already handled? The next sync will consider every show on your watchlist again, including ones you removed from MediaMate.")) return;
     setTraktBusy("forget");
     try {
       await api.trakt.forgetHistory();
@@ -774,7 +774,7 @@ export default function Settings() {
       const blob = await res.blob();
       const cd = res.headers.get("Content-Disposition") ?? "";
       const match = cd.match(/filename="([^"]+)"/);
-      const filename = match?.[1] ?? `screenmate-backup-${new Date().toISOString().slice(0, 10)}.zip`;
+      const filename = match?.[1] ?? `mediamate-backup-${new Date().toISOString().slice(0, 10)}.zip`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -829,7 +829,7 @@ export default function Settings() {
     if (pathModal === true) saved = await api.paths.create(data);
     else if (pathModal && typeof pathModal === "object") saved = await api.paths.update(pathModal.id, data);
     setPathModal(null); load();
-    if (saved) testFolder(saved.id);   // show straight away whether ScreenMate can use it
+    if (saved) testFolder(saved.id);   // show straight away whether MediaMate can use it
   };
 
   const addQbFolder = async (f: FolderSuggestion) => {
@@ -892,7 +892,7 @@ export default function Settings() {
             <Field label="Username" value={settings.qbit_username ?? ""} onChange={(v) => set("qbit_username", v)} placeholder="admin" />
             <Field label="Password" type="password" value={settings.qbit_password ?? ""} onChange={(v) => set("qbit_password", v)} placeholder="••••••••" />
             <div className="sm:col-span-2">
-              <Field label="Category" hint="Torrents added by ScreenMate will use this category in qBittorrent." value={settings.qbit_category ?? ""} onChange={(v) => set("qbit_category", v)} placeholder="screenmate" />
+              <Field label="Category" hint="Torrents added by MediaMate will use this category in qBittorrent." value={settings.qbit_category ?? ""} onChange={(v) => set("qbit_category", v)} placeholder="mediamate" />
             </div>
             <Field label="Music category" hint="Album downloads use this category, so qBittorrent can keep them apart." value={settings.qbit_music_category ?? ""} onChange={(v) => set("qbit_music_category", v)} placeholder="music" />
             <div>
@@ -958,11 +958,11 @@ export default function Settings() {
                       <p className="text-xs text-gray-500 dark:text-gray-400">{f.why.join(" · ")}</p>
                       {f.visible_here ? (
                         <p className="truncate text-xs text-green-700 dark:text-green-400" title={f.local}>
-                          {f.how === "same path" ? "ScreenMate sees it too" : `ScreenMate sees it at ${f.local}`}
+                          {f.how === "same path" ? "MediaMate sees it too" : `MediaMate sees it at ${f.local}`}
                           {f.how === "found by name" && " (found by its folder name)"}
                         </p>
                       ) : (
-                        <p className="text-xs text-amber-700 dark:text-amber-400">ScreenMate can't see it yet: it will take downloads, and Test shows how to mount it</p>
+                        <p className="text-xs text-amber-700 dark:text-amber-400">MediaMate can't see it yet: it will take downloads, and Test shows how to mount it</p>
                       )}
                     </div>
                     <button onClick={() => addQbFolder(f)}
@@ -1002,12 +1002,12 @@ export default function Settings() {
                       {p.scan && <span className="rounded-full bg-green-50 dark:bg-green-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-green-700 dark:text-green-300">Scan &amp; encode</span>}
                       {!p.exists_here && (p.scan || p.downloads) && (
                         <span className="rounded-full bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
-                              title="ScreenMate can't see this folder. Mount it, or add a path mapping.">Not found here</span>
+                              title="MediaMate can't see this folder. Mount it, or add a path mapping.">Not found here</span>
                       )}
                     </div>
                     <p className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate" title={p.path}>{p.path}</p>
                     {p.local && p.local !== p.path && (
-                      <p className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate" title="Where ScreenMate sees it">here: {p.local}</p>
+                      <p className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate" title="Where MediaMate sees it">here: {p.local}</p>
                     )}
                     {p.scan && p.target_summary && (
                       <p className="text-xs text-gray-500 dark:text-gray-400">Target: {p.target_summary}</p>
@@ -1019,7 +1019,7 @@ export default function Settings() {
                     )}
                   </div>
                   <button onClick={() => testFolder(p.id)} disabled={t === "running"} aria-label={`Test ${p.name}`}
-                    title="Check that ScreenMate (and qBittorrent) can use this folder"
+                    title="Check that MediaMate (and qBittorrent) can use this folder"
                     className="flex items-center gap-1 rounded-lg border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50">
                     {t === "running" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Stethoscope className="h-3.5 w-3.5" />}
                     Test
@@ -1055,7 +1055,7 @@ export default function Settings() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Scan interval (minutes)</label>
-              <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">How often ScreenMate checks for new episodes.</p>
+              <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">How often MediaMate checks for new episodes.</p>
               <input type="number" min={5} value={settings.scan_interval_minutes ?? "60"} onChange={(e) => set("scan_interval_minutes", e.target.value)} className={FIELD} />
             </div>
             <div>
@@ -1083,7 +1083,7 @@ export default function Settings() {
                   Remove from qBittorrent when download completes
                 </span>
                 <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  Once a torrent finishes downloading and starts seeding, ScreenMate will remove it from
+                  Once a torrent finishes downloading and starts seeding, MediaMate will remove it from
                   qBittorrent automatically. Your downloaded files are kept — only the torrent entry is removed.
                 </p>
               </div>
@@ -1107,7 +1107,7 @@ export default function Settings() {
               />
               <Field
                 label="Max attempts per episode"
-                hint="Including the first grab. After this ScreenMate gives up and alerts you."
+                hint="Including the first grab. After this MediaMate gives up and alerts you."
                 type="number"
                 value={settings.retry_max_attempts ?? "3"}
                 onChange={(v) => set("retry_max_attempts", v)}
@@ -1169,8 +1169,8 @@ export default function Settings() {
         {/* Trakt */}
         <Section title="Trakt Watchlist Sync">
           <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-            Shows you add to your Trakt watchlist are added to ScreenMate automatically (checked every 6 hours).
-            Trakt has no push notifications for this, so ScreenMate polls it. You need a free API app:
+            Shows you add to your Trakt watchlist are added to MediaMate automatically (checked every 6 hours).
+            Trakt has no push notifications for this, so MediaMate polls it. You need a free API app:
             create one at <span className="font-mono">trakt.tv/oauth/applications</span> (any name; redirect URI{" "}
             <span className="font-mono">urn:ietf:wg:oauth:2.0:oob</span>) and paste its <em>Client ID</em> below.
             Your watchlist must be public (Trakt → Settings → Privacy).
@@ -1281,14 +1281,14 @@ export default function Settings() {
             Follow artists on the Watchlist's Music tab. Finished albums are tagged from MusicBrainz and linked into this
             folder as <code>Artist/Album (Year)/01 - Title.flac</code> (the torrent keeps seeding). Point a Plex Music library at it.
           </p>
-          <Field label="Music library folder" hint="As ScreenMate sees it, e.g. /mnt/video/music. It must be mounted into the container."
+          <Field label="Music library folder" hint="As MediaMate sees it, e.g. /mnt/video/music. It must be mounted into the container."
                  value={settings.organise_music_dir ?? ""} onChange={(v) => set("organise_music_dir", v)} placeholder="/mnt/video/music" />
         </Section>
         </div>
 
         <Section title="Plex Media Server">
           <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
-            Optional. ScreenMate will refresh your Plex library whenever a download completes.
+            Optional. MediaMate will refresh your Plex library whenever a download completes.
           </p>
           <div className="mb-4 border-b border-gray-100 dark:border-gray-800 pb-4">
             <label className="flex cursor-pointer items-start gap-3">
@@ -1361,7 +1361,7 @@ export default function Settings() {
         {/* Jellyfin */}
         <Section title="Jellyfin">
           <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
-            Optional. ScreenMate will refresh your Jellyfin library whenever a download completes.
+            Optional. MediaMate will refresh your Jellyfin library whenever a download completes.
           </p>
           <div className="mb-4 border-b border-gray-100 dark:border-gray-800 pb-4">
             <label className="flex cursor-pointer items-start gap-3">
@@ -1474,7 +1474,7 @@ export default function Settings() {
                     label="From address"
                     value={settings.digest_from_email ?? ""}
                     onChange={(v) => set("digest_from_email", v)}
-                    placeholder="ScreenMate <you@gmail.com>"
+                    placeholder="MediaMate <you@gmail.com>"
                     hint="Defaults to the username above if left blank."
                   />
                 </div>
@@ -1634,7 +1634,7 @@ export default function Settings() {
         {/* Security */}
         <Section title="Security">
           <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
-            Set a password to require login when ScreenMate is accessed via Cloudflare tunnel.
+            Set a password to require login when MediaMate is accessed via Cloudflare tunnel.
             Local network access is always unrestricted. Leave blank to disable authentication.
           </p>
           <div className="space-y-3">

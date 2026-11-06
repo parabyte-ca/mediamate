@@ -100,10 +100,10 @@ export default function CommandPalette() {
     };
     const onOpen = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    window.addEventListener("screenmate:palette", onOpen);
+    window.addEventListener("mediamate:palette", onOpen);
     return () => {
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("screenmate:palette", onOpen);
+      window.removeEventListener("mediamate:palette", onOpen);
     };
   }, [navigate, open]);
 

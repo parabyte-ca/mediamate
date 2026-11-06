@@ -25,10 +25,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error("Session expired. Please log in.");
   }
   if (!res.ok) {
-    // A proxy in front of ScreenMate answers with HTML while the container restarts.
+    // A proxy in front of MediaMate answers with HTML while the container restarts.
     const err = await res.json().catch(() => ({
       detail: res.status >= 502 && res.status <= 504
-        ? `ScreenMate isn't responding (HTTP ${res.status}). It may be restarting.`
+        ? `MediaMate isn't responding (HTTP ${res.status}). It may be restarting.`
         : `Request failed (HTTP ${res.status}).`,
     }));
     throw new Error(err.detail ?? err.msg ?? "Request failed");
@@ -230,7 +230,7 @@ export interface DownloadPath {
   is_default: boolean;
   /** Path here when it differs and no path mapping covers it; null = worked out. */
   local_path?: string | null;
-  /** Where ScreenMate sees the folder (local_path or the mapped path). */
+  /** Where MediaMate sees the folder (local_path or the mapped path). */
   local?: string;
   exists_here?: boolean;
   /** qBittorrent may save here. */
@@ -690,7 +690,7 @@ export interface FolderSuggestion {
   path: string;          // as qBittorrent sees it
   name: string;
   why: string[];
-  local: string;         // where ScreenMate would find it
+  local: string;         // where MediaMate would find it
   visible_here: boolean;
   how: "same path" | "path mapping" | "found by name";
 }

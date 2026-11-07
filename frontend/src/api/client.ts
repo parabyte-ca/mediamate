@@ -88,6 +88,17 @@ export interface MusicAlbum {
   problem: string | null;
 }
 
+export interface BrowseRelease {
+  mbid: string; title: string; artist: string; artist_mbids: string[]; date: string | null; type: string;
+  cover: string | null; listens: number; tags: string[];
+  following: boolean; status: AlbumStatus | null; in_library: boolean; score: number; why: string | null;
+}
+
+export interface BrowseMusic {
+  list: "new" | "popular"; for_you: boolean; releases: BrowseRelease[];
+  taste: string[]; taste_ready: boolean; learning: number; building: boolean;
+}
+
 export type MusicIssue = "untagged" | "missing_tracks" | "low_bitrate" | "duplicate";
 
 export interface LibAlbum {
@@ -1225,6 +1236,14 @@ export const api = {
     movies: (list: MovieList = "popular", q = "") =>
       req<{ need_key: boolean; movies: BrowseMovie[]; list: string; country?: string }>(
         `/browse/movies?list=${list}${q ? `&q=${encodeURIComponent(q)}` : ""}`),
+    music: (list: "new" | "popular", forYou: boolean) =>
+      req<BrowseMusic>(`/browse/music?list=${list}&for_you=${forYou}`),
+    musicAdd: (r: BrowseRelease) =>
+      req<{ ok: boolean; album_status: string; message: string }>("/browse/music/add", {
+        method: "POST",
+        body: JSON.stringify({ artist_mbid: r.artist_mbids[0], mbid: r.mbid, title: r.title, date: r.date, type: r.type }),
+      }),
+    musicTaste: () => req<{ started: boolean }>("/browse/music/taste", { method: "POST" }),
   },
 
   profiles: {

@@ -143,6 +143,7 @@ class Download(Base):
     retry_count = Column(Integer, default=0, server_default="0")
     music_album_id = Column(Integer, ForeignKey("music_albums.id"), nullable=True)
     error_detail = Column(String, nullable=True)        # qBittorrent's reason, when it errored
+    replaces_album_id = Column(Integer, nullable=True)   # music upgrade: the library album it replaces
 
 
 class MusicAlbum(Base):
@@ -193,6 +194,18 @@ class MusicLibAlbum(Base):
     plex_dirty = Column(Integer, nullable=False, default=0, server_default="0")
     scanned_at = Column(DateTime, nullable=True)
     cover_checked_at = Column(DateTime, nullable=True)   # last MusicBrainz cover lookup that found none
+
+
+class MusicArtistTag(Base):
+    """An artist's MusicBrainz tags (genres), cached for Browse → Music "for you"."""
+    __tablename__ = "music_artist_tags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name_key = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=True)
+    mbid = Column(String, nullable=True, index=True)
+    tags = Column(String, nullable=True)                 # JSON {tag: votes}
+    checked_at = Column(DateTime, nullable=True)
 
 
 class MusicTrack(Base):

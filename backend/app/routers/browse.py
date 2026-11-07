@@ -77,3 +77,44 @@ async def browse_movies(q: str = "", list: str = "popular", db: Session = Depend
         # Age rating when we already know it (no extra lookups for a whole list).
         m["certification"] = ratings.certification(db, "movie", m["title"], m["year"], lookup=False)
     return {"need_key": False, "movies": movies, "list": "search" if query else list, "country": country}
+
+
+# ── music ───────────────────────────────────────────────────────────────────
+
+
+@router.get("/browse/music")
+def browse_music(list: str = "new", for_you: bool = True, db: Session = Depends(get_db)):
+    """New releases or popular albums (ListenBrainz), ranked for you."""
+    from ..services import music_discover
+    if list not in ("new", "popular"):
+        raise HTTPException(status_code=400, detail="list must be new or popular")
+    try:
+        rows = music_discover.releases(list, db.get_bind())
+    except music_discover.Unavailable as exc:
+        raise HTTPException(status_code=502, detail=f"Could not reach ListenBrainz ({exc}). Try again in a moment.")
+    out = music_discover.rank(db, rows, for_you)
+    if not out["taste_ready"]:
+        music_discover.start_taste(db.get_bind())
+    return {"list": list, "for_you": for_you, **out}
+
+
+@router.post("/browse/music/taste")
+def rebuild_taste(db: Session = Depends(get_db)):
+    """Look up your artists' genres again (in the background)."""
+    from ..services import music_discover
+    return {"started": music_discover.start_taste(db.get_bind())}
+
+
+@router.post("/browse/music/add")
+def browse_music_add(body: dict, db: Session = Depends(get_db)):
+    """Follow the artist (future releases) and want this album."""
+    from ..services import music, music_discover, musicbrainz
+    artist, rg = str(body.get("artist_mbid") or ""), str(body.get("mbid") or "")
+    if not artist or not rg:
+        raise HTTPException(status_code=400, detail="artist_mbid and mbid are needed")
+    try:
+        return music_discover.add(db, artist, rg, str(body.get("title") or ""), body.get("date"), body.get("type"))
+    except music.AlreadyFollowing:
+        raise HTTPException(status_code=409, detail="Already following")
+    except musicbrainz.MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz is unavailable right now ({exc})")

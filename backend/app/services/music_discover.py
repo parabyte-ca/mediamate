@@ -195,15 +195,48 @@ def _learn_release_artists(bind, rows: list[dict]) -> None:
 # ── taste ───────────────────────────────────────────────────────────────────
 
 
+# Not real artists: compilations, soundtracks, unknowns. Never "your taste" on their own.
+VARIOUS_MBID = "89ad4ac3-39f7-470e-963a-56509c546377"     # MusicBrainz "Various Artists"
+_NOT_ARTISTS = {"variousartists", "various", "va", "variousartist", "soundtrack", "soundtracks",
+                "originalsoundtrack", "ost", "originalcast", "originalbroadwaycast", "unknown", "unknownartist",
+                "artist", "compilation", "compilations", "karaoke", "nobody"}
+
+
+def not_an_artist(name: str | None, mbids=()) -> bool:
+    import re
+    if VARIOUS_MBID in (mbids or ()):
+        return True
+    k = re.sub(r"[^a-z0-9]", "", (name or "").lower())
+    return not k or k in _NOT_ARTISTS
+
+
 def _yours(db) -> tuple[Counter, dict[str, str], set[str]]:
-    """(albums per artist name key, {name key: display name}, followed artist mbids)."""
-    from ..models import MusicLibAlbum, WatchlistItem
+    """(albums per artist name key, {name key: display name}, followed artist mbids).
+    A compilation ("Various Artists", soundtracks) counts for the artists on its tracks,
+    each getting an equal share of one album, so 51 compilations don't make "Various
+    Artists" your favourite."""
+    from ..models import MusicLibAlbum, MusicTrack, WatchlistItem
     counts, names = Counter(), {}
-    for a in db.query(MusicLibAlbum.artist).filter(MusicLibAlbum.artist.isnot(None)):
+    va = []
+    for a in db.query(MusicLibAlbum.id, MusicLibAlbum.artist).filter(MusicLibAlbum.artist.isnot(None)):
+        if not_an_artist(a.artist):
+            va.append(a.id)
+            continue
         k = _name_key(a.artist)
         if k:
             counts[k] += 1
             names.setdefault(k, a.artist)
+    if va:
+        by_album: dict[int, list[str]] = {}
+        for t in db.query(MusicTrack.album_id, MusicTrack.artist).filter(MusicTrack.album_id.in_(va)):
+            if t.artist and not not_an_artist(t.artist):
+                by_album.setdefault(t.album_id, []).append(t.artist)
+        for artists in by_album.values():
+            for name in artists:
+                k = _name_key(name)
+                if k:
+                    counts[k] += 1 / len(artists)
+                    names.setdefault(k, name)
     followed = set()
     for w in db.query(WatchlistItem).filter(WatchlistItem.kind == "artist"):
         k = _name_key(w.title)
@@ -221,6 +254,8 @@ def build_taste(bind=None) -> None:
         counts, names, _ = _yours(db)
         mbid_of = {_name_key(w.title): w.mbid for w in db.query(WatchlistItem).filter(WatchlistItem.kind == "artist")}
         for k, _n in counts.most_common(MAX_TASTE_ARTISTS):
+            if not_an_artist(names[k]):
+                continue
             if artist_tags(db, names[k], mbid_of.get(k)) is None:
                 artist_tags(db, names[k], mbid_of.get(k), lookup=True)
 
@@ -268,9 +303,10 @@ def rank(db, rows: list[dict], for_you: bool) -> dict:
         al = albums.get(r["mbid"])
         r["status"] = al.status if al is not None and r["following"] else None
         r["in_library"] = (key, music._key(r["title"])) in owned
-        have = counts.get(key, 0)
+        various = not_an_artist(r["artist"], r["artist_mbids"])
+        have = 0 if various else int(counts.get(key, 0))
         score, why = 0.0, None
-        if r["following"] or have:
+        if not various and (r["following"] or have):
             score = 10.0 + have
             why = "You follow them" if r["following"] else f"You have {have} album{'s' if have != 1 else ''} by them"
         else:

@@ -126,3 +126,27 @@ def test_routes(Session, lb, mb, grabbing):
         assert pun["following"] and pun["status"] == "grabbed"
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+def test_various_artists_dont_inflate_your_taste(lb, mine):
+    from app.models import MusicTrack
+    for i in range(51):                               # 51 compilations
+        a = MusicLibAlbum(folder=f"/m/va/{i}", artist="Various Artists", title=f"Now {i}", format="mp3")
+        mine.add(a)
+        mine.flush()
+        for j, who in enumerate(("Slowdive", "Metal Band", "Some EDM Act", "Various Artists")):
+            mine.add(MusicTrack(album_id=a.id, path=f"/m/va/{i}/{j}.mp3", artist=who))
+    mine.commit()
+    counts, names, _ = md._yours(mine)
+    assert md._name_key("Various Artists") not in counts
+    assert round(counts[md._name_key("Metal Band")], 1) == 17.0 and round(counts[md._name_key("Slowdive")], 1) == 21.0
+    rows = [{"mbid": "rg-va", "title": "Hits 2026", "artist": "Various Artists",
+             "artist_mbids": [md.VARIOUS_MBID], "date": None, "type": "Album", "cover": None, "listens": 0, "tags": []}]
+    r = md.rank(mine, rows, for_you=False)["releases"][0]
+    assert not (r["why"] or "").startswith("You have")
+
+
+@pytest.mark.parametrize("name", ["Various Artists", "VA", "Original Soundtrack", "Unknown Artist", "[unknown]", ""])
+def test_not_artists(name):
+    assert md.not_an_artist(name)
+    assert not md.not_an_artist("Vanessa Carlton")

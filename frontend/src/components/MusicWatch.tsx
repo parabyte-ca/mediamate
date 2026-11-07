@@ -50,7 +50,7 @@ export function ArtistCard({ item, selected, onToggleSelect, onToggle, onDelete,
   const skipped = (albums ?? []).filter((x) => x.status === "ignored").length;
 
   return (
-    <div className={`rounded-xl border bg-white dark:bg-gray-900 p-4 shadow-sm ${selected ? "border-blue-400" : "border-gray-200 dark:border-gray-700"} ${item.enabled ? "" : "opacity-70"}`}>
+    <div className={`min-w-0 rounded-xl border bg-white dark:bg-gray-900 p-4 shadow-sm ${selected ? "border-blue-400" : "border-gray-200 dark:border-gray-700"} ${item.enabled ? "" : "opacity-70"}`}>
       <div className="flex gap-3">
         <input type="checkbox" checked={selected} onChange={onToggleSelect} aria-label={`Select ${item.title}`}
                className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-blue-600" />

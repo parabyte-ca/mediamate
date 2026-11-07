@@ -1350,7 +1350,7 @@ export default function Watchlist() {
               {filtered.length} of {inTab.length} {noun}{inTab.length !== 1 ? "s" : ""} match
             </p>
           )}
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {filtered.map((item) => isArtist(item) ? (
               <ArtistCard
                 key={item.id}

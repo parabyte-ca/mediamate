@@ -542,3 +542,48 @@ def test_bulk_organise(shelf):
     st = client.get("/api/music/library/bulk/status").json()
     assert st["changed"] == 1, st
     assert (music / "C" / "Three (2003)" / "01 - Song 1.flac").exists() and not loose.exists()
+
+
+# ── bootleg discs, download folders, folder test ────────────────────────────
+
+
+def test_bootleg_disc_folders_are_one_album(root):
+    client, Session, music = root
+    show = music / "2001-08-03 Molson Park, Barrie"
+    clip(show / "rh2001-08-03d1" / "t01.flac")
+    clip(show / "rh2001-08-03d1" / "t02.flac")
+    clip(show / "rh2001-08-03d2" / "t01.flac")
+    clip(music / "Solo" / "Live d1" / "a.flac")                 # one "d1" alone is just a folder
+    ml.scan()
+    with Session() as db:
+        by = {os.path.basename(a.folder): a.tracks for a in db.query(MusicLibAlbum)}
+    assert by == {"2001-08-03 Molson Park, Barrie": 3, "Live d1": 1}
+    assert ml.disc_dirs(["gd77d1", "gd77d2", "CD1", "Extras"]) == {"gd77d1", "gd77d2", "CD1"}
+
+
+def test_scan_skips_download_folders_inside_the_library(root):
+    from app.models import DownloadPath
+    client, Session, music = root
+    album(music / "A" / "One (2001)", artist="A", title="One", n=1)
+    clip(music / "incoming" / "A - One [FLAC]" / "01.flac")
+    with Session() as db:
+        db.add(DownloadPath(name="Music downloads", path=str(music / "incoming"),
+                            local_path=str(music / "incoming"), downloads=True, scan=False))
+        db.commit()
+    ml.scan()
+    with Session() as db:
+        assert [os.path.basename(a.folder) for a in db.query(MusicLibAlbum)] == ["One (2001)"]
+
+
+def test_folder_test_counts_audio_for_music_folders(root):
+    from app.models import DownloadPath
+    from app.services import folders
+    client, Session, music = root
+    album(music / "A" / "One (2001)", artist="A", title="One", n=2)
+    with Session() as db:
+        dp = DownloadPath(name="Music", path=str(music), local_path=str(music), downloads=False,
+                          scan=True, target="music")
+        db.add(dp)
+        db.commit()
+        read = next(c for c in folders.check(db, dp)["checks"] if c["key"] == "read")
+    assert read["detail"].startswith("2 audio files")

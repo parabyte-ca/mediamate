@@ -225,12 +225,12 @@ def scan_folder(db, folder: str, tracks_info: list[dict] | None = None):
     from ..models import MusicLibAlbum, MusicTrack
     files = [os.path.join(folder, f) for f in sorted(os.listdir(folder), key=_natural)
              if os.path.splitext(f)[1].lower() in AUDIO_EXTS] if os.path.isdir(folder) else []
-    # Disc folders ("CD1", "Disc 2") belong to the album above them.
-    for sub in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+    # Disc folders ("CD1", "Disc 2", bootleg "gd77-05-08d1") belong to the album above them.
+    subs = [d for d in os.listdir(folder) if os.path.isdir(os.path.join(folder, d))] if os.path.isdir(folder) else []
+    for sub in sorted(disc_dirs(subs), key=_natural):
         p = os.path.join(folder, sub)
-        if os.path.isdir(p) and re.match(r"(?i)^(cd|disc|disk)\s*\d+$", sub):
-            files += [os.path.join(p, f) for f in sorted(os.listdir(p), key=_natural)
-                      if os.path.splitext(f)[1].lower() in AUDIO_EXTS]
+        files += [os.path.join(p, f) for f in sorted(os.listdir(p), key=_natural)
+                  if os.path.splitext(f)[1].lower() in AUDIO_EXTS]
     album = db.query(MusicLibAlbum).filter(MusicLibAlbum.folder == folder).first()
     if not files:
         if album is not None:
@@ -271,17 +271,57 @@ def scan_folder(db, folder: str, tracks_info: list[dict] | None = None):
     return album
 
 
-def _album_folders(root: str) -> list[str]:
+_DISC = re.compile(r"(?i)^(cd|disc|disk)\s*\d+$")
+_DISC_SUFFIX = re.compile(r"(?i)^(?P<stem>.*?)[\s._-]*(?:cd|disc|disk|d)\s*(?P<n>\d{1,2})$")
+
+
+def disc_dirs(names) -> set[str]:
+    """Which of these sibling folders are discs of one album: "CD1", "Disc 2", or two or
+    more that differ only by a disc suffix ("gd77-05-08d1", "gd77-05-08d2", "Show CD1")."""
+    names = list(names)
+    out = {n for n in names if _DISC.match(n)}
+    groups: dict[str, list[str]] = {}
+    for n in names:
+        m = _DISC_SUFFIX.match(n)
+        if m and m.group("stem").strip(" ._-"):
+            groups.setdefault(m.group("stem").strip(" ._-").lower(), []).append(n)
+    for members in groups.values():
+        if len(members) >= 2:
+            out.update(members)
+    return out
+
+
+def _album_folders(root: str, skip: set[str] = frozenset()) -> list[str]:
     folders = []
     for here, dirs, files in os.walk(root):
-        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
-        if re.match(r"(?i)^(cd|disc|disk)\s*\d+$", os.path.basename(here)):
-            continue                                       # part of the album above
+        dirs[:] = sorted(d for d in dirs if not d.startswith(".")
+                         and os.path.normpath(os.path.join(here, d)) not in skip)
+        discs = disc_dirs(dirs)
+        dirs[:] = [d for d in dirs if d not in discs]      # read with the album above them
         has_audio = any(os.path.splitext(f)[1].lower() in AUDIO_EXTS for f in files)
-        has_discs = any(re.match(r"(?i)^(cd|disc|disk)\s*\d+$", d) for d in dirs)
-        if has_audio or has_discs:
+        if has_audio or discs:
             folders.append(os.path.normpath(here))
     return folders
+
+
+def download_folders_inside(db, rs: list[str]) -> set[str]:
+    """Folders qBittorrent downloads into that sit inside a music root. With a music
+    library folder set, finished albums are linked from them into the library, so the
+    raw torrent folders aren't scanned as albums too."""
+    from ..models import DownloadPath, Setting
+    from . import folders
+    row = db.query(Setting).filter(Setting.key == DIR_KEY).first()
+    if not (row and row.value):
+        return set()
+    out = set()
+    for dp in db.query(DownloadPath).filter(DownloadPath.downloads.is_(True)).all():
+        local = folders.local_of(db, dp)
+        if not local:
+            continue
+        p = os.path.normpath(local)
+        if any(p != r and p.startswith(r.rstrip(os.sep) + os.sep) for r in rs):
+            out.add(p)
+    return out
 
 
 def mark_duplicates(db) -> int:
@@ -312,16 +352,18 @@ def scan(bind=None) -> dict:
     try:
         with Session(bind=bind or store._engine()) as db:
             rs = roots(db)
+            skip = download_folders_inside(db, rs)
             seen = set()
             for r in rs:
-                for folder in _album_folders(r):
+                for folder in _album_folders(r, skip):
                     if scan_folder(db, folder) is not None:
                         seen.add(folder)
                 db.commit()
             removed = 0
             for a in db.query(MusicLibAlbum).all():
-                inside = any(a.folder == r or a.folder.startswith(r.rstrip(os.sep) + os.sep) for r in rs)
-                if a.folder not in seen and (not inside or not os.path.isdir(a.folder)):
+                # Not found by this scan: gone, outside the roots, a disc now read with its
+                # album, or inside a download folder that isn't scanned.
+                if a.folder not in seen:
                     db.query(MusicTrack).filter(MusicTrack.album_id == a.id).delete()
                     db.delete(a)
                     removed += 1

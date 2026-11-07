@@ -244,8 +244,12 @@ def music_folder(db, item):
     named like music, else the default download folder."""
     from ..models import DownloadPath, Setting
     from .folders import download_folder
+    from . import folder_roles
     if item.download_path_id:
         return download_folder(db, item.download_path_id)
+    flagged = folder_roles.music_download_folder(db)
+    if flagged is not None:
+        return flagged
     row = db.query(Setting).filter(Setting.key == "music_download_path_id").first()
     if row and (row.value or "").isdigit():
         dp = db.get(DownloadPath, int(row.value))

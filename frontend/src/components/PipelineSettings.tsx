@@ -218,12 +218,15 @@ function OrganiseSection() {
     setS(await api.pipeline.saveOrganise(data));
     setSaved("Saved");
   };
-  const field = (k: "organise_tv_dir" | "organise_movie_dir" | "organise_tv_mature_dir" | "organise_movie_mature_dir", label: string, ph: string) => (
-    <label className="block">
+  // Library folders are a folder's job in Settings → Folders ("Library for"); shown here read-only.
+  const field = (k: "organise_tv_dir" | "organise_movie_dir" | "organise_tv_mature_dir" | "organise_movie_mature_dir", label: string, _ph: string) => (
+    <div>
       <span className="mb-1 block text-xs text-gray-500">{label}</span>
-      <input className={input} value={s[k]} placeholder={ph} onChange={(e) => set(k, e.target.value)} />
+      <p className="rounded-lg border border-dashed border-gray-300 px-3 py-2 font-mono text-sm text-gray-800 dark:border-gray-600 dark:text-gray-200">
+        {s[k] || <span className="font-sans text-gray-400">Not set</span>}
+      </p>
       {s.warnings?.[k] && <span className="mt-1 block text-xs text-amber-700 dark:text-amber-400">{s.warnings[k]}</span>}
-    </label>
+    </div>
   );
 
   return (
@@ -233,6 +236,10 @@ function OrganiseSection() {
         Used by the <b>Rename &amp; organise</b> rule step and the Library's <b>Rename &amp; organise</b> action.
         Files get Plex-style names in these folders (paths as MediaMate sees them). Downloads are removed from
         qBittorrent first (stops seeding, keeps the file). Matching subtitles move too; nothing is ever overwritten.
+      </p>
+      <p className="mb-3 text-xs text-gray-600 dark:text-gray-300">
+        Choose these in <a href="#folders" className="font-medium text-blue-600 hover:underline dark:text-blue-400">Settings → Folders</a>:
+        edit a folder and set <b>Library for</b>.
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         {field("organise_tv_dir", "TV folder", "/mnt/video/TV Shows")}

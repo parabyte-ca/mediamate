@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import DownloadPath, Setting
 from ..schemas import DownloadPathCreate, DownloadPathOut, DownloadPathUpdate
-from ..services import folders
+from ..services import folder_roles, folders
 from ..services.disk_space import is_low, threshold_bytes
 
 router = APIRouter()
@@ -17,7 +17,7 @@ def _threshold(db: Session) -> int:
     return threshold_bytes({"low_disk_warn_gb": row.value if row else "10"})
 
 
-def _with_disk_usage(db: Session, dp: DownloadPath, threshold: int = 0) -> dict:
+def _with_disk_usage(db: Session, dp: DownloadPath, threshold: int = 0, all_folders: list | None = None) -> dict:
     """Return a dict suitable for DownloadPathOut, with disk-usage fields populated."""
     local = folders.local_of(db, dp)
     out = {
@@ -39,6 +39,9 @@ def _with_disk_usage(db: Session, dp: DownloadPath, threshold: int = 0) -> dict:
         "target_shrink": bool(dp.target_shrink),
         "target_summary": _target_summary(dp),
         "protected": bool(dp.protected),
+        "role": dp.role,
+        "music_downloads": bool(dp.music_downloads),
+        "notes": folder_roles.notes(db, dp, all_folders) if all_folders is not None else [],
     }
     try:
         usage = shutil.disk_usage(local)  # measured here, where MediaMate sees the folder
@@ -53,7 +56,8 @@ def _with_disk_usage(db: Session, dp: DownloadPath, threshold: int = 0) -> dict:
 @router.get("/paths", response_model=list[DownloadPathOut])
 def get_paths(db: Session = Depends(get_db)):
     threshold = _threshold(db)
-    return [_with_disk_usage(db, dp, threshold) for dp in db.query(DownloadPath).all()]
+    rows = db.query(DownloadPath).all()
+    return [_with_disk_usage(db, dp, threshold, rows) for dp in rows]
 
 
 def _target_summary(dp: DownloadPath) -> str:
@@ -119,6 +123,33 @@ def _clean(values: dict, current: DownloadPath | None = None) -> dict:
     return values
 
 
+def _roles(db: Session, values: dict, current: DownloadPath | None = None) -> dict:
+    """One folder per library role and one music download folder; never on a protected
+    folder (adult content stays out of the Plex libraries)."""
+    if values.get("role") == "":
+        values["role"] = None
+    if "music_downloads" in values and values["music_downloads"] is None:
+        values.pop("music_downloads")
+    role = values.get("role", current.role if current else None)
+    protected = values.get("protected", current.protected if current else False)
+    if role and protected:
+        raise HTTPException(status_code=400, detail="A protected folder can't be a library for Plex")
+    downloads = values.get("downloads", current.downloads if current else True)
+    if values.get("music_downloads") and not downloads:
+        raise HTTPException(status_code=400, detail="Turn Downloads on to send album downloads here")
+    if not downloads:
+        values["music_downloads"] = False
+    others = db.query(DownloadPath)
+    if current is not None:
+        others = others.filter(DownloadPath.id != current.id)
+    if values.get("role"):
+        others.filter(DownloadPath.role == values["role"]).update({"role": None}, synchronize_session=False)
+    if values.get("music_downloads"):
+        others.filter(DownloadPath.music_downloads.is_(True)).update({"music_downloads": False},
+                                                                    synchronize_session=False)
+    return values
+
+
 @router.get("/paths/suggestions")
 def path_suggestions(db: Session = Depends(get_db)):
     """Folders qBittorrent uses that aren't in the list yet (read-only)."""
@@ -127,13 +158,16 @@ def path_suggestions(db: Session = Depends(get_db)):
 
 @router.post("/paths", response_model=DownloadPathOut, status_code=201)
 def create_path(path: DownloadPathCreate, db: Session = Depends(get_db)):
-    values = _clean_target(_clean(path.model_dump()))
+    values = _roles(db, _clean_target(_clean(path.model_dump())))
+    values["music_downloads"] = bool(values.get("music_downloads"))
     if "target" not in values:
         values.update(_guess_target(values.get("name", "")))
     if values.get("protected") is None:
         from ..services import adult
         values["protected"] = adult.guess_protected(values.get("name", "")) or \
             adult.guess_protected(values.get("path", ""))
+        if values["protected"] and values.get("role"):
+            raise HTTPException(status_code=400, detail="A protected folder can't be a library for Plex")
     if values.get("is_default"):
         db.query(DownloadPath).update({"is_default": False})
     db_path = DownloadPath(**values)
@@ -142,7 +176,7 @@ def create_path(path: DownloadPathCreate, db: Session = Depends(get_db)):
     db.refresh(db_path)
     folders.refresh(db)
     _reclassify(db, db_path)
-    return _with_disk_usage(db, db_path, _threshold(db))
+    return _with_disk_usage(db, db_path, _threshold(db), db.query(DownloadPath).all())
 
 
 @router.put("/paths/{path_id}", response_model=DownloadPathOut)
@@ -150,7 +184,7 @@ def update_path(path_id: int, path: DownloadPathUpdate, db: Session = Depends(ge
     db_path = db.query(DownloadPath).filter(DownloadPath.id == path_id).first()
     if not db_path:
         raise HTTPException(status_code=404, detail="Path not found")
-    updates = _clean_target(_clean(path.model_dump(exclude_unset=True), db_path))
+    updates = _roles(db, _clean_target(_clean(path.model_dump(exclude_unset=True), db_path)), db_path)
     if updates.get("is_default"):
         db.query(DownloadPath).update({"is_default": False})
     target_changed = any(k.startswith("target") for k in updates) or "local_path" in updates or "path" in updates
@@ -161,7 +195,7 @@ def update_path(path_id: int, path: DownloadPathUpdate, db: Session = Depends(ge
     folders.refresh(db)
     if target_changed:
         _reclassify(db, db_path)
-    return _with_disk_usage(db, db_path, _threshold(db))
+    return _with_disk_usage(db, db_path, _threshold(db), db.query(DownloadPath).all())
 
 
 @router.delete("/paths/{path_id}")

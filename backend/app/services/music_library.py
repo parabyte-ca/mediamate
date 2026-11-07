@@ -176,9 +176,9 @@ def roots(db) -> list[str]:
     from ..models import DownloadPath, Setting
     from . import folders
     out = []
-    row = db.query(Setting).filter(Setting.key == DIR_KEY).first()
-    if row and row.value:
-        out.append(row.value)
+    lib = music_dir(db)
+    if lib:
+        out.append(lib)
     for dp in db.query(DownloadPath).filter(DownloadPath.target == "music").all():
         local = folders.local_of(db, dp)
         if local:
@@ -310,8 +310,7 @@ def download_folders_inside(db, rs: list[str]) -> set[str]:
     raw torrent folders aren't scanned as albums too."""
     from ..models import DownloadPath, Setting
     from . import folders
-    row = db.query(Setting).filter(Setting.key == DIR_KEY).first()
-    if not (row and row.value):
+    if not music_dir(db):
         return set()
     out = set()
     for dp in db.query(DownloadPath).filter(DownloadPath.downloads.is_(True)).all():
@@ -797,7 +796,13 @@ def in_download_folder(db, folder: str) -> bool:
 
 
 def music_dir(db) -> str | None:
+    """The music library: the folder whose role is Music library (the old typed setting
+    is only a fallback for installs that haven't moved over yet)."""
     from ..models import Setting
+    from . import folder_roles
+    found = folder_roles.path_for(db, "music")
+    if found:
+        return found
     row = db.query(Setting).filter(Setting.key == DIR_KEY).first()
     return row.value if row and row.value else None
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Compass, Copy, RefreshCw, Download, Edit2, FolderOpen, Loader2, MinusCircle, Plus, Save, Star, Stethoscope, Trash2, Upload, XCircle } from "lucide-react";
-import { api, SECRET_MASK, type DownloadPath, type FolderTarget, type FolderSuggestion, type FolderTest, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type PlexSyncStatus, type RestoreResponse, type Settings as SettingsType } from "../api/client";
+import { api, SECRET_MASK, type DownloadPath, type FolderRole, type FolderTarget, type FolderSuggestion, type FolderTest, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type PlexSyncStatus, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
 import { PALETTES, useTheme, type Theme } from "../ThemeContext";
 import ImportPanel from "../components/ImportPanel";
@@ -85,6 +85,12 @@ export type FolderForm = {
   name: string; path: string; local_path: string; is_default: boolean; downloads: boolean; scan: boolean;
   target?: FolderTarget; target_min?: number | null; target_max?: number | null; target_shrink?: boolean;
   protected?: boolean;
+  role?: FolderRole | "" | null; music_downloads?: boolean;
+};
+
+export const ROLE_LABEL: Record<FolderRole, string> = {
+  tv: "TV library", movies: "Movies library", mature_tv: "Mature TV library",
+  mature_movies: "Mature Movies library", music: "Music library",
 };
 
 /** Same guess as the server: adult-content folders are protected by default. */
@@ -167,10 +173,12 @@ function PathModal({ initial, onClose, onSave }: {
     target_max: initial?.target_max ?? 720,
     target_shrink: initial?.target_shrink ?? true,
     protected: initial?.protected,
+    role: initial?.role ?? "",
+    music_downloads: initial?.music_downloads ?? false,
   });
   const isProtected = form.protected ?? guessProtected(form.name);
-  const valid = form.name.trim() && form.path.trim() && (form.downloads || form.scan);
-  const save = () => valid && onSave({ ...form, protected: isProtected });
+  const valid = form.name.trim() && form.path.trim() && (form.downloads || form.scan || !!form.role);
+  const save = () => valid && onSave({ ...form, protected: isProtected, role: isProtected ? "" : form.role });
   const set = <K extends keyof FolderForm>(k: K, v: FolderForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
@@ -218,11 +226,29 @@ function PathModal({ initial, onClose, onSave }: {
             </div>
           )}
           {form.downloads && (
-            <label className="flex cursor-pointer items-center gap-2">
-              <input type="checkbox" checked={form.is_default} onChange={(e) => set("is_default", e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600" />
-              <span className="text-sm text-gray-700 dark:text-gray-300">Default download folder</span>
-            </label>
+            <div className="space-y-2">
+              <label className="flex cursor-pointer items-center gap-2">
+                <input type="checkbox" checked={form.is_default} onChange={(e) => set("is_default", e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600" />
+                <span className="text-sm text-gray-700 dark:text-gray-300">Default download folder (shows and movies)</span>
+              </label>
+              <label className="flex cursor-pointer items-center gap-2">
+                <input type="checkbox" checked={!!form.music_downloads} onChange={(e) => set("music_downloads", e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600" />
+                <span className="text-sm text-gray-700 dark:text-gray-300">Album downloads go here</span>
+              </label>
+            </div>
           )}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300" htmlFor="folder-role">Library for</label>
+            <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">
+              Rename &amp; organise puts finished files here, named for Plex. One folder per library.
+            </p>
+            <select id="folder-role" value={form.role ?? ""} disabled={isProtected}
+                    onChange={(e) => set("role", (e.target.value || "") as FolderRole | "")} className={FIELD}>
+              <option value="">Nothing (not a library)</option>
+              {(Object.keys(ROLE_LABEL) as FolderRole[]).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+            </select>
+            {isProtected && <p className="mt-1 text-xs text-gray-500">Protected folders are never a Plex library.</p>}
+          </div>
           {form.scan && (
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Target format</label>
@@ -274,6 +300,21 @@ function PathModal({ initial, onClose, onSave }: {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** A folder chosen in Settings → Folders, shown where it's used (read-only). */
+export function FolderSummary({ label, folder, empty }: { label: string; folder?: DownloadPath; empty: string }) {
+  return (
+    <div>
+      <span className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
+      <p className="rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm dark:border-gray-600">
+        {folder
+          ? <><b className="text-gray-900 dark:text-gray-100">{folder.name}</b> <code className="text-xs text-gray-500">{folder.local || folder.path}</code></>
+          : <span className="text-gray-500 dark:text-gray-400">{empty}</span>}
+        {" · "}<a href="#folders" className="text-blue-600 hover:underline dark:text-blue-400">Change in Folders</a>
+      </p>
     </div>
   );
 }
@@ -895,14 +936,8 @@ export default function Settings() {
               <Field label="Category" hint="Torrents added by MediaMate will use this category in qBittorrent." value={settings.qbit_category ?? ""} onChange={(v) => set("qbit_category", v)} placeholder="mediamate" />
             </div>
             <Field label="Music category" hint="Album downloads use this category, so qBittorrent can keep them apart." value={settings.qbit_music_category ?? ""} onChange={(v) => set("qbit_music_category", v)} placeholder="music" />
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Music download folder</label>
-              <select value={settings.music_download_path_id ?? ""} onChange={(e) => set("music_download_path_id", e.target.value)} className={FIELD}>
-                <option value="">A folder named "Music" (else the default)</option>
-                {paths.filter((p) => p.downloads !== false).map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
-              </select>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Add it under Folders first; an artist can also pick its own.</p>
-            </div>
+            <FolderSummary label="Album downloads go to" folder={paths.find((p) => p.music_downloads)}
+                           empty={'A folder named "Music", else the default download folder'} />
           </div>
           <div className="mt-4 flex items-center gap-3">
             <button onClick={handleTestQbit} disabled={testing}
@@ -998,6 +1033,8 @@ export default function Settings() {
                           <Star className="h-2.5 w-2.5" /> Default
                         </span>
                       )}
+                      {p.role && <span className="rounded-full bg-violet-50 dark:bg-violet-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700 dark:text-violet-300">{ROLE_LABEL[p.role]}</span>}
+                      {p.music_downloads && <span className="rounded-full bg-fuchsia-50 dark:bg-fuchsia-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-fuchsia-700 dark:text-fuchsia-300">Album downloads</span>}
                       {p.downloads && <span className="rounded-full bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300">Downloads</span>}
                       {p.scan && <span className="rounded-full bg-green-50 dark:bg-green-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-green-700 dark:text-green-300">Scan &amp; encode</span>}
                       {!p.exists_here && (p.scan || p.downloads) && (
@@ -1009,6 +1046,9 @@ export default function Settings() {
                     {p.local && p.local !== p.path && (
                       <p className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate" title="Where MediaMate sees it">here: {p.local}</p>
                     )}
+                    {(p.notes ?? []).map((n) => (
+                      <p key={n} className="text-xs font-medium text-amber-700 dark:text-amber-400">⚠ {n}</p>
+                    ))}
                     {p.scan && p.target_summary && (
                       <p className="text-xs text-gray-500 dark:text-gray-400">Target: {p.target_summary}</p>
                     )}
@@ -1281,8 +1321,8 @@ export default function Settings() {
             Follow artists on the Watchlist's Music tab. Finished albums are tagged from MusicBrainz and linked into this
             folder as <code>Artist/Album (Year)/01 - Title.flac</code> (the torrent keeps seeding). Point a Plex Music library at it.
           </p>
-          <Field label="Music library folder" hint="As MediaMate sees it, e.g. /mnt/video/music. It must be mounted into the container."
-                 value={settings.organise_music_dir ?? ""} onChange={(v) => set("organise_music_dir", v)} placeholder="/mnt/video/music" />
+          <FolderSummary label="Music library" folder={paths.find((p) => p.role === "music")}
+                         empty="Not set: give a folder the job “Library for: Music library”" />
         </Section>
         </div>
 

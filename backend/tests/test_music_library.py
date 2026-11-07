@@ -251,7 +251,7 @@ def test_organise_needs_a_music_folder(lib):
         db.commit()
         aid = a.id
     r = client.post(f"/api/music/library/albums/{aid}/organise")
-    assert r.status_code == 400 and "music library folder" in r.json()["detail"]
+    assert r.status_code == 400 and "music library" in r.json()["detail"]
 
 
 def test_tracks_table_cleared_with_album(root):

@@ -31,6 +31,8 @@ class DownloadPathCreate(BaseModel):
     target_max: Optional[int] = None
     target_shrink: Optional[bool] = None
     protected: Optional[bool] = None      # never rename or move files here; None = guessed
+    role: Optional[Literal["", "tv", "movies", "mature_tv", "mature_movies", "music"]] = None
+    music_downloads: Optional[bool] = None
 
 
 class DownloadPathUpdate(BaseModel):
@@ -45,6 +47,8 @@ class DownloadPathUpdate(BaseModel):
     target_max: Optional[int] = None
     target_shrink: Optional[bool] = None
     protected: Optional[bool] = None
+    role: Optional[Literal["", "tv", "movies", "mature_tv", "mature_movies", "music"]] = None
+    music_downloads: Optional[bool] = None
 
 
 class DownloadPathOut(BaseModel):
@@ -66,6 +70,9 @@ class DownloadPathOut(BaseModel):
     target_shrink: bool = False
     target_summary: str = ""           # e.g. "H.265, 720p–1080p"
     protected: bool = False            # never renamed or moved (adult content)
+    role: Optional[str] = None         # library for tv | movies | mature_tv | mature_movies | music
+    music_downloads: bool = False      # album downloads go here
+    notes: list[str] = []              # e.g. "Same as TV Shows apart from capital letters"
 
     model_config = {"from_attributes": True}
 

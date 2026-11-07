@@ -92,7 +92,8 @@ def get_settings(db: Session) -> dict[str, str]:
     out = {k: (rows.get(k) if rows.get(k) not in (None, "") else v) for k, v in SETTINGS_DEFAULTS.items()}
     for key in ("organise_tv_template", "organise_movie_template"):
         out[key] = fix_template(out[key])[0]     # always end with the file's own {ext}
-    return out
+    from . import folder_roles
+    return folder_roles.overlay(db, out)       # library folders come from Settings → Folders
 
 
 class OrganiseError(Exception):

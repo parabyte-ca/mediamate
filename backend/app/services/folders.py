@@ -243,6 +243,37 @@ def _mount_root(path: str) -> str:
     return "/" + "/".join(parts[:depth])
 
 
+def _recent_write_failure(db: Session, dp: DownloadPath, days: int = 7):
+    """The newest download into this folder that qBittorrent couldn't save (permissions,
+    a missing path, a full disk) in the last week. qBittorrent has no way to test
+    writing, so a real failure is the evidence."""
+    from datetime import datetime, timedelta, timezone
+    from ..models import Download
+    from .qbittorrent import is_folder_problem
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    rows = (db.query(Download).filter(Download.status.in_(["error", "failed"]), Download.error_detail.isnot(None),
+                                      Download.created_at >= since)
+            .order_by(Download.id.desc()).limit(200).all())
+    want = _norm(dp.path)
+    return next((d for d in rows if _norm(d.download_path or "") == want and is_folder_problem(d.error_detail)), None)
+
+
+def _qbit_write_hint(path: str) -> dict:
+    return {
+        "kind": "qbit-write",
+        "text": (f"qBittorrent can see {path} but can't write to it, so downloads there error straight away. "
+                 "On TrueNAS: Datasets → the dataset holding this folder → Edit permissions (ACL) → add qBittorrent's "
+                 "user (the apps user, uid 568, unless you changed it) with Modify, and apply it to child folders. "
+                 "Then, on the Watchlist, press download on the album again."),
+        "steps": [
+            {"label": "Check from qBittorrent's side (on the host; use your qBittorrent container's name). "
+                      "It prints \"writable\" once it's fixed",
+             "copy": f"docker exec qbittorrent sh -c 'mkdir -p \"{path}\" && touch \"{path}/.mm-write-test\" "
+                     f"&& rm \"{path}/.mm-write-test\" && echo writable'"},
+        ],
+    }
+
+
 def _same_as_qbit_hint(qbit_path: str, local: str) -> dict:
     """qBittorrent can see the folder and MediaMate can't: downloads land in
     qBittorrent's mount, so give MediaMate the same host folder at the same path."""
@@ -348,6 +379,11 @@ def check(db: Session, dp: DownloadPath, low_threshold: int = 0) -> dict:
         else:
             add("qbit", "qBittorrent sees it", "skip",
                 "Couldn't ask qBittorrent (not connected, or version 4.x, which has no way to check)")
+        failed = _recent_write_failure(db, dp)
+        if failed is not None:
+            add("qbit_write", "qBittorrent can write here", "fail",
+                f"A download into {dp.path} failed: {failed.error_detail}")
+            hint = hint or _qbit_write_hint(dp.path)
 
     ok = not any(c["status"] == "fail" for c in checks)
     return {"ok": ok, "local": local, "checks": checks, "hint": hint}

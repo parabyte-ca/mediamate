@@ -6,6 +6,9 @@ COPY frontend/package*.json ./
 RUN npm install
 
 COPY frontend/ ./
+# The app reloads itself when the server is newer than the screens it has cached.
+ARG APP_VERSION=0.8.0
+ENV VITE_APP_VERSION=${APP_VERSION}
 RUN npm run build
 
 # ── Stage 2: Python backend + compiled frontend ────────────────────────────────

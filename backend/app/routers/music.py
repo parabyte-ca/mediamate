@@ -32,11 +32,12 @@ def _artist(db: Session, item_id: int) -> WatchlistItem:
     return item
 
 
-def _album_out(a: MusicAlbum) -> dict:
+def _album_out(a: MusicAlbum, db: Session | None = None) -> dict:
     return {"id": a.id, "mbid": a.mbid, "title": a.title, "type": a.album_type, "release_date": a.release_date,
             "status": a.status, "released": music.released(a), "torrent_name": a.torrent_name,
             "quality": a.quality, "cover_url": musicbrainz.cover_url(a.mbid),
-            "completed_at": a.completed_at.isoformat() if a.completed_at else None}
+            "completed_at": a.completed_at.isoformat() if a.completed_at else None,
+            "problem": music.problem(db, a) if db is not None and a.status == "wanted" else None}
 
 
 @router.get("/music/artists/search")
@@ -69,7 +70,8 @@ def list_albums(item_id: int, db: Session = Depends(get_db)):
     item = _artist(db, item_id)
     rows = (db.query(MusicAlbum).filter(MusicAlbum.watchlist_id == item.id)
             .order_by(MusicAlbum.release_date.desc()).all())
-    return [_album_out(a) for a in rows]
+    music.settle(db, rows)
+    return [_album_out(a, db) for a in rows]
 
 
 @router.post("/watchlist/{item_id}/albums/refresh")
@@ -89,7 +91,7 @@ def update_album(album_id: int, body: AlbumUpdate, db: Session = Depends(get_db)
         raise HTTPException(status_code=409, detail="It's downloading; cancel it on Activity first.")
     album.status = body.status
     db.commit()
-    return _album_out(album)
+    return _album_out(album, db)
 
 
 @router.post("/music/albums/{album_id}/search")

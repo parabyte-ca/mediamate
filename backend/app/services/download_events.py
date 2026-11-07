@@ -129,6 +129,8 @@ def retry_download(db, dl, settings: dict, reason: str) -> str:
         return ""
     if dl.watchlist_id is None:
         return ""
+    if dl.music_album_id is not None:      # albums: the artist's next scan looks again (music.problem)
+        return ""
 
     item = db.query(WatchlistItem).filter(WatchlistItem.id == dl.watchlist_id).first()
     if item is None:
@@ -242,6 +244,12 @@ def _fail_download(db, dl, settings: dict, reason: str, alert_key: str, flag_att
     dl.notified_failed = True
     setattr(dl, flag_attr, True)
     db.commit()
+    if dl.music_album_id is not None:          # the album no longer shows as downloading
+        from ..models import MusicAlbum
+        from .music import settle
+        album = db.get(MusicAlbum, dl.music_album_id)
+        if album is not None:
+            settle(db, [album])
 
     outcome = ""
     try:
@@ -297,7 +305,10 @@ def process_download_events() -> None:
 
                 if state in ERROR_STATES:
                     if not dl.notified_failed:
-                        _fail_download(db, dl, settings, f"qBittorrent reported '{state}'",
+                        from .qbittorrent import error_reason
+                        why = error_reason(dl.torrent_hash, dl.title)
+                        dl.error_detail = (why or f"qBittorrent reported '{state}'")[:400]
+                        _fail_download(db, dl, settings, f"qBittorrent reported '{state}'" + (f": {why}" if why else ""),
                                        "notify_on_failed", "notified_failed")
                     continue
 

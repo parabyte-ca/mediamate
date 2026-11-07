@@ -201,9 +201,50 @@ def _active_download(db, album):
             .order_by(Download.id.desc()).first())
 
 
+def last_download(db, album):
+    from ..models import Download
+    return (db.query(Download).filter(Download.music_album_id == album.id)
+            .order_by(Download.id.desc()).first())
+
+
+def problem(db, album) -> str | None:
+    """Why automatic downloads of this album have stopped, or None.
+
+    A save-folder problem (qBittorrent can't write there) stops them at once, since
+    every other copy would fail the same way and pile up in qBittorrent; anything
+    else stops them after two failed downloads. Pressing download (force) tries again."""
+    from ..models import Download
+    from .qbittorrent import is_folder_problem
+    last = last_download(db, album)
+    if last is None or last.status not in ("failed", "error"):
+        return None
+    if is_folder_problem(last.error_detail):
+        d = last.error_detail.rstrip(".")
+        return d if d.lower().startswith("qbittorrent") else f"qBittorrent couldn't save it: {d}"
+    failed = (db.query(Download).filter(Download.music_album_id == album.id,
+                                        Download.status.in_(["failed", "error"])).count())
+    if failed >= 2:
+        return f"{failed} downloads failed" + (f" (last: {last.error_detail})" if last.error_detail else "")
+    return None
+
+
+def settle(db, albums) -> int:
+    """Albums marked downloading whose download failed or was removed go back to
+    wanted straight away (not only at the next scan). Returns how many changed."""
+    n = 0
+    for a in albums:
+        if a.status == "grabbed" and _active_download(db, a) is None:
+            a.status = "wanted"
+            n += 1
+    if n:
+        db.commit()
+    return n
+
+
 def summary(db, item) -> dict:
     from ..models import MusicAlbum
     rows = db.query(MusicAlbum).filter(MusicAlbum.watchlist_id == item.id).all()
+    settle(db, rows)
     counts = {k: 0 for k in ("wanted", "grabbed", "have", "ignored")}
     for r in rows:
         counts[r.status] = counts.get(r.status, 0) + 1
@@ -267,13 +308,17 @@ def grab(db, item, album, settings: dict | None = None, *, force: bool = False) 
     from ..models import Download, DownloadHistory, Setting
     from .apprise_notify import notify
     from .duplicate import check_duplicate
-    from .qbittorrent import add_torrent
+    from .qbittorrent import AddFailed, add_torrent, confirm_added, is_folder_problem, remove_torrent
 
     label = f"{item.title} – {album.title}"
     if album.status == "have" or _active_download(db, album) is not None:
         return {"status": "already", "message": f"{label} is already downloaded or downloading."}
     if not force and not released(album):
         return {"status": "waiting", "message": f"{label} isn't out yet (expected {album.release_date})."}
+    stop = None if force else problem(db, album)
+    if stop:
+        return {"status": "blocked", "message": f"{label}: not trying again by itself. {stop}. "
+                                                "Fix it, then press download."}
     settings = settings if settings is not None else {s.key: s.value for s in db.query(Setting).all()}
     try:
         min_seeds = int(settings.get("min_seeds", "3"))
@@ -295,7 +340,26 @@ def grab(db, item, album, settings: dict | None = None, *, force: bool = False) 
             return {"status": "duplicate", "message": f"{label} looks like it was already downloaded."}
         dp = music_folder(db, item)
         save_path = dp.path if dp else "/downloads"
-        info_hash = add_torrent(best["magnet"], save_path, settings.get("qbit_music_category") or "music")
+        info_hash = None
+        try:
+            info_hash = add_torrent(best["magnet"], save_path, settings.get("qbit_music_category") or "music")
+            confirm_added(info_hash, best["title"])
+        except AddFailed as exc:
+            reason = str(exc)
+            if info_hash:
+                try:
+                    remove_torrent(info_hash, delete_files=True)    # nothing was written; don't leave it errored
+                except Exception:
+                    pass
+            db.add(Download(title=best["title"], torrent_hash=info_hash, magnet_link=best["magnet"],
+                            size_bytes=best.get("size_bytes"), status="error", download_path=save_path,
+                            watchlist_id=item.id, music_album_id=album.id, error_detail=reason[:400],
+                            qbit_removed=True, notified_failed=True))
+            db.commit()
+            logger.warning("Album download refused for %s: %s", label, reason)
+            hint = (f" qBittorrent needs write access to {save_path} (Settings → Folders → Test shows how)."
+                    if is_folder_problem(reason) else "")
+            return {"status": "error", "message": f"{label}: qBittorrent couldn't start it. {reason}.{hint}"}
         db.add(Download(title=best["title"], torrent_hash=info_hash, magnet_link=best["magnet"],
                         size_bytes=best.get("size_bytes"), status="downloading", download_path=save_path,
                         watchlist_id=item.id, music_album_id=album.id))

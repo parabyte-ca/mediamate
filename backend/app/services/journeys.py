@@ -133,7 +133,7 @@ def _download_steps(db: Session, dl: Download) -> list[dict]:
         "progress": round(progress * 100, 1),
         "speed": live.get("dlspeed"), "eta": live.get("eta"),
         "size_bytes": dl.size_bytes, "path": dl.download_path,
-        "detail": dl.status, "stale": stale, "retry_count": dl.retry_count or 0,
+        "detail": f"{dl.status}: {dl.error_detail}" if dl.error_detail else dl.status, "stale": stale, "retry_count": dl.retry_count or 0,
         "started_at": _iso(dl.created_at),
         "finished_at": _iso(dl.completion_first_seen_at) if status == "done" else None,
         "ref": {"type": "download", "id": dl.id},

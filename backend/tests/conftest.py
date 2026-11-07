@@ -30,3 +30,10 @@ def _no_real_tmdb(monkeypatch):
     from app.services import tmdb
 
     monkeypatch.setattr(tmdb, "_BASE", "http://tmdb.invalid")
+
+
+@pytest.fixture(autouse=True)
+def _no_wait_for_qbittorrent(monkeypatch):
+    """Don't wait for qBittorrent to confirm a new torrent in tests."""
+    from app.services import qbittorrent
+    monkeypatch.setattr(qbittorrent, "CONFIRM_WAIT", 0)

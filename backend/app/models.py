@@ -142,6 +142,7 @@ class Download(Base):
     # How many automatic re-searches led to this download (0 = original grab).
     retry_count = Column(Integer, default=0, server_default="0")
     music_album_id = Column(Integer, ForeignKey("music_albums.id"), nullable=True)
+    error_detail = Column(String, nullable=True)        # qBittorrent's reason, when it errored
 
 
 class MusicAlbum(Base):

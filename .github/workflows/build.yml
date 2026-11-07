@@ -67,6 +67,8 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           # Published under both names while installs move from ScreenMate to MediaMate.
+          # docker-compose.yml pulls mediamate; screenmate keeps old checkouts and rollbacks
+          # working. Drop it once every install is on a release that pulls mediamate.
           images: |
             ghcr.io/parabyte-ca/mediamate
             ghcr.io/parabyte-ca/screenmate

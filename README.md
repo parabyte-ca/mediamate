@@ -89,7 +89,7 @@ docker compose up -d
 
 ### Versions and rolling back
 
-`update.sh` (and the in-app upgrade) installs an exact release and records it as `SCREENMATE_VERSION` in `.env`; `docker-compose.yml` uses it as the image tag (`ghcr.io/parabyte-ca/screenmate:${SCREENMATE_VERSION:-latest}`). That is what makes going back possible:
+`update.sh` (and the in-app upgrade) installs an exact release and records it as `SCREENMATE_VERSION` in `.env`; `docker-compose.yml` uses it as the image tag (`ghcr.io/parabyte-ca/mediamate:${SCREENMATE_VERSION:-latest}`). That is what makes going back possible:
 
 - **Automatic** — if the new version does not become healthy, `update.sh` puts the previous release back.
 - **From the app** — after an upgrade, the **Updates** page shows **Roll back to vX.Y.Z**.
@@ -119,7 +119,7 @@ The app was renamed when it gained music. An install from before the rename move
 - The container is now called `mediamate` (`docker logs mediamate`). Your data in `./data` stays where it is.
 - Existing installs keep the qBittorrent category `screenmate`; new installs use `mediamate`.
 - Some internal names stay as they were so upgrades and rollbacks keep working: the `SCREENMATE_VERSION` and `SCREENMATE_PORT` lines in `.env`, the compose service name, the `screenmate.db` file and the folder you installed into.
-- Images are published as both `ghcr.io/parabyte-ca/mediamate` and `ghcr.io/parabyte-ca/screenmate` for now. `docker-compose.yml` still pulls `screenmate`, and will switch once the `mediamate` package is public.
+- Installs now pull `ghcr.io/parabyte-ca/mediamate`. The next upgrade fetches the new `docker-compose.yml` and switches over by itself. Images are still published as `ghcr.io/parabyte-ca/screenmate` too, so an older install keeps getting updates until it moves, and rolling back to a release from before the switch still works.
 - The repository is now `parabyte-ca/mediamate`. GitHub redirects the old address, so `git pull` keeps working.
 
 ---

@@ -247,7 +247,8 @@ def library_organise(album_id: int, db: Session = Depends(get_db)):
     if not root or not os.path.isdir(root):
         raise HTTPException(status_code=400, detail="Choose a music library first: Settings → Folders, edit a folder, Library for: Music library")
     files = _album_files(db, a)
-    res = music_library.organise(db, files, root, keep_source=music_library.in_download_folder(db, a.folder))
+    res = music_library.organise(db, files, root, keep_source=music_library.in_download_folder(db, a.folder),
+                                 tidy=a.folder not in music_library.roots(db))
     if not res.get("ok"):
         raise HTTPException(status_code=400, detail=res.get("msg"))
     old = a.folder
@@ -458,3 +459,33 @@ def library_bulk(body: AlbumBulk):
 def library_bulk_status():
     from ..services import music_batch
     return music_batch.status()
+
+
+# ── music doctor ────────────────────────────────────────────────────────────
+
+def _doctor_out(db: Session, report: dict | None) -> dict:
+    from ..services import doctor, music_batch
+    return {"auto_fix": doctor.auto_fix_enabled(db), "report": report, "batch": music_batch.status()}
+
+
+@router.get("/music/doctor")
+def music_doctor_get(db: Session = Depends(get_db)):
+    from ..services import music_doctor
+    return _doctor_out(db, music_doctor.last_report(db))
+
+
+@router.post("/music/doctor/run")
+def music_doctor_run(db: Session = Depends(get_db)):
+    from ..services import music_doctor
+    return _doctor_out(db, music_doctor.run(db))
+
+
+class DoctorFixIn(BaseModel):
+    ids: list[str]
+
+
+@router.post("/music/doctor/fix")
+def music_doctor_fix(body: DoctorFixIn, db: Session = Depends(get_db)):
+    from ..services import music_doctor
+    r = music_doctor.fix_ids(db, [str(i) for i in body.ids])
+    return {"done": r["done"], "errors": r["errors"], "started": r["started"], **_doctor_out(db, r["report"])}

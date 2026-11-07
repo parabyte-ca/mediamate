@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Disc3, FileText, LayoutGrid, List as ListIcon, Star, FolderInput, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Tags, Upload, Wand2, X } from "lucide-react";
-import { api, type AlbumTags, type CoverCandidate, type LibAlbum, type MusicBatch, type LibAlbumDetail, type MusicIssue, type TagRow } from "../api/client";
+import { AlertTriangle, Stethoscope, Disc3, FileText, LayoutGrid, List as ListIcon, Star, FolderInput, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Tags, Upload, Wand2, X } from "lucide-react";
+import { api, type MusicDoctorKind, type AlbumTags, type CoverCandidate, type LibAlbum, type MusicBatch, type LibAlbumDetail, type MusicIssue, type TagRow } from "../api/client";
 import Stars from "./Stars";
+import DoctorDialog, { type DoctorKindInfo } from "./DoctorDialog";
 import { fmtSize } from "../utils";
 
 // The music half of the Library: album folders from the music library and folders
@@ -14,6 +15,23 @@ const ISSUE: Record<MusicIssue, [string, string]> = {
   low_bitrate: ["Low bitrate", "A lossy copy under 220 kbps. Look for a FLAC or 320 kbps copy."],
   duplicate: ["Duplicate", "The same album is in another folder too. Keep the better copy and delete the other."],
 };
+
+const DOCTOR_KINDS: DoctorKindInfo<MusicDoctorKind>[] = [
+  { kind: "broken", title: "Can't be read", hint: "Damaged or incomplete audio files. Fixing moves them to the 30-day trash." },
+  { kind: "duplicate", title: "Duplicate albums", hint: "The best copy is kept: lossless first, then bitrate, then the most tracks. Fixing moves the other copy to the trash.",
+    confirm: (n) => `Move ${n === 1 ? "this copy" : `${n} copies`} to the 30-day trash? The better copy stays.` },
+  { kind: "placement", title: "Not organised for Plex", hint: "Fixing moves them to Artist / Album (Year) / 01 - Title in the music library, with their .cue, .log and notes. Albums still downloading are linked, so they keep seeding.",
+    fixAll: "Organise all", fixOne: "Organise",
+    confirm: (n) => (n > 1 ? `Organise ${n} albums into the music library? Files are moved and renamed.` : null) },
+  { kind: "untagged", title: "Missing tags", hint: "Fixing fills them in from MusicBrainz in the background (about a second per album). Live and bootleg albums: use Edit tags on the album instead.", fixAll: "Fix tags for all", fixOne: "Fix tags" },
+  { kind: "no_cover", title: "No artwork", hint: "Fixing looks on MusicBrainz in the background. For live and bootleg albums, upload a picture from the album.", fixAll: "Find artwork for all", fixOne: "Find artwork" },
+  { kind: "not_embedded", title: "Cover not in the files", hint: "Some players and phones only show artwork that's inside the files.", fixAll: "Put covers in all", fixOne: "Put in files" },
+  { kind: "missing_tracks", title: "Missing tracks", hint: "Fixing marks the album Wanted on the artist's Watchlist card, so a complete copy downloads. Then the duplicate check keeps the better one.", fixAll: "Want all", fixOne: "Want" },
+  { kind: "low_bitrate", title: "Low bitrate", hint: "Lossy copies under 220 kbps. Fixing marks the album Wanted, so a FLAC or 320 kbps copy downloads.", fixAll: "Want all", fixOne: "Want" },
+  { kind: "missing", title: "Folder is gone", hint: "Listed in the Library, but the folder isn't there any more." },
+  { kind: "junk", title: "Leftover files", hint: "Download clutter such as .url, .sfv and Thumbs.db. .cue, .log, .nfo and .txt notes are kept." },
+  { kind: "empty", title: "Empty folders", hint: "Fixed automatically when that's on." },
+];
 
 const sel = "rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm text-gray-700 dark:text-gray-200";
 const btn = "flex min-h-[36px] items-center gap-1.5 rounded-lg px-3 text-sm disabled:opacity-50";
@@ -54,6 +72,7 @@ export default function MusicLibrary() {
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [batch, setBatch] = useState<MusicBatch | null>(null);
   const [failedOpen, setFailedOpen] = useState(false);
+  const [doctor, setDoctor] = useState(false);
 
   const load = useCallback(async () => {
     const [a, s] = await Promise.all([api.music.library(), api.music.libraryStatus()]);
@@ -130,6 +149,9 @@ export default function MusicLibrary() {
         }}>
           {status?.running ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderSearch className="h-4 w-4" />}
           {status?.running ? "Scanning…" : "Scan music"}
+        </button>
+        <button className={ghost} onClick={() => setDoctor(true)} title="Find and fix problems in your music">
+          <Stethoscope className="h-4 w-4" />Music doctor
         </button>
         <div className="ml-auto flex items-center gap-2 sm:order-last">
           {albums && albums.length > 0 && (
@@ -318,6 +340,10 @@ export default function MusicLibrary() {
         </div>
       )}
 
+      {doctor && <DoctorDialog title="Music doctor" kinds={DOCTOR_KINDS} source={api.music.doctor}
+                               autoFixLabel="Fix leftover files, empty folders and albums whose folder is gone automatically (shared with the video Library doctor; files go to the 30-day trash)"
+                               onClose={() => setDoctor(false)}
+                               onChanged={() => { load().catch(() => {}); api.music.bulkStatus().then((b) => b.running && setBatch(b)).catch(() => {}); }} />}
       {open != null && <AlbumDialog id={open} onClose={() => setOpen(null)} onChanged={(m) => { if (m) say(m); load().catch(() => {}); }} />}
       {toast && (
         <div role="status" className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-lg md:bottom-6 dark:bg-gray-100 dark:text-gray-900">{toast}</div>

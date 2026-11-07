@@ -580,9 +580,12 @@ export interface OrganisePlan {
   mature_folders?: boolean;
 }
 
-export interface DoctorIssue {
+export type MusicDoctorKind = "broken" | "duplicate" | "placement" | "untagged" | "no_cover" | "not_embedded"
+  | "missing_tracks" | "low_bitrate" | "missing" | "junk" | "empty";
+
+export interface DoctorIssue<K extends string = DoctorKind> {
   id: string;
-  kind: DoctorKind;
+  kind: K;
   label: string;
   path: string;
   detail: string;
@@ -592,11 +595,12 @@ export interface DoctorIssue {
   target?: string;
   result?: string;
   error?: string;
+  fixable?: boolean;
 }
 
-export interface DoctorState {
+export interface DoctorState<K extends string = DoctorKind> {
   auto_fix: boolean;
-  report: { checked_at: string; issues: DoctorIssue[]; total: number; fixed: DoctorIssue[] } | null;
+  report: { checked_at: string; issues: DoctorIssue<K>[]; total: number; fixed: DoctorIssue<K>[] } | null;
 }
 
 export interface OrganiseSettings {
@@ -889,6 +893,12 @@ export const api = {
     library: () => req<LibAlbum[]>("/music/library/albums"),
     libraryAlbum: (id: number) => req<LibAlbumDetail>(`/music/library/albums/${id}`),
     libraryScan: () => req<{ ok: boolean; running: boolean }>("/music/library/scan", { method: "POST" }),
+    doctor: {
+      get: () => req<DoctorState<MusicDoctorKind>>("/music/doctor"),
+      run: () => req<DoctorState<MusicDoctorKind>>("/music/doctor/run", { method: "POST" }),
+      fix: (ids: string[]) => req<DoctorState<MusicDoctorKind> & { done: number; errors: string[]; started: string | null }>(
+        "/music/doctor/fix", { method: "POST", body: JSON.stringify({ ids }) }),
+    },
     libraryStatus: () => req<{ running: boolean; roots: string[]; music_dir: string | null;
                                last: { ok: boolean; albums?: number; tracks?: number; removed?: number; msg?: string } | null }>("/music/library/status"),
     fixTags: (id: number) => req<{ ok: boolean; tagged: number; msg: string }>(`/music/library/albums/${id}/fix-tags`, { method: "POST" }),

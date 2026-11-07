@@ -259,17 +259,35 @@ def _recent_write_failure(db: Session, dp: DownloadPath, days: int = 7):
 
 
 def _qbit_write_hint(path: str) -> dict:
+    # docker exec runs as root unless told otherwise, which would always print
+    # "writable"; run the test as the user qBittorrent itself runs as.
+    who = "U=$(docker top qbittorrent -eo pid,uid,gid,comm | awk '/qbittorrent/{print $2\":\"$3; exit}')"
+    ace = "group:apps:rwxpDdaARWc--s"
+    host = "/host/path/of" + path       # placeholder: MediaMate can't see host paths
     return {
         "kind": "qbit-write",
         "text": (f"qBittorrent can see {path} but can't write to it, so downloads there error straight away. "
-                 "On TrueNAS: Datasets → the dataset holding this folder → Edit permissions (ACL) → add qBittorrent's "
-                 "user (the apps user, uid 568, unless you changed it) with Modify, and apply it to child folders. "
-                 "Then, on the Watchlist, press download on the album again."),
+                 "Check which user qBittorrent runs as (step 1): on TrueNAS it's usually the apps user and group "
+                 "(568). The usual cause is this folder missing the group:apps entry its sibling folders have: "
+                 "compare them (step 4), then add the entry (step 5) to the folder, the folders inside it and its "
+                 "files. Replace /host/path/of… with the host folder step 2 shows for "
+                 f"{path}. Then, on the Watchlist, press download on the album again."),
         "steps": [
-            {"label": "Check from qBittorrent's side (on the host; use your qBittorrent container's name). "
-                      "It prints \"writable\" once it's fixed",
-             "copy": f"docker exec qbittorrent sh -c 'mkdir -p \"{path}\" && touch \"{path}/.mm-write-test\" "
-                     f"&& rm \"{path}/.mm-write-test\" && echo writable'"},
+            {"label": "1. Which user qBittorrent runs as (uid, gid, extra groups; on the host, use your "
+                      "qBittorrent container's name)",
+             "copy": "docker top qbittorrent -eo pid,uid,gid,supgid,comm"},
+            {"label": "2. Where qBittorrent's folders come from, and whether they're writable (rw=true)",
+             "copy": "docker inspect qbittorrent --format '{{range .Mounts}}{{.Source}} -> {{.Destination}} "
+                     "rw={{.RW}}{{println}}{{end}}'"},
+            {"label": "3. Test writing as qBittorrent's user. It prints \"writable\" once it's fixed",
+             "copy": f"{who}; docker exec -u \"$U\" qbittorrent sh -c 'id; mkdir -p \"{path}\" && "
+                     f"touch \"{path}/.mm-write-test\" && rm \"{path}/.mm-write-test\" && echo writable'"},
+            {"label": "4. Show this folder's permissions (TrueNAS); compare with a folder that works",
+             "copy": f"sudo nfs4xdr_getfacl \"{host}\""},
+            {"label": "5. Give the apps group Modify: the folder, the folders inside, then the files (run each once)",
+             "copy": (f"sudo nfs4xdr_setfacl -a \"{ace}:fd-----:allow\" \"{host}\" && "
+                      f"sudo find \"{host}\" -mindepth 1 -type d -exec nfs4xdr_setfacl -a \"{ace}:fd-----:allow\" {{}} \\; && "
+                      f"sudo find \"{host}\" -type f -exec nfs4xdr_setfacl -a \"{ace}:-------:allow\" {{}} \\;")},
         ],
     }
 

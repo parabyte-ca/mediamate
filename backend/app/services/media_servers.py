@@ -41,6 +41,20 @@ async def refresh_plex(url: str, token: str, library_key: str | None) -> bool:
         return False
 
 
+async def refresh_plex_sections(url: str, token: str, kind: str) -> list[str]:
+    """Refresh every Plex library of one type ("artist" = music, "movie", "show").
+    Returns the keys refreshed."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(f"{url}/library/sections", params={"X-Plex-Token": token})
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+        keys = [d.get("key") for d in root.findall(".//Directory") if d.get("type") == kind and d.get("key")]
+        for key in keys:
+            await client.get(f"{url}/library/sections/{key}/refresh", params={"X-Plex-Token": token})
+        logger.info("Plex %s libraries refreshed: %s", kind, keys)
+        return keys
+
+
 async def refresh_jellyfin(url: str, api_key: str, library_id: str | None) -> bool:
     """Trigger a Jellyfin library refresh. Returns True on success, False on any error."""
     try:

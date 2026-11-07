@@ -939,6 +939,17 @@ export default function Settings() {
             <FolderSummary label="Album downloads go to" folder={paths.find((p) => p.music_downloads)}
                            empty={'A folder named "Music", else the default download folder'} />
           </div>
+          <label className="mt-4 flex cursor-pointer items-start gap-3">
+            <input type="checkbox" checked={settings.music_remove_after_import !== "false"}
+              onChange={(e) => set("music_remove_after_import", e.target.checked ? "true" : "false")}
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" />
+            <div>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Remove albums from qBittorrent once they're in the music library</span>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                After every track is safely in the music library, the torrent is removed and its download folder goes to the music trash (kept 30 days), so there's no second copy. Plex is asked to rescan its music either way.
+              </p>
+            </div>
+          </label>
           <div className="mt-4 flex items-center gap-3">
             <button onClick={handleTestQbit} disabled={testing}
               className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">

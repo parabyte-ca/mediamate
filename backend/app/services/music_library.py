@@ -914,8 +914,105 @@ def import_download(bind, download_id: int) -> dict:
             scan_folder(db, os.path.normpath(folder))
             mark_duplicates(db)
             db.commit()
+        if res.get("ok") and folder and root and os.path.isdir(root):
+            done = _clean_up_torrent(db, dl, local, files, folder)
+            if done:
+                res["msg"] = (res.get("msg") or "") + f". {done}"
+            db.commit()
         logger.info("Album imported: %s", res.get("msg"))
-        return res
+    if res.get("ok"):
+        refresh_plex_music(bind)
+    return res
+
+
+def _placed(src: str, folder: str) -> bool:
+    """Is this downloaded track now in the library folder (linked or copied)?"""
+    for n in os.listdir(folder) if os.path.isdir(folder) else []:
+        p = os.path.join(folder, n)
+        try:
+            if os.path.samefile(src, p):
+                return True
+            if os.path.getsize(src) == os.path.getsize(p) \
+                    and os.path.splitext(n)[1].lower() == os.path.splitext(src)[1].lower():
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _clean_up_torrent(db, dl, local: str, files: list[str], folder: str) -> str | None:
+    """Once every track is safely in the library, remove the torrent from qBittorrent and
+    send its raw download to the music trash (30 days), so it isn't scanned as a second
+    copy. Off with the music_remove_after_import setting."""
+    from ..models import DownloadPath, MusicLibAlbum, MusicTrack, Setting
+    from . import folders, music_doctor
+    from .qbittorrent import remove_torrent
+    row = db.query(Setting).filter(Setting.key == "music_remove_after_import").first()
+    if row and (row.value or "").lower() == "false":
+        return None
+    src = os.path.normpath(local)
+    if os.path.normpath(folder) == src or not all(_placed(f, folder) for f in files):
+        return None
+    rs = roots(db)
+    keep = {os.path.normpath(r) for r in rs} | {
+        os.path.normpath(p) for dp in db.query(DownloadPath).all()
+        for p in (folders.local_of(db, dp), dp.local_path, dp.path) if p}
+    targets = [src] if src not in keep else files            # never trash a whole root
+    inside = all(music_doctor._root_of(t, rs) for t in targets)
+    try:
+        if dl.torrent_hash and not dl.qbit_removed:
+            remove_torrent(dl.torrent_hash, delete_files=not inside)
+            dl.qbit_removed = True
+        elif not inside:
+            return None                                     # already removed; leave its files
+        if inside:
+            for t in targets:
+                if os.path.exists(t):
+                    music_doctor.trash(t, rs)
+            for a in db.query(MusicLibAlbum).filter(MusicLibAlbum.folder == src).all():
+                db.query(MusicTrack).filter(MusicTrack.album_id == a.id).delete()
+                db.delete(a)
+    except Exception as exc:
+        logger.warning("Couldn't clean up the torrent for %s: %s", dl.title, exc)
+        return None
+    logger.info("Removed %s from qBittorrent; its raw download is in the music trash", dl.title)
+    return "Removed from qBittorrent"
+
+
+def refresh_plex_music(bind) -> None:
+    """Ask Plex to rescan its music libraries, so a new album shows up straight away."""
+    from sqlalchemy.orm import Session
+    from ..models import Setting
+    from .media_servers import refresh_plex_sections
+    try:
+        with Session(bind=bind) as db:
+            settings = {s.key: s.value for s in db.query(Setting).all()}
+        if settings.get("plex_enabled", "false").lower() == "true" and settings.get("plex_url") \
+                and settings.get("plex_token"):
+            import asyncio
+            asyncio.run(refresh_plex_sections(settings["plex_url"], settings["plex_token"], "artist"))
+    except Exception as exc:
+        logger.warning("Plex music refresh failed: %s", exc)
+
+
+def tidy_finished(bind) -> int:
+    """Hourly: finished album downloads still in qBittorrent are imported again (a no-op
+    for tracks already placed) and cleaned up. Catches albums finished before clean-up
+    existed, or while the library was unreachable."""
+    from sqlalchemy.orm import Session
+    from ..models import Download, MusicAlbum
+    with Session(bind=bind) as db:
+        ids = [d.id for d in db.query(Download).join(MusicAlbum, MusicAlbum.id == Download.music_album_id)
+               .filter(Download.status.in_(["completed", "seeding"]), Download.qbit_removed.is_(False),
+                       MusicAlbum.status == "have").all()]
+    n = 0
+    for i in ids:
+        try:
+            if "Removed from qBittorrent" in (import_download(bind, i).get("msg") or ""):
+                n += 1
+        except Exception:
+            logger.exception("Tidying album download %s failed", i)
+    return n
 
 
 def import_later(bind, download_id: int) -> None:

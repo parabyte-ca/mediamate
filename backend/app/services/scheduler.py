@@ -756,6 +756,16 @@ def run_music_scan() -> None:
         logger.exception("Music library scan failed")
 
 
+def run_music_tidy() -> None:
+    """Hourly: clean up finished album torrents that are still in qBittorrent."""
+    from . import music_library
+    from .media import store
+    try:
+        music_library.tidy_finished(store._engine())
+    except Exception:
+        logger.exception("Music download clean-up failed")
+
+
 def run_plex_sync() -> None:
     """Stars and collections, both ways, when Plex sync is on."""
     from . import plex_sync
@@ -849,6 +859,12 @@ def start_scheduler() -> None:
         run_music_scan,
         trigger=CronTrigger(hour=4, minute=41, timezone="UTC"),
         id="music_scan",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        run_music_tidy,
+        trigger=IntervalTrigger(hours=1),
+        id="music_tidy",
         replace_existing=True,
     )
     _scheduler.add_job(

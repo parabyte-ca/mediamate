@@ -677,8 +677,10 @@ def run_pipeline_tick() -> None:
 
 def run_library_doctor() -> None:
     """Weekly Library doctor: fix the safe problems, list the rest."""
+    from . import music_doctor
     from .doctor import scheduled_run
     scheduled_run()
+    music_doctor.scheduled_run()
 
 
 def purge_old_trash() -> None:

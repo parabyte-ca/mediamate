@@ -56,7 +56,8 @@ def _one(db, action: str, album) -> bool:
         root = music_library.music_dir(db)
         if not root or not os.path.isdir(root):
             raise ValueError("choose a music library in Settings → Folders first")
-        res = music_library.organise(db, files, root, keep_source=music_library.in_download_folder(db, album.folder))
+        res = music_library.organise(db, files, root, keep_source=music_library.in_download_folder(db, album.folder),
+                                     tidy=album.folder not in music_library.roots(db))
         if not res.get("ok"):
             raise ValueError(res.get("msg"))
         old = album.folder

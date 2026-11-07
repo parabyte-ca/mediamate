@@ -99,13 +99,27 @@ def _quality(row) -> tuple:
     return ((row["height"] or 0), 1 if (row["codec"] or "").lower() == "hevc" else 0, -(row["size_bytes"] or 0))
 
 
-def _empty_trees(root: str) -> list[str]:
+def _in_any(path: str, roots) -> bool:
+    return any(path == r or path.startswith(r.rstrip(os.sep) + os.sep) for r in roots)
+
+
+def _music_roots(db: Session) -> list[str]:
+    """Music folders belong to the music doctor (it keeps .txt setlists, .cue and .log)."""
+    from . import music_library
+    try:
+        return [os.path.normpath(r) for r in music_library.roots(db)]
+    except Exception:
+        logger.exception("Couldn't list the music folders")
+        return []
+
+
+def _empty_trees(root: str, skip=()) -> list[str]:
     """The top-most folders under `root` that hold no files at any depth."""
     empty: set[str] = set()
     for here, dirs, files in os.walk(root, topdown=False):
         if here != root and not files and all(os.path.join(here, d) in empty for d in dirs):
             empty.add(here)
-    return sorted(d for d in empty if os.path.dirname(d) not in empty and not
+    return sorted(d for d in empty if os.path.dirname(d) not in empty and not _in_any(d, skip) and not
                   any(part.startswith(".") for part in os.path.relpath(d, root).split(os.sep)))
 
 
@@ -123,6 +137,7 @@ def check(db: Session) -> dict:
     from .media import codec_detector, config, store
 
     roots = folders.scan_roots(db)
+    music = _music_roots(db)
     rows = {r["path"]: r for r in store.get_all_files()}
     issues: list[dict] = []
     lookups = [0]
@@ -132,6 +147,8 @@ def check(db: Session) -> dict:
             continue
         for here, dirs, files in os.walk(root, topdown=False):
             if any(part.startswith(".") for part in os.path.relpath(here, root).split(os.sep) if part != "."):
+                continue
+            if _in_any(here, music):
                 continue
             for name in files:
                 if name.startswith("."):
@@ -153,7 +170,7 @@ def check(db: Session) -> dict:
                                                  "Move to trash"))
                 elif ext in JUNK_EXTS:
                     issues.append(_issue("junk", path, f"{ext} file left over from a download", "Move to trash"))
-        for folder in _empty_trees(root):
+        for folder in _empty_trees(root, music):
             issues.append(_issue("empty", folder, "Nothing in this folder", "Remove the folder"))
 
     # Library entries whose file has gone.
@@ -406,8 +423,9 @@ def run(db: Session, auto_fix: bool | None = None) -> dict:
                     issue["error"] = str(exc)
             # Folders last, looked for again: the fixes above can empty them.
             report["issues"] = [i for i in report["issues"] if i["kind"] != "empty"]
+            music = _music_roots(db)
             for root in report["roots"]:
-                for folder in (_empty_trees(root) if os.path.isdir(root) else []):
+                for folder in (_empty_trees(root, music) if os.path.isdir(root) else []):
                     issue = _issue("empty", folder, "Nothing in this folder", "Remove the folder")
                     try:
                         issue["result"] = fix(db, issue)

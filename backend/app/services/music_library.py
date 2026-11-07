@@ -740,9 +740,14 @@ def _place(src: str, dest: str, keep_source: bool) -> None:
         shutil.move(src, dest)
 
 
-def organise(db, files: list[str], root: str, keep_source: bool) -> dict:
+SIDECAR_EXTS = {".cue", ".log", ".txt", ".nfo", ".m3u", ".m3u8", ".pdf", ".jpg", ".jpeg", ".png", ".gif"}
+
+
+def organise(db, files: list[str], root: str, keep_source: bool, tidy: bool = True) -> dict:
     """Put an album's files in ``root/Artist/Album (Year)/NN - Title.ext`` with its cover.
-    Never overwrites. Returns {"ok", "folder", "moved", "skipped", "msg"}."""
+    Never overwrites. When moving (not linking) and ``tidy``, the album's other files
+    (.cue, .log, setlist .txt, scans …) go with it once no audio is left behind, and the
+    emptied folder is removed. Returns {"ok", "folder", "moved", "skipped", "msg"}."""
     infos = _order([read(f) for f in files])
     if not infos:
         return {"ok": False, "msg": "No audio files"}
@@ -772,7 +777,14 @@ def organise(db, files: list[str], root: str, keep_source: bool) -> dict:
                    keep_source)
         except OSError:
             pass
-    if not keep_source:
+    if not keep_source and tidy and os.path.normpath(src_dir) != os.path.normpath(dest):
+        left = os.listdir(src_dir) if os.path.isdir(src_dir) else []
+        if not any(os.path.splitext(n)[1].lower() in AUDIO_EXTS for n in left):
+            for n in left:
+                p = os.path.join(src_dir, n)
+                if n != pic and os.path.isfile(p) and os.path.splitext(n)[1].lower() in SIDECAR_EXTS \
+                        and not os.path.exists(os.path.join(dest, n)):
+                    shutil.move(p, os.path.join(dest, n))
         from .organise import _prune_empty
         _prune_empty(src_dir)
     return {"ok": True, "folder": dest, "moved": moved, "skipped": skipped,

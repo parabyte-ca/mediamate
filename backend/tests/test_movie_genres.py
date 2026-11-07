@@ -178,3 +178,60 @@ def test_routes(genres):
     out = client.post("/api/pipeline/organise/auto/run?dry_run=true").json()
     assert out["dry_run"] and out["moved"][0]["to"].startswith("Comedy")
     assert client.get("/api/pipeline/organise").json()["auto_report"]["dry_run"] is True
+
+
+# ── v0.28.1: never flatten shelves, names, extras, limits ───────────────────
+
+
+@pytest.mark.parametrize("name,title,year", [
+    ("2009.X-Men.Origins-.Wolverine.1920x818.BDRip.x264.DTS-HD.MA.mp4", "X-Men Origins - Wolverine", 2009),
+    ("2019.Dark.Phoenix.1920x804.BDRip.x264.DTS-HD.MA.mp4", "Dark Phoenix", 2019),
+    ("The Unbearable Weight Of Massive Talent [2022] 1080p 10bit BluRay HEVC-Vyndros.mkv",
+     "The Unbearable Weight Of Massive Talent", 2022),
+    ("2001.A.Space.Odyssey.1968.1080p.BluRay.mkv", "2001 A Space Odyssey", 1968),
+    ("1917.2019.1080p.mkv", "1917", 2019),
+    ("Spider-Man.2002.1080p.mkv", "Spider-Man", 2002),
+])
+def test_movie_names(name, title, year):
+    p = organise.parse(name)
+    assert (p.kind, p.title, p.year) == ("movie", title, year)
+
+
+def test_genres_off_never_flattens_shelves(lib, monkeypatch):
+    client, Session, media = lib
+    movies = media / "Movies"
+    placed = movies / "Drama" / "The House That Jack Built (2018)" / "The House That Jack Built (2018).avi"
+    shelf_loose = movies / "Action-Adventure" / "Transformers.2007.1080p.BrRip.x264.YIFY.mp4"
+    loose = movies / "Airplane.1980.mkv"
+    extra = movies / "Horror" / "Interview with actor Willem Dafoe.mp4"
+    (movies / "Horror" / "Martyrs (2008)").mkdir(parents=True)
+    for p in (placed, shelf_loose, loose, extra):
+        _add(p)
+    with Session() as db:
+        p = organise.plan(db, str(shelf_loose))
+        assert p["target"] == str(movies / "Action-Adventure" / "Transformers (2007)" / "Transformers (2007).mp4")
+        assert organise.plan(db, str(placed))["target"] == str(placed)
+        r = auto_organise.run(db, dry_run=True)
+    assert [m["from"] for m in r["moved"]] == ["Airplane.1980.mkv"]
+
+
+def test_extras_are_left_alone(genres):
+    client, Session, media, movies = genres
+    extra = movies / "Deleted Scenes.mp4"
+    trailer = movies / "Some Film (2019)" / "Trailers" / "Teaser.mp4"
+    for p in (extra, trailer):
+        _add(p)
+    with Session() as db:
+        r = auto_organise.run(db)
+    assert extra.exists() and trailer.exists() and r["moved_count"] == 0 and r["unsorted_count"] == 0
+    assert sum("an extra" in s for s in r["skipped"]) == 2
+
+
+def test_a_run_moves_at_most_the_limit(genres):
+    client, Session, media, movies = genres
+    for i in range(4):
+        _add(movies / f"Airplane.{1980 + i}.mkv")
+    with Session() as db:
+        r = auto_organise.run(db, limit=2)
+        assert r["moved_count"] == 2 and sum("limit" in s for s in r["skipped"]) == 2
+        assert auto_organise.run(db, limit=None)["moved_count"] == 2

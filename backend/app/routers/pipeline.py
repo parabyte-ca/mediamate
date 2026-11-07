@@ -98,10 +98,11 @@ def _organise_status(db: Session, values: dict) -> dict:
 
 
 @router.post("/organise/auto/run")
-def run_auto_organise(dry_run: bool = False, db: Session = Depends(get_db)):
-    """Organise loose files in the TV and movie libraries now (or just show what would move)."""
+def run_auto_organise(dry_run: bool = False, all: bool = False, db: Session = Depends(get_db)):
+    """Organise loose files in the TV and movie libraries now (or just show what would move).
+    Moves at most 50 unless `all` (the UI asks first)."""
     from ..services import auto_organise
-    return auto_organise.run(db, dry_run=dry_run)
+    return auto_organise.run(db, dry_run=dry_run, limit=None if all else auto_organise.NIGHTLY_LIMIT)
 
 
 @router.get("/organise")

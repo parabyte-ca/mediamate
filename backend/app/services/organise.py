@@ -37,6 +37,7 @@ SIDECAR_EXTS = (".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt", ".sup")
 _EPISODE = re.compile(r"(?i)(?<![a-z0-9])S(\d{1,2})[ ._-]?E(\d{1,3})(?:[-_ ]?E?(\d{1,3}))?(?![0-9])")
 _EPISODE_X = re.compile(r"(?i)(?<![a-z0-9])(\d{1,2})x(\d{2,3})(?![0-9])")
 _YEAR = re.compile(r"(?<!\d)(19[2-9]\d|20\d\d)(?!\d)")
+_RESOLUTION = re.compile(r"(?i)(?<!\d)\d{3,4}x\d{3,4}(?!\d)")
 # Words that start the release junk after a title: quality, source, codec…
 _JUNK = re.compile(
     r"(?i)\b(2160p|1080p|720p|576p|480p|4k|uhd|hdr\d*|dv|web[- .]?dl|webrip|web|bluray|blu[- .]?ray|brrip|"
@@ -77,6 +78,8 @@ def parse(filename: str) -> Parsed:
         title = _YEAR.sub("", title).strip(" ()-") or title     # "Show 2019 S01E01" → "Show"
         end = int(m.group(3)) if m.re is _EPISODE and m.group(3) else 0
         return Parsed("episode", title, int(m.group(1)), int(m.group(2)), end)
+    # Resolutions ("1920x818") look like years; blank them out (same length, so positions hold).
+    stem = _RESOLUTION.sub(lambda m: " " * len(m.group(0)), stem)
     years = list(_YEAR.finditer(stem))
     junk = _JUNK.search(stem)
     if years:
@@ -84,10 +87,20 @@ def parse(filename: str) -> Parsed:
         y = years[-1] if not junk else max((y for y in years if y.start() < junk.start()), default=years[-1],
                                            key=lambda y: y.start())
         cut = min(y.start(), junk.start()) if junk else y.start()
-        title = _clean(stem[:cut]).strip(" (")
+        title = _tidy(_clean(stem[:cut]))
+        if not title and y.start() <= 1:
+            # "2009.X-Men.Origins.Wolverine.BDRip": the year comes first, the title follows it.
+            end = junk.start() if junk and junk.start() > y.end() else len(stem)
+            title = _tidy(_clean(stem[y.end():end]))
         if title:
             return Parsed("movie", title, year=int(y.group(1)))
     return Parsed(None, _clean(stem[:junk.start()] if junk else stem))
+
+
+def _tidy(title: str) -> str:
+    """Drop a dangling "[" / "(" and dashes at the ends; "Origins- Wolverine" → "Origins - Wolverine"."""
+    title = re.sub(r"\s*-\s+|\s+-\s*", " - ", title)
+    return title.strip(" -([")
 
 
 def get_settings(db: Session) -> dict[str, str]:
@@ -356,11 +369,13 @@ def plan(db: Session, path: str, download_id: int | None = None, override: str |
     genre, confidence = None, None
     if parsed.kind == "movie":
         from . import movie_genres
-        if movie_genres.enabled(settings):
-            root = _root(settings, "movie", aud)
-            if root:
-                genre, confidence = movie_genres.choose(db, root, path, parsed.title, parsed.year, settings,
-                                                        lookup=lookup)
+        root = _root(settings, "movie", aud)
+        if root and movie_genres.enabled(settings):
+            genre, confidence = movie_genres.choose(db, root, path, parsed.title, parsed.year, settings,
+                                                    lookup=lookup)
+        elif root:
+            genre = movie_genres.keep_shelf(root, path, settings)
+            confidence = "kept" if genre else None
     dest, p = target_for(settings, path, hint, aud, genre)
     return {"target": dest, "kind": p.kind, "audience": aud, "reason": why, "show_hint": hint,
             "settings": settings, "genre": genre, "genre_confidence": confidence}

@@ -142,6 +142,32 @@ def where_now(root: str, path: str, settings: dict) -> tuple[str | None, bool]:
     return (first if first in genre_folders(root, settings) else None), False
 
 
+def keep_shelf(root: str, path: str, settings: dict) -> str | None:
+    """Genre folders off: a movie already on a shelf (a genre folder) keeps it, so nothing
+    flattens a library sorted by hand or by the old nightly script."""
+    from .organise import OrganiseError
+    now, skipped = where_now(root, path, settings)
+    if skipped:
+        raise OrganiseError("It's in a folder Rename & organise leaves alone")
+    return now
+
+
+_EXTRA_WORDS = re.compile(
+    r"(?i)\b(trailers?|teasers?|featurettes?|interviews?|behind[ ._-]the[ ._-]scenes|deleted[ ._-]scenes?|"
+    r"photo[ ._-]gallery|making[ ._-]of|introduction|press[ ._-]kit|storyboard|bloopers?|gag[ ._-]reel|"
+    r"post[ ._-]?sync|extras?|bonus|sample)\b")
+_EXTRA_DIRS = {"extras", "featurettes", "behind the scenes", "deleted scenes", "trailers", "interviews",
+               "shorts", "other", "scenes", "bonus", "_extras"}
+
+
+def is_extra(root: str, path: str) -> bool:
+    """Bonus material (trailers, interviews, featurettes…): never organised or unsorted."""
+    rel = os.path.relpath(path, root).split(os.sep)
+    if any(p.lower() in _EXTRA_DIRS for p in rel[:-1]):
+        return True
+    return bool(_EXTRA_WORDS.search(os.path.splitext(rel[-1])[0]))
+
+
 async def _fetch(key: str, title: str, year: int | None) -> list[str] | None:
     from . import tmdb
     params = {"query": title, "include_adult": "false"}

@@ -48,7 +48,7 @@ def libraries(settings: dict) -> list[tuple[str, str]]:
     return sorted(out, key=lambda x: -len(x[1]))
 
 
-def is_loose(kind: str, root: str, path: str, settings: dict) -> bool:
+def is_loose(kind: str, root: str, path: str, settings: dict, shelves=None) -> bool:
     rel = os.path.relpath(path, root)
     parts = rel.split(os.sep)
     if rel.startswith("..") or any(p.startswith(".") for p in parts[:-1]):
@@ -59,8 +59,12 @@ def is_loose(kind: str, root: str, path: str, settings: dict) -> bool:
         return not (len(parts) >= 3 and _SEASON.match(parts[-2]))
     if len(parts) >= 2 and parts[0].lower() in movie_genres.skip_list(settings):
         return False
+    # On a shelf (a genre folder): placed, whether or not genre folders are switched on.
+    shelves = movie_genres.genre_folders(root, settings) if shelves is None else shelves
+    if len(parts) >= 2 and parts[0] in shelves:
+        return False
     if movie_genres.enabled(settings):
-        return not (len(parts) >= 2 and parts[0] in movie_genres.genre_folders(root, settings))
+        return True
     return not (len(parts) >= 2 and movie_genres._TITLE_YEAR.search(parts[0]))
 
 
@@ -85,7 +89,10 @@ def _unsort(root: str, row: dict) -> str:
     return dest
 
 
-def run(db, dry_run: bool = False) -> dict:
+NIGHTLY_LIMIT = 50           # moves per night; the rest wait (a big first run shouldn't happen unseen)
+
+
+def run(db, dry_run: bool = False, limit: int | None = NIGHTLY_LIMIT) -> dict:
     """Organise the loose files now. Returns (and saves) the report."""
     from .media import store
     with _lock:
@@ -99,15 +106,24 @@ def run(db, dry_run: bool = False) -> dict:
         busy = _downloading(db)
         now = datetime.now().timestamp()
         lookups = 0
+        shelves: dict = {}
         for row in store.get_all_files():
             path = row["path"]
             lib = next(((k, r) for k, r in libs if path.startswith(r.rstrip(os.sep) + os.sep)), None)
             if lib is None or not os.path.isfile(path):
                 continue
             kind, root = lib
-            if not is_loose(kind, root, path, settings):
+            if kind == "movie" and root not in shelves:
+                shelves[root] = movie_genres.genre_folders(root, settings)
+            if not is_loose(kind, root, path, settings, shelves.get(root)):
                 continue
             name = os.path.relpath(path, root)
+            if movie_genres.is_extra(root, path):
+                report["skipped"].append(f"{name}: an extra (trailer, interview…), left where it is")
+                continue
+            if not dry_run and limit and len(report["moved"]) + len(report["unsorted"]) >= limit:
+                report["skipped"].append(f"{name}: over this run's limit of {limit}; next time")
+                continue
             if row["status"] in ("queued", "processing") or store.get_active_job_for_file(row["id"]) is not None:
                 report["skipped"].append(f"{name}: being processed")
                 continue

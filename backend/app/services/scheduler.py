@@ -723,6 +723,24 @@ def run_movie_housekeeping() -> None:
         db.close()
 
 
+def _local_tz() -> str:
+    """The container's time zone (TZ, set by setup.sh), else UTC."""
+    import os
+    from zoneinfo import ZoneInfo
+    tz = (os.environ.get("TZ") or "").strip()
+    try:
+        ZoneInfo(tz)
+        return tz
+    except Exception:
+        return "UTC"
+
+
+def run_auto_organise() -> None:
+    """Nightly: organise loose new files in the TV and movie libraries (when switched on)."""
+    from .auto_organise import scheduled_run
+    scheduled_run()
+
+
 def run_music_scan() -> None:
     """Index the music library (new albums, changed tags, checks)."""
     from . import music_library
@@ -807,6 +825,12 @@ def start_scheduler() -> None:
         run_movie_housekeeping,
         trigger=CronTrigger(hour=5, minute=11, timezone="UTC"),
         id="movie_housekeeping",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        run_auto_organise,
+        trigger=CronTrigger(hour=2, minute=7, timezone=_local_tz()),   # 02:07 local, like the old nightly scripts
+        id="auto_organise",
         replace_existing=True,
     )
     _scheduler.add_job(

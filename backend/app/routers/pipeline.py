@@ -82,10 +82,26 @@ def _organise_status(db: Session, values: dict) -> dict:
             warnings[f"organise_{kind}_mature_dir"] = (
                 "Use a separate folder (not the same one, or one inside the other), so Plex can show it "
                 "to adults only.")
+    from ..services import auto_organise, movie_genres
     from ..services.show_metadata import tmdb_key
-    no_key = organise.mature_folders_set(values) and not tmdb_key(db)
+    has_key = bool(tmdb_key(db))
+    no_key = organise.mature_folders_set(values) and not has_key
+    genres = {}
+    for key in ("organise_movie_dir", "organise_movie_mature_dir"):
+        root = (values.get(key) or "").strip()
+        if root and os.path.isdir(root):
+            genres[root] = sorted(movie_genres.genre_folders(root, values))
+    if movie_genres.enabled(values) and not has_key:
+        warnings["organise_movie_genres"] = "Genre folders need a TMDB key (Settings → Integrations)."
     return {**{k: values.get(k, v) for k, v in organise.SETTINGS_DEFAULTS.items()}, "warnings": warnings,
-            "ratings_need_key": no_key}
+            "ratings_need_key": no_key, "genre_folders": genres, "auto_report": auto_organise.last_report(db)}
+
+
+@router.post("/organise/auto/run")
+def run_auto_organise(dry_run: bool = False, db: Session = Depends(get_db)):
+    """Organise loose files in the TV and movie libraries now (or just show what would move)."""
+    from ..services import auto_organise
+    return auto_organise.run(db, dry_run=dry_run)
 
 
 @router.get("/organise")
@@ -130,7 +146,11 @@ def organise_example(body: dict = Body(...), db: Session = Depends(get_db)):
         parsed = organise.parse("/x/" + os.path.basename(name))
         aud, why = (ratings.audience(db, parsed.kind, body.get("show") or parsed.title, parsed.year)
                     if organise.mature_folders_set(settings) else (ratings.GENERAL, ""))
-        dest, parsed = organise.target_for(settings, "/x/" + os.path.basename(name), body.get("show") or None, aud)
+        genre = None
+        if parsed.kind == "movie" and str(settings.get("organise_movie_genres")).lower() == "true":
+            genre = "<Genre>"                     # chosen per movie from TMDB and your genre folders
+        dest, parsed = organise.target_for(settings, "/x/" + os.path.basename(name), body.get("show") or None, aud,
+                                           genre)
         return {"ok": True, "target": dest, "kind": parsed.kind, "audience": aud, "reason": why}
     except (organise.OrganiseError, KeyError, ValueError, IndexError) as exc:
         msg = str(exc) if isinstance(exc, organise.OrganiseError) else f"The template has a problem: {exc}"

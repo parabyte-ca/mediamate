@@ -105,6 +105,8 @@ MIGRATIONS: list[tuple[str, str | None]] = [
     ("ALTER TABLE watchlist ADD COLUMN mbid TEXT", None),
     ("ALTER TABLE downloads ADD COLUMN music_album_id INTEGER", None),
     ("ALTER TABLE downloads ADD COLUMN error_detail VARCHAR", None),
+    ("ALTER TABLE content_ratings ADD COLUMN genres TEXT", None),
+    ("ALTER TABLE content_ratings ADD COLUMN genres_checked_at DATETIME", None),
     ("ALTER TABLE music_lib_albums ADD COLUMN cover_checked_at DATETIME", None),
     # One Folders list: library roles and the music download folder live on folders.
     ("ALTER TABLE download_paths ADD COLUMN role TEXT", None),

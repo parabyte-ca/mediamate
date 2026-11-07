@@ -420,7 +420,7 @@ def advance(bind, plan_id: int) -> None:
                     where = organise.plan(db, row["path"], plan.download_id)
                     db.commit()         # release the write lock before the Library row is updated
                     dest = organise.organise_file(where["settings"], plan.file_id, where["show_hint"],
-                                                  where["audience"])
+                                                  where["audience"], where.get("genre"))
                     plan.organise_status, plan.organised_to = "done", dest
                 except (organise.OrganiseError, OSError) as exc:
                     plan.organise_status = "failed"

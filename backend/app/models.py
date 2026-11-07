@@ -453,6 +453,8 @@ class ContentRating(Base):
     title = Column(String, nullable=True)
     cert = Column(String, nullable=True)
     checked_at = Column(DateTime, nullable=True)
+    genres = Column(String, nullable=True)               # movies: JSON list of TMDB genres, main first
+    genres_checked_at = Column(DateTime, nullable=True)
 
 
 class PushSubscription(Base):

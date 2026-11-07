@@ -261,7 +261,7 @@ def _recent_write_failure(db: Session, dp: DownloadPath, days: int = 7):
 def _qbit_write_hint(path: str) -> dict:
     # docker exec runs as root unless told otherwise, which would always print
     # "writable"; run the test as the user qBittorrent itself runs as.
-    who = "U=$(docker top qbittorrent -eo uid,gid,comm | awk '/qbittorrent/{print $1\":\"$2; exit}')"
+    who = "U=$(docker top qbittorrent -eo pid,uid,gid,comm | awk '/qbittorrent/{print $2\":\"$3; exit}')"
     return {
         "kind": "qbit-write",
         "text": (f"qBittorrent can see {path} but can't write to it, so downloads there error straight away. "
@@ -274,7 +274,7 @@ def _qbit_write_hint(path: str) -> dict:
         "steps": [
             {"label": "1. Which user qBittorrent runs as (uid, gid, extra groups; on the host, use your "
                       "qBittorrent container's name)",
-             "copy": "docker top qbittorrent -eo uid,gid,supgid,comm"},
+             "copy": "docker top qbittorrent -eo pid,uid,gid,supgid,comm"},
             {"label": "2. Where qBittorrent's folders come from, and whether they're writable (rw=true)",
              "copy": "docker inspect qbittorrent --format '{{range .Mounts}}{{.Source}} -> {{.Destination}} "
                      "rw={{.RW}}{{println}}{{end}}'"},

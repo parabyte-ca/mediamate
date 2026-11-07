@@ -822,6 +822,51 @@ def music_dir(db) -> str | None:
 # ── a finished album download ───────────────────────────────────────────────
 
 
+def _retire_old_copy(db, lib_album_id: int) -> dict | None:
+    """An upgrade arrived: move the old copy's audio files to the music trash first, so
+    the new files never sit next to them. Returns what's needed to finish up."""
+    from ..models import MusicLibAlbum, MusicTrack
+    from . import music_doctor
+    old = db.get(MusicLibAlbum, lib_album_id)
+    if old is None or not os.path.isdir(old.folder):
+        return None
+    was = f"{(old.format or '?').upper()}, {old.tracks} track{'s' if old.tracks != 1 else ''}"
+    rs = roots(db)
+    for t in db.query(MusicTrack).filter(MusicTrack.album_id == old.id).all():
+        if os.path.isfile(t.path):
+            try:
+                music_doctor.trash(t.path, rs)
+            except OSError as exc:
+                logger.warning("Couldn't move %s to the trash: %s", t.path, exc)
+    folder = old.folder
+    db.query(MusicTrack).filter(MusicTrack.album_id == old.id).delete()
+    db.delete(old)
+    db.commit()
+    logger.info("Upgrade: old copy of %s (%s) moved to the trash", folder, was)
+    return {"folder": folder, "was": was}
+
+
+def _finish_replacing(db, replaced: dict, new_folder: str) -> None:
+    """Bring the old copy's cover and notes (.cue/.log/.txt/scans) over when the new copy
+    has none, then trash the old folder if nothing of it is left in use."""
+    from . import music_doctor
+    old = replaced["folder"]
+    if not os.path.isdir(old) or os.path.normpath(old) == os.path.normpath(new_folder):
+        return
+    for n in os.listdir(old):
+        p = os.path.join(old, n)
+        if os.path.isfile(p) and os.path.splitext(n)[1].lower() in SIDECAR_EXTS \
+                and not os.path.exists(os.path.join(new_folder, n)):
+            if os.path.splitext(n)[1].lower() in IMAGE_EXTS and cover_in(new_folder):
+                continue
+            shutil.copy2(p, os.path.join(new_folder, n))
+    if not audio_files(old) and old not in roots(db):
+        try:
+            music_doctor.trash(old, roots(db))
+        except OSError as exc:
+            logger.warning("Couldn't move %s to the trash: %s", old, exc)
+
+
 def import_download(bind, download_id: int) -> dict:
     """Tag (if needed), organise into the music library and index a finished album."""
     from sqlalchemy.orm import Session
@@ -851,6 +896,7 @@ def import_download(bind, download_id: int) -> dict:
                 fix_tags(files, item.title, album.title, album.mbid)
             except Exception as exc:
                 logger.info("Tag fix for %s skipped: %s", album.title, exc)
+        replaced = _retire_old_copy(db, dl.replaces_album_id) if dl.replaces_album_id else None
         root = music_dir(db)
         if root and os.path.isdir(root):
             res = organise(db, files, root, keep_source=True)
@@ -858,6 +904,9 @@ def import_download(bind, download_id: int) -> dict:
         else:
             res = {"ok": True, "msg": "No music library folder set; left in the download folder"}
             folder = os.path.dirname(files[0])
+        if replaced and folder and os.path.isdir(folder):
+            _finish_replacing(db, replaced, folder)
+            res["msg"] = f"Replaced your {replaced['was']} copy. " + (res.get("msg") or "")
         if folder and os.path.isdir(folder):
             placed = audio_files(folder) if root and os.path.isdir(root) else files
             ensure_cover(folder, placed, item.title if item else None, album.title if album else None,

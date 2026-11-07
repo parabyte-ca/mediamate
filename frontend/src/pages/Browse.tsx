@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { CheckCircle2, Clapperboard, Download, Loader2, Plus, Search, Star, Tv, X } from "lucide-react";
-import { api, type BrowseMovie, type BrowseShow, type MovieList } from "../api/client";
+import { CheckCircle2, Clapperboard, Disc3, Download, Loader2, Music, Plus, RefreshCw, Search, Sparkles, Star, Tv, X } from "lucide-react";
+import { api, type BrowseMovie, type BrowseRelease, type BrowseShow, type MovieList } from "../api/client";
 import Poster from "../components/Poster";
 import { fmtDate, fmtDay } from "../utils";
 
@@ -224,8 +224,9 @@ function MovieBrowse() {
 
 export default function Browse() {
   const [params, setParams] = useSearchParams();
-  const type = params.get("type") === "movies" ? "movies" : "tv";
-  const setType = (t: "tv" | "movies") => setParams(t === "movies" ? { type: "movies" } : {}, { replace: true });
+  const raw = params.get("type");
+  const type = raw === "movies" || raw === "music" ? raw : "tv";
+  const setType = (t: "tv" | "movies" | "music") => setParams(t === "tv" ? {} : { type: t }, { replace: true });
   return (
     <div className="px-4 py-6 sm:px-6">
       <div className="mb-5 flex flex-wrap items-end gap-3">
@@ -233,11 +234,12 @@ export default function Browse() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Browse</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {type === "tv" ? "Shows airing soon, or search any show, and add it to your watchlist."
-              : "Popular, in-theatre and upcoming movies, or search any movie, and add it to your watchlist."}
+              : type === "movies" ? "Popular, in-theatre and upcoming movies, or search any movie, and add it to your watchlist."
+              : "New and popular albums, picked for your taste from your music library."}
           </p>
         </div>
         <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5" role="tablist" aria-label="Browse">
-          {([["tv", "TV shows", Tv], ["movies", "Movies", Clapperboard]] as const).map(([id, label, Icon]) => (
+          {([["tv", "TV shows", Tv], ["movies", "Movies", Clapperboard], ["music", "Music", Music]] as const).map(([id, label, Icon]) => (
             <button key={id} role="tab" aria-selected={type === id} onClick={() => setType(id)}
               className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm ${type === id ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}>
               <Icon className="h-4 w-4" />{label}
@@ -245,7 +247,7 @@ export default function Browse() {
           ))}
         </div>
       </div>
-      {type === "tv" ? <ShowBrowse /> : <MovieBrowse />}
+      {type === "tv" ? <ShowBrowse /> : type === "movies" ? <MovieBrowse /> : <MusicBrowse />}
     </div>
   );
 }
@@ -377,5 +379,122 @@ function ShowBrowse() {
         </div>
       )}
     </div>
+  );
+}
+
+const STATUS_TEXT: Record<string, string> = {
+  wanted: "Wanted", grabbed: "Downloading", have: "Downloaded", ignored: "Skipped",
+};
+
+/** Browse → Music: new releases and popular albums (ListenBrainz), ranked for your taste. */
+function MusicBrowse() {
+  const [params, setParams] = useSearchParams();
+  const list = params.get("list") === "popular" ? "popular" : "new";
+  const setList = (l: "new" | "popular") => { const p = new URLSearchParams(params); p.set("list", l); setParams(p, { replace: true }); };
+  const [forYou, setForYou] = useState(true);
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.browse.music>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const load = async () => {
+    setError(null);
+    try { setData(await api.browse.music(list, forYou)); } catch (e) { setError((e as Error).message); setData(null); }
+  };
+  useEffect(() => { setData(null); load(); }, [list, forYou]); // eslint-disable-line react-hooks/exhaustive-deps
+  // While genres are being looked up, refresh now and then so "for you" fills in.
+  useEffect(() => {
+    if (!data || (!data.building && data.learning === 0)) return;
+    const t = setTimeout(load, 20000);
+    return () => clearTimeout(t);
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 6000); return () => clearTimeout(t); }, [toast]);
+
+  const add = async (r: BrowseRelease) => {
+    setBusy(r.mbid);
+    try {
+      const res = await api.browse.musicAdd(r);
+      setToast(res.message || "Added");
+      await load();
+    } catch (e) { setToast((e as Error).message); } finally { setBusy(null); }
+  };
+
+  const shown = data?.releases ?? [];
+  return (
+    <>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-lg border border-gray-200 p-0.5 dark:border-gray-700" role="radiogroup" aria-label="Music list">
+          {([["new", "New releases"], ["popular", "Popular this week"]] as const).map(([id, label]) => (
+            <button key={id} role="radio" aria-checked={list === id} onClick={() => setList(id)}
+              className={`rounded-md px-3 py-1.5 text-sm ${list === id ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <label className="flex min-h-[36px] cursor-pointer items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 text-sm text-gray-700 dark:border-gray-600 dark:text-gray-200">
+          <input type="checkbox" checked={forYou} onChange={(e) => setForYou(e.target.checked)} />
+          <Sparkles className="h-4 w-4 text-amber-500" />For you
+        </label>
+      </div>
+      {data && (
+        <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+          {data.taste_ready ? <>Your taste: {data.taste.slice(0, 8).join(", ")}. </> : <>Learning your taste from your music library… </>}
+          {(data.building || data.learning > 0) && <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />looking up genres{data.learning ? ` (${data.learning} artists to go)` : ""}</span>}
+          {data.taste_ready && !data.building && (
+            <button className="ml-1 inline-flex items-center gap-1 text-blue-600 hover:underline dark:text-blue-400"
+                    onClick={async () => { await api.browse.musicTaste(); load(); }}>
+              <RefreshCw className="h-3 w-3" />Refresh my taste
+            </button>
+          )}
+        </p>
+      )}
+      {error && <p className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {data === null && !error && <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-blue-600" /></div>}
+      {data && shown.length === 0 && (
+        <p className="py-12 text-center text-sm text-gray-400 dark:text-gray-600">
+          {forYou && data.taste_ready ? "Nothing here matches your taste right now. Untick For you to see everything." : "Nothing to show right now."}
+        </p>
+      )}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {shown.map((r) => (
+          <div key={r.mbid} className="flex min-w-0 gap-3 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+            <Poster url={r.cover} title={`${r.artist} – ${r.title}`} className="h-24 w-24" icon={Disc3} />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <h3 className="truncate font-semibold leading-tight text-gray-900 dark:text-gray-100" title={r.title}>{r.title}</h3>
+              <p className="truncate text-sm text-gray-600 dark:text-gray-300">{r.artist}</p>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                {[r.date ? fmtDay(r.date) : null, r.type !== "Album" ? r.type : null,
+                  list === "popular" && r.listens ? `${r.listens.toLocaleString()} listens` : null].filter(Boolean).join(" · ")}
+              </p>
+              {r.why && <p className="mt-0.5 truncate text-xs text-amber-700 dark:text-amber-400" title={r.why}>{r.why}</p>}
+              <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
+                {r.in_library ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400"><CheckCircle2 className="h-3.5 w-3.5" /> In your library</span>
+                ) : r.status && r.status !== "ignored" ? (
+                  <Link to="/watchlist?tab=music" className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
+                    <CheckCircle2 className="h-3.5 w-3.5" /> {STATUS_TEXT[r.status]}
+                  </Link>
+                ) : (
+                  <button onClick={() => add(r)} disabled={busy !== null || !r.artist_mbids.length}
+                          className="inline-flex min-h-[32px] items-center gap-1 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                          title={r.following ? "Download this album" : "Follow the artist and download this album"}>
+                    {busy === r.mbid ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                    {r.following ? "Get album" : "Add"}
+                  </button>
+                )}
+                {r.following && <span className="text-xs text-gray-500 dark:text-gray-400">Following</span>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {toast && (
+        <div role="status" onClick={() => setToast(null)}
+             className="fixed bottom-20 right-4 z-50 max-w-sm rounded-lg bg-gray-900 px-4 py-3 text-sm text-white shadow-lg dark:bg-gray-700 md:bottom-6 md:right-6">
+          {toast}
+        </div>
+      )}
+    </>
   );
 }

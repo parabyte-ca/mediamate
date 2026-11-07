@@ -24,7 +24,7 @@ FALLBACK_AFTER_HOURS = 48
 REFRESH_EVERY = timedelta(hours=24)
 MAX_GRABS_PER_SCAN = 3
 _TRY_TOP = 5
-STARTS = ("new", "latest", "all")
+STARTS = ("new", "latest", "all", "none")   # none: only future releases (Browse → Add wants one album)
 
 _VIDEO = re.compile(r"(?i)\bS\d{1,2}E\d{1,3}\b|\b(?:480|576|720|1080|2160)[pi]\b|\bx26[45]\b|\bh\.?26[45]\b|"
                     r"\bhevc\b|\bblu-?ray\b|\bweb-?(?:dl|rip)\b|\bbdrip\b|\bdvdrip\b|\bhdtv\b|\bmkv\b|\bmp4\b")
@@ -117,7 +117,9 @@ def _initial_status(albums: list[dict], start: str) -> dict[str, str]:
     status = {}
     for a in albums:
         is_out = (_date(a["date"]) or today) <= today
-        if start == "all" or not is_out or (start == "latest" and latest and a["mbid"] == latest["mbid"]):
+        if start == "none" and is_out:
+            status[a["mbid"]] = "ignored"
+        elif start == "all" or not is_out or (start == "latest" and latest and a["mbid"] == latest["mbid"]):
             status[a["mbid"]] = "wanted"
         else:
             status[a["mbid"]] = "ignored"
@@ -148,11 +150,70 @@ def add_artist(db, mbid: str, start: str = "new", include_eps: bool = False,
     db.add(item)
     db.flush()
     for g in groups:
-        db.add(MusicAlbum(watchlist_id=item.id, mbid=g["mbid"], title=g["title"], album_type=g["type"],
-                          release_date=g["date"] or None, status=status[g["mbid"]]))
+        row = MusicAlbum(watchlist_id=item.id, mbid=g["mbid"], title=g["title"], album_type=g["type"],
+                         release_date=g["date"] or None, status=status[g["mbid"]])
+        db.add(row)
+        _mark_owned(db, item, row)
     db.commit()
     db.refresh(item)
     return item
+
+
+# ── the music library: never download what's already there ──────────────────
+
+_EDITION = re.compile(r"(?i)\s*[\(\[][^)\]]*(?:deluxe|remaster(?:ed)?|expanded|anniversary|edition|bonus|"
+                      r"special|reissue|mono|stereo)[^)\]]*[\)\]]")
+
+
+def _key(text: str | None) -> str:
+    from .music_library import _norm
+    return _norm(_EDITION.sub("", text or ""))
+
+
+def library_copy(db, item, album):
+    """The library album for this Watchlist album: same MusicBrainz release group, or the
+    same artist and title (ignoring "(Deluxe)", "(Remastered)" and the like)."""
+    from ..models import MusicLibAlbum
+    if album.mbid:
+        hit = db.query(MusicLibAlbum).filter(MusicLibAlbum.mb_release_group_id == album.mbid).first()
+        if hit is not None:
+            return hit
+    artist, title = _key(item.title), _key(album.title)
+    if not (artist and title):
+        return None
+    from .music_library import _norm
+    for a in db.query(MusicLibAlbum).filter(MusicLibAlbum.title.isnot(None)):
+        if _key(a.title) == title and _norm(a.artist) == _norm(item.title):
+            return a
+    return None
+
+
+def is_upgrade(db, lib_album) -> bool:
+    """Is the library copy worth replacing: lossy, low bitrate or missing tracks."""
+    import json
+    from ..models import MusicTrack
+    flags = set(json.loads(lib_album.issues or "[]"))
+    if flags & {"low_bitrate", "missing_tracks"}:
+        return True
+    tracks = db.query(MusicTrack).filter(MusicTrack.album_id == lib_album.id).all()
+    return bool(tracks) and not all(t.lossless for t in tracks)
+
+
+def _describe(db, lib_album) -> str:
+    return f"{(lib_album.format or '?').upper()}, {lib_album.tracks} track{'s' if lib_album.tracks != 1 else ''}"
+
+
+def _mark_owned(db, item, album) -> bool:
+    """A Watchlist album already in the library (good enough) is "have", so it never
+    shows as wanted. True if it was marked."""
+    if album.status not in ("wanted", "ignored"):
+        return False
+    lib = library_copy(db, item, album)
+    if lib is None or is_upgrade(db, lib):
+        return False
+    album.status = "have"
+    album.quality = "flac" if (lib.format or "") == "flac" else (lib.format or None)
+    return True
 
 
 def refresh_albums(db, item, force: bool = False) -> int:
@@ -176,8 +237,10 @@ def refresh_albums(db, item, force: bool = False) -> int:
     for g in groups:
         row = have.get(g["mbid"])
         if row is None:
-            db.add(MusicAlbum(watchlist_id=item.id, mbid=g["mbid"], title=g["title"], album_type=g["type"],
-                              release_date=g["date"] or None, status="wanted"))
+            row = MusicAlbum(watchlist_id=item.id, mbid=g["mbid"], title=g["title"], album_type=g["type"],
+                             release_date=g["date"] or None, status="wanted")
+            db.add(row)
+            _mark_owned(db, item, row)
             new += 1
         elif g["date"] and g["date"] != row.release_date:
             row.release_date = g["date"]
@@ -315,6 +378,17 @@ def grab(db, item, album, settings: dict | None = None, *, force: bool = False) 
         return {"status": "already", "message": f"{label} is already downloaded or downloading."}
     if not force and not released(album):
         return {"status": "waiting", "message": f"{label} isn't out yet (expected {album.release_date})."}
+    lib = library_copy(db, item, album)
+    upgrade_of = None
+    if lib is not None:
+        if not is_upgrade(db, lib):
+            if not force:
+                album.status = "have"
+                album.quality = "flac" if (lib.format or "") == "flac" else (lib.format or None)
+                db.commit()
+                return {"status": "in_library", "message": f"{label} is already in your library ({_describe(db, lib)})."}
+        else:
+            upgrade_of = lib
     stop = None if force else problem(db, album)
     if stop:
         return {"status": "blocked", "message": f"{label}: not trying again by itself. {stop}. "
@@ -325,13 +399,14 @@ def grab(db, item, album, settings: dict | None = None, *, force: bool = False) 
     except ValueError:
         min_seeds = 3
     age = _hours_out(album)
-    lossless_only = not force and age is not None and age < FALLBACK_AFTER_HOURS
+    lossless_only = (not force and age is not None and age < FALLBACK_AFTER_HOURS) or upgrade_of is not None
 
     with WATCHLIST_LOCK:
         cands = find_candidates(item, album, min_seeds, failed_hashes(db, item.id), failed_titles(db, item.id),
                                 lossless_only)
         if not cands:
-            why = " in FLAC yet" if lossless_only else ""
+            why = (" in FLAC to replace your " + _describe(db, upgrade_of) + " copy" if upgrade_of is not None
+                   else " in FLAC yet" if lossless_only else "")
             return {"status": "not_found", "message": f"No suitable copy of {label}{why}."}
         best = next((c for c in cands[:_TRY_TOP]
                      if not check_duplicate(torrent_hash=result_hash(c), torrent_name=c["title"], db=db)["is_duplicate"]),
@@ -362,7 +437,8 @@ def grab(db, item, album, settings: dict | None = None, *, force: bool = False) 
             return {"status": "error", "message": f"{label}: qBittorrent couldn't start it. {reason}.{hint}"}
         db.add(Download(title=best["title"], torrent_hash=info_hash, magnet_link=best["magnet"],
                         size_bytes=best.get("size_bytes"), status="downloading", download_path=save_path,
-                        watchlist_id=item.id, music_album_id=album.id))
+                        watchlist_id=item.id, music_album_id=album.id,
+                        replaces_album_id=upgrade_of.id if upgrade_of is not None else None))
         db.add(DownloadHistory(name=best["title"], source="watchlist", indexer=best.get("source"),
                                folder=dp.name if dp else None, torrent_hash=info_hash,
                                size_bytes=best.get("size_bytes"), status="downloading", watchlist_id=item.id))

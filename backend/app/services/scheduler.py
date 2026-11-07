@@ -741,6 +741,12 @@ def run_auto_organise() -> None:
     scheduled_run()
 
 
+def run_music_taste() -> None:
+    """Weekly: refresh the genres of your artists for Browse → Music "for you"."""
+    from . import music_discover
+    music_discover.start_taste()
+
+
 def run_music_scan() -> None:
     """Index the music library (new albums, changed tags, checks)."""
     from . import music_library
@@ -831,6 +837,12 @@ def start_scheduler() -> None:
         run_auto_organise,
         trigger=CronTrigger(hour=2, minute=7, timezone=_local_tz()),   # 02:07 local, like the old nightly scripts
         id="auto_organise",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        run_music_taste,
+        trigger=CronTrigger(day_of_week="sun", hour=5, minute=37, timezone="UTC"),
+        id="music_taste",
         replace_existing=True,
     )
     _scheduler.add_job(

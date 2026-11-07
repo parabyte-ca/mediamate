@@ -139,3 +139,27 @@ def test_folder_test_reports_qbittorrent_cannot_write(db, tmp_path, qbit):
     assert row["status"] == "fail" and "Permission denied" in row["detail"]
     assert r["hint"]["kind"] == "qbit-write" and "docker exec" in r["hint"]["steps"][0]["copy"]
     assert not r["ok"]
+
+
+def test_a_failed_download_stops_showing_as_downloading(db, mb, grabbing, qbit):
+    item, album = _album(db, mb)
+    grabbing["results"] = [_r("Phoebe Bridgers - Punisher [FLAC]", "c")]
+    assert music.grab(db, item, album)["status"] == "started" and album.status == "grabbed"
+    dl = db.query(Download).one()
+    dl.status, dl.error_detail = "error", "qBittorrent couldn't save to /dl/music"
+    db.commit()
+    s = music.summary(db, item)
+    assert album.status == "wanted" and s["grabbed"] == 0 and s["wanted"] >= 1
+    assert music.problem(db, album).startswith("qBittorrent couldn't save")
+
+
+def test_event_sweep_failure_resets_the_album(db, mb, grabbing, qbit):
+    from app.services import download_events
+    item, album = _album(db, mb)
+    grabbing["results"] = [_r("Phoebe Bridgers - Punisher [FLAC]", "c")]
+    music.grab(db, item, album)
+    dl = db.query(Download).one()
+    with patch.object(download_events, "_alert"):
+        download_events._fail_download(db, dl, {}, "qBittorrent reported 'error'", "notify_on_failed", "notified_failed")
+    db.refresh(album)
+    assert album.status == "wanted"

@@ -244,6 +244,12 @@ def _fail_download(db, dl, settings: dict, reason: str, alert_key: str, flag_att
     dl.notified_failed = True
     setattr(dl, flag_attr, True)
     db.commit()
+    if dl.music_album_id is not None:          # the album no longer shows as downloading
+        from ..models import MusicAlbum
+        from .music import settle
+        album = db.get(MusicAlbum, dl.music_album_id)
+        if album is not None:
+            settle(db, [album])
 
     outcome = ""
     try:

@@ -228,9 +228,23 @@ def problem(db, album) -> str | None:
     return None
 
 
+def settle(db, albums) -> int:
+    """Albums marked downloading whose download failed or was removed go back to
+    wanted straight away (not only at the next scan). Returns how many changed."""
+    n = 0
+    for a in albums:
+        if a.status == "grabbed" and _active_download(db, a) is None:
+            a.status = "wanted"
+            n += 1
+    if n:
+        db.commit()
+    return n
+
+
 def summary(db, item) -> dict:
     from ..models import MusicAlbum
     rows = db.query(MusicAlbum).filter(MusicAlbum.watchlist_id == item.id).all()
+    settle(db, rows)
     counts = {k: 0 for k in ("wanted", "grabbed", "have", "ignored")}
     for r in rows:
         counts[r.status] = counts.get(r.status, 0) + 1

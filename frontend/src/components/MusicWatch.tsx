@@ -115,7 +115,7 @@ export function ArtistCard({ item, selected, onToggleSelect, onToggle, onDelete,
                         <p className="text-xs text-gray-500 dark:text-gray-400">
                           {al.released ? year(al.release_date) : `Out ${when(al.release_date)}`}
                           {al.type && al.type !== "Album" ? ` · ${al.type}` : ""}
-                          {al.quality ? ` · ${al.quality === "flac" ? "FLAC" : al.quality.toUpperCase()}` : ""}
+                          {al.quality && al.quality !== "unknown" ? ` · ${al.quality === "flac" ? "FLAC" : al.quality.toUpperCase()}` : ""}
                         </p>
                         {al.problem && (
                           <p className="break-words text-xs text-red-600 dark:text-red-400" title={al.problem}>

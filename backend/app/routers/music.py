@@ -70,6 +70,7 @@ def list_albums(item_id: int, db: Session = Depends(get_db)):
     item = _artist(db, item_id)
     rows = (db.query(MusicAlbum).filter(MusicAlbum.watchlist_id == item.id)
             .order_by(MusicAlbum.release_date.desc()).all())
+    music.settle(db, rows)
     return [_album_out(a, db) for a in rows]
 
 

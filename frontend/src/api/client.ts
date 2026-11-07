@@ -84,6 +84,8 @@ export interface MusicAlbum {
   id: number; mbid: string; title: string; type: string | null; release_date: string | null;
   status: AlbumStatus; released: boolean; torrent_name: string | null; quality: string | null;
   cover_url: string; completed_at: string | null;
+  /** Why automatic downloads stopped (e.g. qBittorrent can't write the folder); download again to retry. */
+  problem: string | null;
 }
 
 export type MusicIssue = "untagged" | "missing_tracks" | "low_bitrate" | "duplicate";

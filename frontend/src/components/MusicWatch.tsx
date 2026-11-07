@@ -104,7 +104,9 @@ export function ArtistCard({ item, selected, onToggleSelect, onToggle, onDelete,
             <>
               <ul className="space-y-2">
                 {shown.map((al) => {
-                  const [label, style] = STATUS[al.status];
+                  const [label, style] = al.problem
+                    ? ["Problem", "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"]
+                    : STATUS[al.status];
                   return (
                     <li key={al.id} className="flex items-center gap-2">
                       <Poster url={al.cover_url} title={al.title} className="h-10 w-10" icon={Disc3} />
@@ -115,6 +117,11 @@ export function ArtistCard({ item, selected, onToggleSelect, onToggle, onDelete,
                           {al.type && al.type !== "Album" ? ` · ${al.type}` : ""}
                           {al.quality ? ` · ${al.quality === "flac" ? "FLAC" : al.quality.toUpperCase()}` : ""}
                         </p>
+                        {al.problem && (
+                          <p className="break-words text-xs text-red-600 dark:text-red-400" title={al.problem}>
+                            {al.problem}. Fix it (Settings → Folders → Test), then press download.
+                          </p>
+                        )}
                       </div>
                       <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${style}`}>{label}</span>
                       {al.status !== "have" && al.status !== "grabbed" && (

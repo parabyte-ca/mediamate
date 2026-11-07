@@ -66,7 +66,24 @@ export default function Layout() {
   useEffect(() => {
     fetch("/health")
       .then((r) => r.json())
-      .then((d) => setVersion(d.version ?? null))
+      .then((d) => {
+        setVersion(d.version ?? null);
+        // An installed app (phones especially) can keep running the screens it cached before
+        // an upgrade. When the server is newer than this build, fetch the new one and reload once.
+        const built = import.meta.env.VITE_APP_VERSION as string | undefined;
+        const key = `mm-reloaded-for-${d.version}`;
+        let seen = true;                     // no storage: never risk a reload loop
+        try { seen = !!sessionStorage.getItem(key); if (!seen) sessionStorage.setItem(key, "1"); } catch { /* keep seen */ }
+        if (built && d.version && built !== d.version && !seen) {
+          const reload = () => window.location.reload();
+          if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.getRegistration()
+              .then((reg) => reg?.update())
+              .catch(() => {})
+              .finally(() => setTimeout(reload, 500));
+          } else reload();
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -324,7 +341,7 @@ export default function Layout() {
       {/* ── Main content ────────────────────────────────────────────────────── */}
       {/* main-scroll: on mobile adds padding to clear the bottom tab bar     */}
       {/* + iOS safe area; on md+ resets to zero (see index.css)              */}
-      <main className="flex-1 overflow-y-auto main-scroll">
+      <main className="flex-1 overflow-y-auto overflow-x-hidden main-scroll">
         <div className="sticky top-0 z-30 flex items-center justify-center gap-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/90 px-4 py-2 backdrop-blur md:hidden">
           <span data-tour="status"><StatusPill /></span>
           <button aria-label="Search or jump to…" data-tour="jump" onClick={() => window.dispatchEvent(new Event("mediamate:palette"))}

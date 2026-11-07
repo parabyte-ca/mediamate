@@ -56,8 +56,73 @@ def add_torrent(magnet: str, save_path: str, category: str | None = None) -> str
     kwargs: dict = {"urls": magnet, "save_path": save_path}
     if category:
         kwargs["category"] = category
-    client.torrents_add(**kwargs)
+    res = client.torrents_add(**kwargs)
+    # qBittorrent answers "Ok." or "Fails." (5.1+ may answer with a JSON summary).
+    if isinstance(res, str) and res.strip().lower().startswith("fail"):
+        raise AddFailed("qBittorrent refused the torrent (it may already be in qBittorrent)")
     return _hash_from_magnet(magnet)
+
+
+class AddFailed(Exception):
+    """qBittorrent didn't take the torrent, or errored straight away."""
+
+
+# Words in a qBittorrent error that mean the save folder is the problem (permissions,
+# a path its container doesn't have, a full or read-only disk), not the torrent.
+_FOLDER_PROBLEM = re.compile(r"(?i)permission|denied|read-only|read only|no such file|cannot create|couldn't create|"
+                             r"could not create|not a directory|no space|disk full|create directory|save path|couldn.t save")
+
+
+def is_folder_problem(reason: str | None) -> bool:
+    return bool(reason and _FOLDER_PROBLEM.search(reason))
+
+
+def error_reason(info_hash: str | None, name: str | None = None) -> str | None:
+    """Why qBittorrent put a torrent in its error state, from qBittorrent's own log
+    (newest matching warning or critical line). Falls back to naming the save folder."""
+    try:
+        client = _get_client()
+    except Exception:
+        return None
+    keys = [k.lower() for k in (info_hash, name) if k]
+    save = None
+    if info_hash:
+        try:
+            props = client.torrents_properties(torrent_hash=info_hash)
+            save = props.get("save_path") if hasattr(props, "get") else getattr(props, "save_path", None)
+        except Exception:
+            pass
+    if save:
+        keys.append(save.lower().rstrip("/"))
+    try:
+        lines = client.log_main(normal=False, info=False, warning=True, critical=True) or []
+    except Exception:
+        lines = []
+    for line in reversed(list(lines)[-300:]):
+        msg = str(line.get("message", "") if isinstance(line, dict) else getattr(line, "message", ""))
+        if msg and any(k and k in msg.lower() for k in keys):
+            return msg[:400]
+    return f"qBittorrent couldn't save to {save}" if save else None
+
+
+CONFIRM_WAIT = 6.0          # seconds; tests set 0
+
+
+def confirm_added(info_hash: str | None, name: str | None = None, wait: float | None = None) -> None:
+    """Give qBittorrent a moment to start a new torrent; raise AddFailed with its reason
+    if the torrent errors straight away (most often: it can't write the save folder)."""
+    import time
+    from .qbit_states import ERROR_STATES
+    if not info_hash:
+        return
+    deadline = time.monotonic() + (CONFIRM_WAIT if wait is None else wait)
+    while True:
+        st = get_torrent_status(info_hash)
+        if st and st.get("status") in ERROR_STATES:
+            raise AddFailed(error_reason(info_hash, name) or f"qBittorrent reported '{st['status']}'")
+        if (st and st.get("status") not in ("metaDL", "checkingResumeData", "allocating")) or time.monotonic() >= deadline:
+            return
+        time.sleep(1.0)
 
 
 def _torrent_to_dict(t) -> dict:

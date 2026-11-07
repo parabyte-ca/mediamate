@@ -1159,8 +1159,8 @@ export const api = {
     preview: (rule?: Partial<PipelineRuleInput>) =>
       req<PipelinePreview>("/pipeline/preview", { method: "POST", body: JSON.stringify(rule ? { rule } : {}) }),
     organise: () => req<OrganiseSettings>("/pipeline/organise"),
-    autoOrganise: (dryRun: boolean) =>
-      req<AutoOrganiseReport>(`/pipeline/organise/auto/run${dryRun ? "?dry_run=true" : ""}`, { method: "POST" }),
+    autoOrganise: (dryRun: boolean, all = false) =>
+      req<AutoOrganiseReport>(`/pipeline/organise/auto/run?dry_run=${dryRun}&all=${all}`, { method: "POST" }),
     saveOrganise: (data: Partial<OrganiseSettings>) =>
       req<OrganiseSettings>("/pipeline/organise", { method: "PUT", body: JSON.stringify(data) }),
     organiseExample: (filename: string, unsaved: Partial<OrganiseSettings> = {}) =>

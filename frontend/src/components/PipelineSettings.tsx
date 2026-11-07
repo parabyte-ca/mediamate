@@ -220,10 +220,27 @@ function OrganiseSection() {
     setSaved("Saved");
   };
   const on = (k: "organise_movie_genres" | "organise_auto") => s[k] === "true";
+  // Switches save straight away, so what's on screen is what the server uses.
+  const toggle = async (k: "organise_movie_genres" | "organise_auto", v: boolean) => {
+    const { warnings: _w, genre_folders: _g, auto_report: _r, ...data } = { ...s, [k]: v ? "true" : "false" };
+    setS({ ...s, [k]: v ? "true" : "false" });
+    try { setS(await api.pipeline.saveOrganise(data)); setSaved("Saved"); } catch (e) { setSaved((e as Error).message); }
+  };
   const runAuto = async (dry: boolean) => {
     setRunning(dry ? "dry" : "run"); setSaved(null);
     try {
-      const r = await api.pipeline.autoOrganise(dry);
+      const { warnings: _w, genre_folders: _g, auto_report: _r, ...data } = s;
+      await api.pipeline.saveOrganise(data);                 // use the settings on screen
+      let all = false;
+      if (!dry) {
+        const preview = await api.pipeline.autoOrganise(true);
+        const n = (preview.moved_count ?? 0) + (preview.unsorted_count ?? 0);
+        if (n === 0) { setS((cur) => (cur ? { ...cur, auto_report: preview } : cur)); return; }
+        if (!confirm(n > 50
+          ? `This would move ${n} files. Move them all now? (Cancel moves the first 50; the nightly run does 50 a night.)`
+          : `Move ${n} file${n === 1 ? "" : "s"} now?`)) { if (n <= 50) return; } else all = n > 50;
+      }
+      const r = await api.pipeline.autoOrganise(dry, all);
       setS((cur) => (cur ? { ...cur, auto_report: r } : cur));
     } catch (e) { setSaved((e as Error).message); } finally { setRunning(null); }
   };
@@ -271,7 +288,7 @@ function OrganiseSection() {
       <div className="mt-3 space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
         <label className="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
           <input type="checkbox" className="mt-0.5" checked={on("organise_movie_genres")}
-                 onChange={(e) => set("organise_movie_genres", e.target.checked ? "true" : "false")} />
+                 onChange={(e) => toggle("organise_movie_genres", e.target.checked)} />
           <span><b>Movie genre folders</b>: Movies / <i>Genre</i> / Title (Year). The genre comes from TMDB and only
             the genre folders you already have are used. Movies already in a genre folder stay where they are.</span>
         </label>
@@ -289,16 +306,17 @@ function OrganiseSection() {
         )}
         <label className="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
           <input type="checkbox" className="mt-0.5" checked={on("organise_auto")}
-                 onChange={(e) => set("organise_auto", e.target.checked ? "true" : "false")} />
+                 onChange={(e) => toggle("organise_auto", e.target.checked)} />
           <span><b>Organise new files every night</b> (2:07): loose files in the TV and movie libraries get named and
-            put in place. Anything already organised is left alone; files whose name can't be read go to <code>_Unsorted</code>.
+            put in place, up to 50 a night. Anything already in a show, season or genre folder is left alone, and so are
+            extras (trailers, interviews, featurettes); files whose name can't be read go to <code>_Unsorted</code>.
             You get a notification only when something needs a look.</span>
         </label>
         <div className="flex flex-wrap items-center gap-2">
           <button className={btnGhost} disabled={!!running} onClick={() => runAuto(true)}>
             {running === "dry" && <Loader2 className="h-4 w-4 animate-spin" />}Show what would move
           </button>
-          <button className={btnGhost} disabled={!!running} onClick={() => { if (confirm("Organise the loose files in the TV and movie libraries now?")) runAuto(false); }}>
+          <button className={btnGhost} disabled={!!running} onClick={() => runAuto(false)}>
             {running === "run" && <Loader2 className="h-4 w-4 animate-spin" />}Organise now
           </button>
         </div>

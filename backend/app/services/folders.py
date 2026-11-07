@@ -259,17 +259,28 @@ def _recent_write_failure(db: Session, dp: DownloadPath, days: int = 7):
 
 
 def _qbit_write_hint(path: str) -> dict:
+    # docker exec runs as root unless told otherwise, which would always print
+    # "writable"; run the test as the user qBittorrent itself runs as.
+    who = "U=$(docker top qbittorrent -eo uid,gid,comm | awk '/qbittorrent/{print $1\":\"$2; exit}')"
     return {
         "kind": "qbit-write",
         "text": (f"qBittorrent can see {path} but can't write to it, so downloads there error straight away. "
-                 "On TrueNAS: Datasets → the dataset holding this folder → Edit permissions (ACL) → add qBittorrent's "
-                 "user (the apps user, uid 568, unless you changed it) with Modify, and apply it to child folders. "
-                 "Then, on the Watchlist, press download on the album again."),
+                 "Check which user qBittorrent runs as (step 1): that user, not just the apps group, needs Modify. "
+                 "On TrueNAS: Datasets → the dataset holding this folder → Edit permissions (ACL) → add that user "
+                 "(the apps user, uid 568, unless you changed it) with Modify, and tick Apply permissions "
+                 "recursively: folders already inside, such as an album folder from an earlier try, can have "
+                 "different permissions from the folder itself. Then, on the Watchlist, press download on the "
+                 "album again."),
         "steps": [
-            {"label": "Check from qBittorrent's side (on the host; use your qBittorrent container's name). "
-                      "It prints \"writable\" once it's fixed",
-             "copy": f"docker exec qbittorrent sh -c 'mkdir -p \"{path}\" && touch \"{path}/.mm-write-test\" "
-                     f"&& rm \"{path}/.mm-write-test\" && echo writable'"},
+            {"label": "1. Which user qBittorrent runs as (uid, gid, extra groups; on the host, use your "
+                      "qBittorrent container's name)",
+             "copy": "docker top qbittorrent -eo uid,gid,supgid,comm"},
+            {"label": "2. Where qBittorrent's folders come from, and whether they're writable (rw=true)",
+             "copy": "docker inspect qbittorrent --format '{{range .Mounts}}{{.Source}} -> {{.Destination}} "
+                     "rw={{.RW}}{{println}}{{end}}'"},
+            {"label": "3. Test writing as qBittorrent's user. It prints \"writable\" once it's fixed",
+             "copy": f"{who}; docker exec -u \"$U\" qbittorrent sh -c 'id; mkdir -p \"{path}\" && "
+                     f"touch \"{path}/.mm-write-test\" && rm \"{path}/.mm-write-test\" && echo writable'"},
         ],
     }
 

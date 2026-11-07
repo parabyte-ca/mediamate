@@ -137,7 +137,7 @@ def test_folder_test_reports_qbittorrent_cannot_write(db, tmp_path, qbit):
         r = folders.check(db, dp)
     row = next(c for c in r["checks"] if c["key"] == "qbit_write")
     assert row["status"] == "fail" and "Permission denied" in row["detail"]
-    assert r["hint"]["kind"] == "qbit-write" and "docker exec" in r["hint"]["steps"][0]["copy"]
+    assert r["hint"]["kind"] == "qbit-write" and "docker exec -u" in r["hint"]["steps"][2]["copy"] and "docker top" in r["hint"]["steps"][0]["copy"]
     assert not r["ok"]
 
 

@@ -27,6 +27,9 @@ SETTINGS_DEFAULTS = {
     "organise_movie_mature_dir": "",    # optional: Mature Movies
     "organise_tv_template": "{show}/Season {season:02d}/{show} - S{season:02d}E{episode:02d}{ext}",
     "organise_movie_template": "{title} ({year})/{title} ({year}){ext}",
+    "organise_movie_genres": "false",            # Movies/<Genre>/Title (Year)/… (services/movie_genres)
+    "organise_movie_genre_skip": "Holiday, _Extras, _Unsorted",
+    "organise_auto": "false",                    # nightly: organise loose new files (services/auto_organise)
 }
 SIDECAR_EXTS = (".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt", ".sup")
 
@@ -115,7 +118,7 @@ def mature_folders_set(settings: dict) -> bool:
 
 
 def target_for(settings: dict, path: str, show_hint: str | None = None,
-               audience: str = "general") -> tuple[str, Parsed]:
+               audience: str = "general", genre: str | None = None) -> tuple[str, Parsed]:
     """Where `path` belongs. Raises OrganiseError when it can't be worked out."""
     p = parse(path)
     ext = os.path.splitext(path)[1]          # exactly as it is: .mp4 stays .mp4, .MKV stays .MKV
@@ -137,6 +140,8 @@ def target_for(settings: dict, path: str, show_hint: str | None = None,
         title = safe(p.title)
         rel = settings["organise_movie_template"].format(title=title, year=p.year, ext=ext,
                                                          show=title, season=0, episode=0)
+        if genre:
+            rel = f"{genre}/{rel}"
     else:
         raise OrganiseError("Couldn't tell whether this is an episode (S01E02) or a movie (Title 2020)")
     rel = keep_extension(rel, ext)
@@ -282,7 +287,7 @@ def _log_move(file_id: int, src: str, dest: str) -> None:
 
 
 def organise_file(settings: dict, file_id: int, show_hint: str | None = None,
-                  audience: str = "general") -> str:
+                  audience: str = "general", genre: str | None = None) -> str:
     """Move a library file into place and update the Library. Returns the new path.
     Takes the settings rather than a session, so no database transaction is held
     open while the Library row is updated."""
@@ -293,7 +298,7 @@ def organise_file(settings: dict, file_id: int, show_hint: str | None = None,
     guard(row["path"])          # again here, whatever the caller checked
     if not os.path.isfile(row["path"]):
         raise OrganiseError(f"{row['path']} isn't there any more")
-    dest, _ = target_for(settings, row["path"], show_hint, audience)
+    dest, _ = target_for(settings, row["path"], show_hint, audience, genre)
     src = row["path"]
     move(src, dest)
     store.rename_file(file_id, dest, os.path.basename(dest))
@@ -348,6 +353,14 @@ def plan(db: Session, path: str, download_id: int | None = None, override: str |
     else:
         aud, why = ratings.audience(db, parsed.kind, hint or parsed.title, parsed.year,
                                     watchlist_item=item, lookup=lookup)
-    dest, p = target_for(settings, path, hint, aud)
+    genre, confidence = None, None
+    if parsed.kind == "movie":
+        from . import movie_genres
+        if movie_genres.enabled(settings):
+            root = _root(settings, "movie", aud)
+            if root:
+                genre, confidence = movie_genres.choose(db, root, path, parsed.title, parsed.year, settings,
+                                                        lookup=lookup)
+    dest, p = target_for(settings, path, hint, aud, genre)
     return {"target": dest, "kind": p.kind, "audience": aud, "reason": why, "show_hint": hint,
-            "settings": settings}
+            "settings": settings, "genre": genre, "genre_confidence": confidence}

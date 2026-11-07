@@ -89,7 +89,8 @@ def _organise_plan(path: str, override: str | None = None) -> dict:
 def _organise(row, override: str | None = None) -> str:
     from ..services import organise
     where = _organise_plan(row["path"], override)
-    return organise.organise_file(where["settings"], row["id"], where["show_hint"], where["audience"])
+    return organise.organise_file(where["settings"], row["id"], where["show_hint"], where["audience"],
+                                  where.get("genre"))
 
 
 @router.get("/files/{file_id}/organise")
@@ -105,7 +106,8 @@ def organise_preview(file_id: int, audience: str | None = None):
         return {"ok": False, "msg": str(exc)}
     return {"ok": True, "target": p["target"], "kind": p["kind"], "audience": p["audience"],
             "reason": p["reason"], "mature_folders": organise.mature_folders_set(p["settings"]),
-            "already": os.path.abspath(p["target"]) == os.path.abspath(row["path"])}
+            "already": os.path.abspath(p["target"]) == os.path.abspath(row["path"]),
+            "genre": p.get("genre"), "genre_confidence": p.get("genre_confidence")}
 
 
 @router.post("/files/{file_id}/organise")

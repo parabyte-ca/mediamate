@@ -580,6 +580,8 @@ export interface OrganisePlan {
   audience?: "general" | "mature";
   reason?: string;
   mature_folders?: boolean;
+  genre?: string | null;
+  genre_confidence?: "exact" | "single" | "borderline" | "none" | "kept" | null;
 }
 
 export type MusicDoctorKind = "broken" | "duplicate" | "placement" | "untagged" | "no_cover" | "not_embedded"
@@ -613,7 +615,19 @@ export interface OrganiseSettings {
   ratings_need_key?: boolean;
   organise_tv_template: string;
   organise_movie_template: string;
-  warnings?: Partial<Record<"organise_tv_dir" | "organise_movie_dir" | "organise_tv_mature_dir" | "organise_movie_mature_dir", string>>;
+  organise_movie_genres: string;          // "true" | "false"
+  organise_movie_genre_skip: string;      // "Holiday, _Extras, _Unsorted"
+  organise_auto: string;                  // "true" | "false": nightly organise of loose files
+  genre_folders?: Record<string, string[]>;
+  auto_report?: AutoOrganiseReport | null;
+  warnings?: Partial<Record<"organise_tv_dir" | "organise_movie_dir" | "organise_tv_mature_dir" | "organise_movie_mature_dir" | "organise_movie_genres", string>>;
+}
+
+export interface AutoOrganiseReport {
+  ran_at: string; dry_run: boolean;
+  moved: { from: string; to: string }[]; borderline: { from: string; to: string }[];
+  unsorted: { from: string; to: string }[]; skipped: string[]; errors: string[];
+  moved_count?: number; borderline_count?: number; unsorted_count?: number; skipped_count?: number; errors_count?: number;
 }
 
 export interface PipelineAction {
@@ -1145,6 +1159,8 @@ export const api = {
     preview: (rule?: Partial<PipelineRuleInput>) =>
       req<PipelinePreview>("/pipeline/preview", { method: "POST", body: JSON.stringify(rule ? { rule } : {}) }),
     organise: () => req<OrganiseSettings>("/pipeline/organise"),
+    autoOrganise: (dryRun: boolean) =>
+      req<AutoOrganiseReport>(`/pipeline/organise/auto/run${dryRun ? "?dry_run=true" : ""}`, { method: "POST" }),
     saveOrganise: (data: Partial<OrganiseSettings>) =>
       req<OrganiseSettings>("/pipeline/organise", { method: "PUT", body: JSON.stringify(data) }),
     organiseExample: (filename: string, unsaved: Partial<OrganiseSettings> = {}) =>

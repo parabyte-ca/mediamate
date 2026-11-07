@@ -4,7 +4,7 @@ import {
 } from "lucide-react";
 import {
   api,
-  type OrganiseSettings, type PathMappingRow, type PathTestResult, type PipelineAction, type PipelineActionType,
+  type AutoOrganiseReport, type OrganiseSettings, type PathMappingRow, type PathTestResult, type PipelineAction, type PipelineActionType,
   type PipelineMatch, type PipelinePreview, type PipelineRule, type PipelineRuleInput,
   type PipelineSettings as PSettings, type PipelineTemplate,
 } from "../api/client";
@@ -200,12 +200,13 @@ function OrganiseSection() {
   const [example, setExample] = useState<{ ok: boolean; target?: string; error?: string; audience?: "general" | "mature"; reason?: string } | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState(false);
+  const [running, setRunning] = useState<"dry" | "run" | null>(null);
 
   useEffect(() => { api.pipeline.organise().then(setS).catch(() => {}); }, []);
   useEffect(() => {
     if (!s) return;
     const t = setTimeout(() => {
-      const { warnings: _w, ...unsaved } = s;
+      const { warnings: _w, genre_folders: _g, auto_report: _r, ...unsaved } = s;
       api.pipeline.organiseExample(sample, unsaved).then(setExample).catch(() => setExample(null));
     }, 250);
     return () => clearTimeout(t);
@@ -214,9 +215,17 @@ function OrganiseSection() {
   if (!s) return null;
   const set = (k: keyof OrganiseSettings, v: string) => { setS({ ...s, [k]: v }); setSaved(null); };
   const save = async () => {
-    const { warnings: _w, ...data } = s;
+    const { warnings: _w, genre_folders: _g, auto_report: _r, ...data } = s;
     setS(await api.pipeline.saveOrganise(data));
     setSaved("Saved");
+  };
+  const on = (k: "organise_movie_genres" | "organise_auto") => s[k] === "true";
+  const runAuto = async (dry: boolean) => {
+    setRunning(dry ? "dry" : "run"); setSaved(null);
+    try {
+      const r = await api.pipeline.autoOrganise(dry);
+      setS((cur) => (cur ? { ...cur, auto_report: r } : cur));
+    } catch (e) { setSaved((e as Error).message); } finally { setRunning(null); }
   };
   // Library folders are a folder's job in Settings → Folders ("Library for"); shown here read-only.
   const field = (k: "organise_tv_dir" | "organise_movie_dir" | "organise_tv_mature_dir" | "organise_movie_mature_dir", label: string, _ph: string) => (
@@ -259,6 +268,42 @@ function OrganiseSection() {
           Watchlist choice goes to the Mature folders.
         </p>
       )}
+      <div className="mt-3 space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+        <label className="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
+          <input type="checkbox" className="mt-0.5" checked={on("organise_movie_genres")}
+                 onChange={(e) => set("organise_movie_genres", e.target.checked ? "true" : "false")} />
+          <span><b>Movie genre folders</b>: Movies / <i>Genre</i> / Title (Year). The genre comes from TMDB and only
+            the genre folders you already have are used. Movies already in a genre folder stay where they are.</span>
+        </label>
+        {on("organise_movie_genres") && (
+          <div className="ml-6 space-y-2 text-xs text-gray-600 dark:text-gray-300">
+            {Object.entries(s.genre_folders ?? {}).map(([root, names]) => (
+              <p key={root} className="break-words"><span className="font-mono">{root}</span>:{" "}
+                {names.length ? names.join(", ") : <span className="text-amber-700 dark:text-amber-400">no genre folders yet (movies go to _Unsorted)</span>}</p>
+            ))}
+            <label className="block"><span className="mb-1 block">Folders to leave alone (never chosen, never moved)</span>
+              <input className={`${input} text-xs`} value={s.organise_movie_genre_skip}
+                     onChange={(e) => set("organise_movie_genre_skip", e.target.value)} /></label>
+            {s.warnings?.organise_movie_genres && <p className="text-amber-700 dark:text-amber-400">{s.warnings.organise_movie_genres}</p>}
+          </div>
+        )}
+        <label className="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
+          <input type="checkbox" className="mt-0.5" checked={on("organise_auto")}
+                 onChange={(e) => set("organise_auto", e.target.checked ? "true" : "false")} />
+          <span><b>Organise new files every night</b> (2:07): loose files in the TV and movie libraries get named and
+            put in place. Anything already organised is left alone; files whose name can't be read go to <code>_Unsorted</code>.
+            You get a notification only when something needs a look.</span>
+        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <button className={btnGhost} disabled={!!running} onClick={() => runAuto(true)}>
+            {running === "dry" && <Loader2 className="h-4 w-4 animate-spin" />}Show what would move
+          </button>
+          <button className={btnGhost} disabled={!!running} onClick={() => { if (confirm("Organise the loose files in the TV and movie libraries now?")) runAuto(false); }}>
+            {running === "run" && <Loader2 className="h-4 w-4 animate-spin" />}Organise now
+          </button>
+        </div>
+        {s.auto_report && <AutoReport r={s.auto_report} />}
+      </div>
       <button className="mt-2 text-xs text-blue-600 hover:underline dark:text-blue-400" onClick={() => setAdvanced((a) => !a)}>
         {advanced ? "Hide" : "Change"} naming templates
       </button>
@@ -289,6 +334,32 @@ function OrganiseSection() {
         <button className={btnPrimary} onClick={save}><Save className="h-4 w-4" />Save</button>
         {saved && <span className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400"><CheckCircle2 className="h-3.5 w-3.5" />{saved}</span>}
       </div>
+    </div>
+  );
+}
+
+function AutoReport({ r }: { r: AutoOrganiseReport }) {
+  const list = (title: string, items: { from: string; to: string }[] | string[], n?: number, tone = "") =>
+    items.length > 0 && (
+      <details className={`text-xs ${tone}`}>
+        <summary className="cursor-pointer">{title} ({n ?? items.length})</summary>
+        <ul className="mt-1 space-y-0.5 pl-3">
+          {items.slice(0, 100).map((it, i) => (
+            <li key={i} className="break-words font-mono">{typeof it === "string" ? it : `${it.from} → ${it.to}`}</li>
+          ))}
+        </ul>
+      </details>
+    );
+  return (
+    <div className="space-y-1 border-t border-gray-100 pt-2 text-xs text-gray-600 dark:border-gray-800 dark:text-gray-300">
+      <p>{r.dry_run ? "Preview" : "Last run"} {new Date(r.ran_at).toLocaleString()}: {r.dry_run ? "would organise" : "organised"} {r.moved_count ?? r.moved.length}
+        {(r.unsorted_count ?? r.unsorted.length) > 0 && <>, {r.unsorted_count ?? r.unsorted.length} to _Unsorted</>}
+        {(r.borderline_count ?? r.borderline.length) > 0 && <>, {r.borderline_count ?? r.borderline.length} in a best-guess genre</>}.</p>
+      {list(r.dry_run ? "Would organise" : "Organised", r.moved, r.moved_count)}
+      {list("Best-guess genre (check these)", r.borderline, r.borderline_count, "text-amber-700 dark:text-amber-400")}
+      {list("To _Unsorted", r.unsorted, r.unsorted_count, "text-amber-700 dark:text-amber-400")}
+      {list("Left alone", r.skipped, r.skipped_count)}
+      {list("Errors", r.errors, r.errors_count, "text-red-600 dark:text-red-400")}
     </div>
   );
 }

@@ -380,7 +380,8 @@ def fix(db: Session, issue: dict) -> str:
         if row is None:
             raise ValueError("No longer in the Library")
         where = organise.plan(db, path, override=issue.get("audience"))
-        dest = organise.organise_file(where["settings"], row["id"], where["show_hint"], where["audience"])
+        dest = organise.organise_file(where["settings"], row["id"], where["show_hint"], where["audience"],
+                                      where.get("genre"))
         return f"Moved to {dest}"
     if kind == "adult_in_plex":
         if row is None:

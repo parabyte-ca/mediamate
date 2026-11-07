@@ -912,7 +912,9 @@ function OrganiseDialog({ files, onClose, onDone }: { files: MediaFile[]; onClos
               <p className="truncate font-medium text-gray-900 dark:text-gray-100" title={f.path}>{f.filename}</p>
               {!p ? <p className="text-gray-400">Working it out…</p>
                 : p.ok ? <>
-                    <p className="break-all text-gray-600 dark:text-gray-300">{p.already ? "Already in place" : <>→ <span className="font-mono">{p.target}</span></>}</p>
+                    <p className="break-all text-gray-600 dark:text-gray-300">{p.already ? "Already in place" : <>→ <span className="font-mono">{p.target}</span></>}
+                      {p.genre_confidence === "borderline" && <span className="ml-1 text-amber-700 dark:text-amber-400">(closest genre folder: check it)</span>}
+                      {p.genre_confidence === "none" && <span className="ml-1 text-amber-700 dark:text-amber-400">(no genre found)</span>}</p>
                     {p.mature_folders && (
                       <div className="mt-1 flex flex-wrap items-center gap-2">
                         <div className="inline-flex rounded-md border border-gray-300 dark:border-gray-600 p-0.5" role="radiogroup" aria-label={`Folder for ${f.filename}`}>

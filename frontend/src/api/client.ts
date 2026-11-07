@@ -252,7 +252,15 @@ export interface DownloadPath {
   target_summary?: string;
   /** Never rename or move files here (adult content). */
   protected?: boolean;
+  /** The library this folder is for (one folder each). */
+  role?: FolderRole | null;
+  /** Album downloads go here. */
+  music_downloads?: boolean;
+  /** Things to check, e.g. a near-identical path or overlapping scans. */
+  notes?: string[];
 }
+
+export type FolderRole = "tv" | "movies" | "mature_tv" | "mature_movies" | "music";
 
 export type FolderTarget = "auto" | "tv" | "movies" | "custom" | "music";
 
@@ -268,6 +276,8 @@ export interface FolderInput {
   target_max?: number | null;
   target_shrink?: boolean;
   protected?: boolean;
+  role?: FolderRole | "" | null;
+  music_downloads?: boolean;
 }
 
 export type Settings = Record<string, string>;

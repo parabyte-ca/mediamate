@@ -64,8 +64,9 @@ async def lifespan(app: FastAPI):
 
     db = SessionLocal()
     try:
-        from .services import rename
+        from .services import folder_roles, rename
         rename.carry_over(db)
+        folder_roles.migrate_once(db)
     except Exception:
         logging.getLogger(__name__).exception("Carrying settings over to MediaMate failed")
     finally:

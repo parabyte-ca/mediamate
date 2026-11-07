@@ -4,7 +4,7 @@ services:
   screenmate:
     # update.sh pins SCREENMATE_VERSION (in .env) to the release it installs, so a
     # bad release can be rolled back to the exact previous image. Unset = latest.
-    image: ghcr.io/parabyte-ca/screenmate:${SCREENMATE_VERSION:-latest}
+    image: ghcr.io/parabyte-ca/mediamate:${SCREENMATE_VERSION:-latest}
     # build: .        # uncomment to build locally instead of pulling from registry
     container_name: mediamate
     ports:

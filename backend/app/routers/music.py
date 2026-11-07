@@ -245,7 +245,7 @@ def library_organise(album_id: int, db: Session = Depends(get_db)):
     a = _lib_album(db, album_id)
     root = music_library.music_dir(db)
     if not root or not os.path.isdir(root):
-        raise HTTPException(status_code=400, detail="Set the music library folder in Settings → Music first")
+        raise HTTPException(status_code=400, detail="Choose a music library first: Settings → Folders, edit a folder, Library for: Music library")
     files = _album_files(db, a)
     res = music_library.organise(db, files, root, keep_source=music_library.in_download_folder(db, a.folder))
     if not res.get("ok"):

@@ -238,6 +238,11 @@ class DownloadPath(Base):
     target_shrink = Column(Boolean, nullable=False, default=False, server_default=text("0"))
     # Never rename or move files here (adult content, e.g. Bellesa). See services/adult.py.
     protected = Column(Boolean, nullable=False, default=False, server_default=text("0"))
+    # What the folder is for (services/folder_roles.py): the library a kind of media is
+    # organised into (tv | movies | mature_tv | mature_movies | music; one folder each),
+    # and whether album downloads go here.
+    role = Column(String, nullable=True)
+    music_downloads = Column(Boolean, nullable=False, default=False, server_default=text("0"))
 
 
 class OrganiseMove(Base):

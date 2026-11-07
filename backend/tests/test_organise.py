@@ -181,9 +181,13 @@ def test_settings_warn_about_folders_the_library_would_lose(lib, tmp_path):
     client, Session, media = lib
     outside = tmp_path / "elsewhere"
     outside.mkdir()
-    r = client.put("/api/pipeline/organise", json={"organise_tv_dir": str(outside)}).json()
+    # The TV library is a folder's role now (Settings → Folders), not a typed path.
+    fid = client.post("/api/paths", json={"name": "TV", "path": str(outside), "downloads": False, "scan": False,
+                                          "role": "tv"}).json()["id"]
+    r = client.get("/api/pipeline/organise").json()
     assert "isn't inside a folder with Scan & encode on" in r["warnings"]["organise_tv_dir"]
-    r = client.put("/api/pipeline/organise", json={"organise_tv_dir": "/nope/tv"}).json()
+    client.put(f"/api/paths/{fid}", json={"path": "/nope/tv", "local_path": "/nope/tv"})
+    r = client.get("/api/pipeline/organise").json()
     assert "doesn't exist" in r["warnings"]["organise_tv_dir"]
     ex = client.post("/api/pipeline/organise/example", json={"filename": "Show.S01E02.mkv"}).json()
     assert ex["ok"] and ex["target"] == "/nope/tv/Show/Season 01/Show - S01E02.mkv"

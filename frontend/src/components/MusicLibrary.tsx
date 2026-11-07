@@ -159,7 +159,7 @@ export default function MusicLibrary() {
 
       {status && !status.music_dir && (
         <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-          Set the <b>music library folder</b> in <Link to="/settings#music" className="underline">Settings → Music</Link>: finished albums are put there as Artist / Album (Year), ready for Plex.
+          Choose your <b>music library</b> in <Link to="/settings#folders" className="underline">Settings → Folders</Link> (edit a folder, <b>Library for: Music library</b>): finished albums are put there as Artist / Album (Year), ready for Plex.
         </div>
       )}
 
@@ -228,7 +228,7 @@ export default function MusicLibrary() {
       ) : albums.length === 0 ? (
         <div className="rounded-xl border border-gray-200 bg-white p-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
           <Disc3 className="mx-auto mb-2 h-6 w-6 text-gray-300 dark:text-gray-600" />
-          No music yet. Set the music library folder (or a folder with the <b>Music</b> target) in Settings, then <b>Scan music</b>.
+          No music yet. In Settings → Folders, make a folder your <b>Music library</b> (or give one the <b>Music</b> target), then <b>Scan music</b>.
           Follow artists on the <Link to="/watchlist?type=music" className="text-blue-600 hover:underline">Watchlist</Link> to download new albums.
         </div>
       ) : shown.length === 0 ? (

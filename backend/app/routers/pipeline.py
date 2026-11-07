@@ -99,6 +99,8 @@ def put_organise(body: dict = Body(...), db: Session = Depends(get_db)):
     from ..services import organise
     corrected = []
     for key in organise.SETTINGS_DEFAULTS:
+        if key.endswith("_dir"):
+            continue                         # library folders are set in Settings → Folders
         if key in body and isinstance(body[key], str):
             value = body[key].strip()
             if key.endswith("_template") and value:

@@ -199,10 +199,11 @@ def _nearest_existing(path: str) -> str:
     return parent or "/"
 
 
-def _count_videos(root: str) -> tuple[int, bool]:
-    """Videos in the folder and one level down; True when the count stopped at the cap."""
+def _count_videos(root: str, exts=None, max_depth: int = 1) -> tuple[int, bool]:
+    """Videos (or ``exts``) in the folder and ``max_depth`` levels down; True when the
+    count stopped at the cap."""
     from .media import config
-    exts = config.VIDEO_EXTENSIONS
+    exts = exts or config.VIDEO_EXTENSIONS
     found = seen = 0
     stack = [(root, 0)]
     while stack:
@@ -216,7 +217,7 @@ def _count_videos(root: str) -> tuple[int, bool]:
                     if e.name.startswith("."):
                         continue
                     if e.is_dir(follow_symlinks=False):
-                        if depth < 1:
+                        if depth < max_depth:
                             stack.append((e.path, depth + 1))
                     elif os.path.splitext(e.name)[1].lower() in exts:
                         found += 1
@@ -294,9 +295,15 @@ def check(db: Session, dp: DownloadPath, low_threshold: int = 0) -> dict:
     else:
         add("visible", "Visible to MediaMate", "ok", "Found")
         try:
-            n, capped = _count_videos(local)
-            add("read", "Readable", "ok",
-                f"{n}{'+' if capped else ''} video{'s' if n != 1 else ''} in the folder and one level down")
+            if (dp.target or "") == "music":
+                from .music_library import AUDIO_EXTS
+                n, capped = _count_videos(local, AUDIO_EXTS, max_depth=2)   # Artist/Album/track
+                add("read", "Readable", "ok",
+                    f"{n}{'+' if capped else ''} audio file{'s' if n != 1 else ''} in the folder and two levels down")
+            else:
+                n, capped = _count_videos(local)
+                add("read", "Readable", "ok",
+                    f"{n}{'+' if capped else ''} video{'s' if n != 1 else ''} in the folder and one level down")
         except OSError as e:
             add("read", "Readable", "fail", f"Can't list it: {e.strerror or e}")
             hint = hint or {"kind": "permissions",

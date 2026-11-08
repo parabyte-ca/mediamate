@@ -404,7 +404,7 @@ function MusicBrowse() {
   useEffect(() => { setData(null); load(); }, [list, forYou]); // eslint-disable-line react-hooks/exhaustive-deps
   // While genres are being looked up, refresh now and then so "for you" fills in.
   useEffect(() => {
-    if (!data || (!data.building && data.learning === 0)) return;
+    if (!data || (!data.building && data.learning === 0 && !data.ratings_pending)) return;
     const t = setTimeout(load, 20000);
     return () => clearTimeout(t);
   }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -441,6 +441,7 @@ function MusicBrowse() {
         <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
           {data.taste_ready ? <>Your taste: {data.taste.slice(0, 8).join(", ")}. </> : <>Learning your taste from your music library… </>}
           {(data.building || data.learning > 0) && <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />looking up genres{data.learning ? ` (${data.learning} artists to go)` : ""}</span>}
+          {data.ratings_pending > 0 && !data.building && data.learning === 0 && <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />looking up ratings ({data.ratings_pending} to go)</span>}
           {data.taste_ready && !data.building && (
             <button className="ml-1 inline-flex items-center gap-1 text-blue-600 hover:underline dark:text-blue-400"
                     onClick={async () => { await api.browse.musicTaste(); load(); }}>

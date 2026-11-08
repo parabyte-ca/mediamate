@@ -152,20 +152,35 @@ def test_not_artists(name):
     assert not md.not_an_artist("Vanessa Carlton")
 
 
-def test_ratings_from_musicbrainz(lb, mine, monkeypatch):
+def test_ratings_from_musicbrainz(Session, lb, monkeypatch):
+    from app.database import get_db
+    from app.main import app
     from app.models import MusicRating
     asked = []
 
     def rating(mbid):
         asked.append(mbid)
-        return {"rg-new-1": (4.25, 12), "rg-new-2": (5.0, 1)}.get(mbid, (None, 0))
+        return {"rg-new-1": (4.25, 12), "rg-new-2": (5.0, 1), "rg-2": (4.6, 30)}.get(mbid, (None, 0))
     monkeypatch.setattr(musicbrainz, "rating", rating)
-    rows = md.releases("new", mine.get_bind())
-    r = {x["title"]: x for x in md.rank(mine, rows, for_you=False)["releases"]}
-    assert (r["Glow"]["rating"], r["Glow"]["rating_votes"]) == (4.2, 12)    # 4.25 shown to one decimal
-    assert r["Bangers"]["rating"] is None                                    # one vote isn't a rating
-    assert sorted(asked) == ["rg-new-1", "rg-new-2"]
-    assert mine.query(MusicRating).count() == 2
-    md._cache.clear()
-    md.releases("new", mine.get_bind())
-    assert len(asked) == 2                                                   # cached for a week
+
+    def _db():
+        s = Session()
+        try:
+            yield s
+        finally:
+            s.close()
+    app.dependency_overrides[get_db] = _db
+    try:
+        c = TestClient(app)
+        r = c.get("/api/browse/music?list=new&for_you=false").json()
+        assert r["ratings_pending"] == 2 and sorted(asked) == ["rg-new-1", "rg-new-2"]   # looked up meanwhile
+        r = c.get("/api/browse/music?list=new&for_you=false").json()
+        got = {x["title"]: (x["rating"], x["rating_votes"]) for x in r["releases"]}
+        assert got["Glow"] == (4.2, 12) and got["Bangers"] == (None, 0)              # one vote isn't a rating
+        assert r["ratings_pending"] == 0 and len(asked) == 2                          # cached for a week
+        r = c.get("/api/browse/music?list=popular&for_you=false").json()              # the other list too
+        assert "rg-2" in asked
+        with Session() as s:
+            assert s.query(MusicRating).count() == 4
+    finally:
+        app.dependency_overrides.pop(get_db, None)

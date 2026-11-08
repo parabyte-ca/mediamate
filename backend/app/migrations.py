@@ -115,6 +115,7 @@ MIGRATIONS: list[tuple[str, str | None]] = [
     ("ALTER TABLE push_subscriptions ADD COLUMN person_id INTEGER", None),
     ("ALTER TABLE people ADD COLUMN avatar BLOB", None),
     ("ALTER TABLE people ADD COLUMN avatar_at DATETIME", None),
+    ("ALTER TABLE share_links ADD COLUMN clip TEXT", None),
 ]
 
 

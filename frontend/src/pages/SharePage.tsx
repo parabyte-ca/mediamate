@@ -42,10 +42,17 @@ export default function SharePage() {
         ) : (
           <>
             <h1 className="mb-1 break-words text-xl font-bold">{meta.title}</h1>
+            {meta.teaser && (
+              <span className="mb-2 inline-block rounded-full bg-pink-100 px-2 py-0.5 text-xs font-medium text-pink-700 dark:bg-pink-950/50 dark:text-pink-300">
+                Teaser · {Math.round(meta.duration_sec ?? 30)} sec
+              </span>
+            )}
             <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
               {meta.expires_at ? `This link works until ${new Date(meta.expires_at + "Z").toLocaleString()}.` : "Shared with you."}
             </p>
-            {meta.kind === "video" ? (
+            {meta.kind === "video" && meta.teaser ? (
+              <video src={api.publicShare.video(token)} controls playsInline className="w-full rounded-lg bg-black" aria-label={meta.title} />
+            ) : meta.kind === "video" ? (
               <VideoPlayer original={api.publicShare.video(token)} converted={(from) => api.publicShare.play(token, from)}
                            duration={meta.duration_sec ?? 0}
                            buttonClass="flex items-center gap-1.5 rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800" />

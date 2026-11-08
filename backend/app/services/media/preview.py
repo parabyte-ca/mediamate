@@ -77,6 +77,29 @@ def thumbnail(file_id: int, path: str, duration_sec: float | None) -> Path | Non
         return None
 
 
+def frame(file_id: int, path: str, at: float) -> Path | None:
+    """A still frame at `at` seconds (JPEG, cached), for picking teaser moments."""
+    st = os.stat(path)
+    folder = cache_dir().parent / "frames"
+    jpg = folder / f"{file_id}-{st.st_size}-{int(st.st_mtime)}-{int(at)}.jpg"
+    if jpg.is_file():
+        return jpg
+    folder.mkdir(parents=True, exist_ok=True)
+    tmp = folder / f"{jpg.stem}.tmp.jpg"
+    with _thumb_slots:
+        try:
+            subprocess.run(thumb_cmd(path, str(tmp), float(int(at))), capture_output=True,
+                           timeout=THUMB_TIMEOUT_S, check=False)
+            if tmp.is_file() and tmp.stat().st_size > 0:
+                os.replace(tmp, jpg)
+                return jpg
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            logger.info("Frame failed for %s at %s: %s", path, at, exc)
+        finally:
+            tmp.unlink(missing_ok=True)
+    return None
+
+
 def _drop_old(folder: Path, file_id: int, keep: str) -> None:
     """Remove this file's thumbnails from before it changed."""
     for old in folder.glob(f"{file_id}-*"):

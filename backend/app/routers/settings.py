@@ -126,6 +126,8 @@ def get_settings(db: Session = Depends(get_db)):
 
 @router.put("/settings")
 def update_settings(updates: dict, db: Session = Depends(get_db)):
+    from ..middleware import scrub as response_scrub
+    response_scrub.forget()                 # a secret may change: reload what to mask
     for key, value in updates.items():
         if key in _PRIVATE_KEYS or is_mask(value):  # the mask means "keep the stored secret"
             continue

@@ -1260,12 +1260,15 @@ export const api = {
   backup: {
     /** Fetch the export ZIP; returns the raw Response so the caller can stream
      *  the blob — do not pass through req<T>() which calls .json(). */
-    export: (): Promise<Response> => authedFetch(`/backup/export`),
+    export: (passphrase: string): Promise<Response> =>
+      authedFetch(`/backup/export`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ passphrase }) }),
     /** Upload a backup ZIP; returns the raw Response so the caller can inspect
      *  both success JSON and error JSON without an intermediate throw. */
-    restore: (file: File): Promise<Response> => {
+    restore: (file: File, passphrase = ""): Promise<Response> => {
       const form = new FormData();
       form.append("file", file);
+      form.append("passphrase", passphrase);
       return authedFetch(`/backup/restore`, { method: "POST", body: form });
     },
   },

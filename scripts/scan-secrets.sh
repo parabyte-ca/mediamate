@@ -15,6 +15,7 @@ PATTERN+='|sk-[A-Za-z0-9]{20,}|sk_live_[A-Za-z0-9]{16,}'
 PATTERN+='|-----BEGIN [A-Z ]*PRIVATE KEY-----'
 PATTERN+='|eyJ[A-Za-z0-9_-]{15,}\.eyJ[A-Za-z0-9_-]{15,}\.'
 PATTERN+='|(postgres(ql)?|mysql|mongodb(\+srv)?|redis|amqp)://[^ :/"'"'"']+:[^@ "'"'"']+@'
+PATTERN+='|[?&](apikey|api_key|passkey|authkey|torrent_pass|X-Plex-Token)=[A-Za-z0-9_-]{16,}'
 PATTERN+='|(X-Plex-Token|api_?key|apikey|password|secret)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9+/_-]{16,}["'"'"']'
 
 hits=0

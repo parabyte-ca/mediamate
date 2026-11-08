@@ -72,3 +72,73 @@ scripts/scan-secrets.sh                                  # source
 cd backend && pytest -q tests/test_secret_settings.py
 curl -s localhost:4260/api/settings | grep -c '••••••••'   # secrets show as the mask
 ```
+
+---
+
+# Audit 2 (2026-11-08)
+
+**Scope:** the same as audit 1, plus everything added since: music, Plex sync, ListenBrainz/MusicBrainz, the importer, folder tests and backups.
+
+The method was:
+- regex scans of the tracked tree, the git history and a fresh `frontend/dist`
+- a check for source maps and `import.meta.env` use
+- a review of every route that returns external error text or indexer data
+- a new test that calls every GET route with secrets seeded
+
+## Findings
+
+| # | Severity | Finding | Status |
+|---|----------|---------|--------|
+| 1 | High | `/api/search` sent Jackett/Prowlarr `.torrent` download URLs to the browser. These carry `apikey=<indexer key>` and, for private trackers, the tracker passkey. | Fixed |
+| 2 | High | The backup ZIP held every secret in plain text: the database and `settings.json`, including the session secret and the VAPID private key. Anyone on the LAN could download it. | Fixed |
+| 3 | Medium | The login was skipped for every request without `CF-Connecting-IP`. A reverse proxy without Cloudflare, or a forwarded port, got full access. | Fixed |
+| 4 | Medium | Some routes returned outside error text as-is. For example, a TMDB failure can include its URL with `api_key=`, and the Plex sync status included the error text unscrubbed. | Fixed |
+| 5 | Medium | `/api/settings` returned the TPDB key in plain text. It was missing from the masked list; the new GET-route test found it. | Fixed |
+| 6 | Info | The source, the git history and the production bundle are free of credentials. There are no source maps. The only build-time variable is `VITE_APP_VERSION`. The importer preview, media settings and push settings mask correctly. | Verified |
+
+## What changed
+
+**Indexer links stay on the server** (`services/link_vault.py`).
+- Search results carry `mmlink:<id>` instead of the real link.
+- The real link is stored in `indexer_links` for 7 days and is swapped back in by `POST /api/downloads`.
+- Info-page links lose any key-like query parameters.
+
+**Encrypted backups** (`services/backup_crypto.py`).
+- Export is `POST /api/backup/export {passphrase}`, with a passphrase of at least 8 characters.
+- Every secret setting, and every http(s) download link, is replaced with `enc:<Fernet>` in a copy of the database. The key is derived from the passphrase with PBKDF2-HMAC-SHA256 (390,000 rounds, random salt).
+- The copy is VACUUMed so old values don't linger in free pages, and `settings.json` is treated the same way.
+- Restore needs the passphrase. A wrong one changes nothing. Old plain backups still restore.
+
+**Only the home network skips the login** (`middleware/auth.py` `from_home`).
+- A request skips the login only when it has no Cloudflare header, comes from a private or loopback address, and every `X-Forwarded-For` / `X-Real-IP` address it carries is also private.
+- `/api/auth/status` follows the same rule.
+
+**Response filter** (`middleware/scrub.py`, the outermost middleware).
+- Every `application/json` response under `/api/` has stored secret values (8 characters or more) and URL credentials (`api_key=`, `X-Plex-Token=`, `passkey=` and similar) replaced with the mask.
+- Streams and files pass through untouched.
+- The list of values is reloaded every 30 seconds and whenever settings are saved.
+
+**CI and tests.**
+- `scan-secrets.sh` also flags `?apikey=`, `passkey=` and `X-Plex-Token=` values in URLs.
+- New tests:
+  - `test_link_vault.py`
+  - `test_backup.py` (secrets in backups)
+  - `test_auth_home.py`
+  - `test_secret_scrub.py`, which includes the every-GET-route sweep with the filter's value list empty, so the routes must mask on their own
+
+## Verification (2026-11-08)
+- `pytest`: 1,320 passed.
+- `npm run build` succeeds.
+- `scripts/scan-secrets.sh` is clean on the source and on a fresh `frontend/dist`, which has no `.map` files.
+- The seeded test secrets don't appear in the bundle.
+- The git-history scan finds no credentials. The only hit is the deliberately fake, truncated key in `tests/test_secret_settings.py`.
+- `shellcheck` passes on all scripts.
+
+## Recommended for the operator
+- Download a new encrypted backup.
+- Delete old backup ZIPs; they hold the secrets in plain text.
+- If an old backup ever left the NAS, rotate:
+  - the Plex token
+  - the Prowlarr/Jackett API key
+  - the qBittorrent password
+  - the TMDB and TPDB keys

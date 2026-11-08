@@ -89,6 +89,8 @@ async function api(path, init) {
 
   await check("backup export downloads a file", async () => {
     await page.goto(`${BASE}/settings`);
+    await page.getByPlaceholder("Passphrase (8+ characters)").fill("smoke-test-pass");
+    await page.getByPlaceholder("Passphrase again").fill("smoke-test-pass");
     const [dl] = await Promise.all([
       page.waitForEvent("download", { timeout: 15000 }),
       page.getByRole("button", { name: /Download backup/ }).click(),

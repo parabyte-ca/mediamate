@@ -10,4 +10,5 @@ requests>=2.31,<3.0
 Pillow>=10.0,<12.0
 imagehash>=4.3,<5.0
 pywebpush>=2.0,<3.0
+cryptography>=42
 mutagen>=1.47,<2.0

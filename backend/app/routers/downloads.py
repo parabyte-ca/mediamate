@@ -264,8 +264,14 @@ def add_download(payload: DownloadCreate, db: Session = Depends(get_db)):
     settings = {s.key: s.value for s in db.query(Setting).all()}
     category = settings.get("qbit_category", "mediamate")
 
+    from ..services import link_vault
+    try:
+        link = link_vault.reveal(db, payload.magnet)      # mmlink:<id> → the real link, server-side
+    except link_vault.Expired as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     # Duplicate detection — derive hash from the magnet link.
-    torrent_hash = _hash_from_magnet(payload.magnet)
+    torrent_hash = _hash_from_magnet(link)
     dup = check_duplicate(torrent_hash=torrent_hash, torrent_name=payload.title, db=db)
 
     if dup["is_duplicate"] and not payload.force:
@@ -286,14 +292,15 @@ def add_download(payload: DownloadCreate, db: Session = Depends(get_db)):
         )
 
     try:
-        info_hash = add_torrent(payload.magnet, save_path, category)
+        info_hash = add_torrent(link, save_path, category)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to add torrent: {e}")
+        from ..services.secret_settings import scrub_urls as scrub_text
+        raise HTTPException(status_code=500, detail=scrub_text(f"Failed to add torrent: {e}"))
 
     download = Download(
         title=payload.title,
         torrent_hash=info_hash,
-        magnet_link=payload.magnet,
+        magnet_link=link,
         status="downloading",
         download_path=save_path,
         watchlist_id=payload.watchlist_id,

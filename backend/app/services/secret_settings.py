@@ -24,6 +24,7 @@ SECRET_KEYS = frozenset({
     "jellyfin_api_key",
     "digest_smtp_password",
     "ui_password",
+    "tpdb_api_key",         # scene naming (media engine)
 })
 
 # Stored server-side only; never sent to the browser at all.
@@ -63,7 +64,7 @@ def scrub(text: str, *secrets: str) -> str:
 
 # Query-string credentials that end up in exception text (httpx puts the full URL
 # in HTTPStatusError) — X-Plex-Token, Jellyfin/Jackett/Prowlarr api keys.
-_URL_SECRET = re.compile(r"(?i)\b(x-plex-token|api_?key|apikey|token|password)=([^&\s'\"]+)")
+_URL_SECRET = re.compile(r"(?i)\b(x-plex-token|api_?key|apikey|token|password|passkey|authkey|torrent_pass|rsskey)=([^&\s'\"]+)")
 
 
 def scrub_urls(text: str) -> str:

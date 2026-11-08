@@ -37,3 +37,19 @@ def _no_wait_for_qbittorrent(monkeypatch):
     """Don't wait for qBittorrent to confirm a new torrent in tests."""
     from app.services import qbittorrent
     monkeypatch.setattr(qbittorrent, "CONFIRM_WAIT", 0)
+
+
+@pytest.fixture(autouse=True)
+def _testclient_from_home(monkeypatch):
+    """TestClient reports its address as "testclient", which the login check can't
+    place, so requests would need a password. Make them arrive from a home address
+    unless a test sets its own (tests.helpers.from_address)."""
+    from app.middleware import auth
+
+    real = auth.from_home
+
+    def from_home(request):
+        if request.client and request.client.host == "testclient":
+            return "cf-connecting-ip" not in request.headers
+        return real(request)
+    monkeypatch.setattr(auth, "from_home", from_home)

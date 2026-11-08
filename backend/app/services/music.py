@@ -62,15 +62,67 @@ def quality_of(title: str) -> tuple[int, str] | None:
     return 1, "unknown"
 
 
+_LEAD = re.compile(r"^\s*(?:(?:\[[^\]]*\]|\([^)]*\)|\{[^}]*\})\s*|(?:va|various artists?)\s*[-–:]\s*)+", re.I)
+
+
+def _lead_stripped(title: str) -> str:
+    """The release name without leading tags: "[Power Pop Indie Rock] Sloan …" → "Sloan …"."""
+    return _LEAD.sub("", title or "")
+
+
 def matches_album(title: str, artist: str, album: str) -> bool:
-    """Is this release this artist's album (and not a video, or a whole discography)?"""
+    """Is this release this artist's album (and not a video, or a whole discography)?
+    The name must start with the artist, and the album must come after it; a short or
+    numeric album title ("12", "IV") must come straight after the artist."""
     if _VIDEO.search(title):
         return False
-    t = _norm(title)
     if _BUNDLE.search(title) and not _BUNDLE.search(album):
         return False
+    t = _norm(_lead_stripped(title))
     a, b = _norm(artist), _norm(album)
-    return _has(t, a) and _has(t, b)
+    if not a or not b or not (t == a or t.startswith(a + " ")):
+        return False
+    rest = t[len(a):].strip()
+    if len(b.replace(" ", "")) <= 3 or b.replace(" ", "").isdigit():
+        return rest == b or rest.startswith(b + " ")
+    return _has(rest, b)
+
+
+_VIDEO_EXTS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v", ".ts", ".flv", ".webm", ".mpg", ".mpeg", ".vob"}
+
+
+def not_music(names) -> str | None:
+    """Why a set of downloaded file names isn't an album (video and no audio), or None."""
+    from .music_library import AUDIO_EXTS
+    import os
+    exts = [os.path.splitext(n)[1].lower() for n in names or []]
+    if not exts or any(e in AUDIO_EXTS for e in exts):
+        return None
+    if any(e in _VIDEO_EXTS for e in exts):
+        return "Not music: the download was a video"
+    return None
+
+
+def reject_download(db, dl, reason: str) -> None:
+    """A wrong download (a video, not the album): remove it from qBittorrent with its
+    files, remember it as failed so it's never grabbed again, and want the album again."""
+    from ..models import MusicAlbum
+    from .qbittorrent import remove_torrent
+    if dl.torrent_hash and not dl.qbit_removed:
+        try:
+            remove_torrent(dl.torrent_hash, delete_files=True)
+        except Exception as exc:
+            logger.warning("Couldn't remove %s from qBittorrent: %s", dl.title, exc)
+    dl.qbit_removed = True
+    dl.status = "error"
+    dl.error_detail = reason
+    dl.notified_failed = True
+    album = db.get(MusicAlbum, dl.music_album_id) if dl.music_album_id else None
+    if album is not None and album.status in ("grabbed", "have"):
+        album.status = "wanted"
+        album.completed_at = None
+    db.commit()
+    logger.warning("Rejected album download %s: %s", dl.title, reason)
 
 
 # ── dates ───────────────────────────────────────────────────────────────────
@@ -419,6 +471,10 @@ def grab(db, item, album, settings: dict | None = None, *, force: bool = False) 
         try:
             info_hash = add_torrent(best["magnet"], save_path, settings.get("qbit_music_category") or "music")
             confirm_added(info_hash, best["title"])
+            from .qbittorrent import file_names
+            why = not_music(file_names(info_hash))
+            if why:
+                raise AddFailed(why)
         except AddFailed as exc:
             reason = str(exc)
             if info_hash:

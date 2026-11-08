@@ -71,9 +71,21 @@ def search_jackett(query: str, jackett_url: str, api_key: str) -> list[dict]:
             "quality": quality(title),
             "source": f"{prefix}/{indexer}",
             "url": item.get("infoUrl") or item.get("Details", ""),
+            "_adult_cat": _is_xxx(item),
         })
 
     return results
+
+
+def _is_xxx(item: dict) -> bool:
+    """Newznab category 6000–6999 (XXX). Prowlarr: categories=[{id}], Jackett: Category=[ids]."""
+    ids = []
+    for c in item.get("categories") or item.get("Category") or []:
+        try:
+            ids.append(int(c.get("id") if isinstance(c, dict) else c))
+        except (TypeError, ValueError):
+            continue
+    return any(6000 <= i <= 6999 for i in ids)
 
 
 def probe_jackett(base_url: str, api_key: str) -> dict:

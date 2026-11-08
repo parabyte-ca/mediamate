@@ -179,6 +179,18 @@ def remove_torrent(info_hash: str, delete_files: bool = False) -> None:
     client.torrents_delete(delete_files=delete_files, torrent_hashes=info_hash)
 
 
+def file_names(info_hash: str) -> list[str] | None:
+    """The torrent's file names (relative), or None while its metadata isn't known yet."""
+    try:
+        files = _get_client().torrents_files(torrent_hash=info_hash)
+    except Exception as e:
+        logger.debug("Could not list files for %s: %s", info_hash, e)
+        return None
+    names = [getattr(f, "name", None) or (f.get("name") if isinstance(f, dict) else None) for f in files or []]
+    names = [n for n in names if n]
+    return names or None
+
+
 # qBittorrent 5.0 added app/getDirectoryContent in Web API 2.11.2. Older versions
 # answer 404 for the unknown endpoint, the same as 5.x does for a missing folder, so
 # the version decides what a 404 means.

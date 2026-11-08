@@ -3,7 +3,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -20,7 +20,7 @@ from ..schemas import (
     WatchlistUpdate,
 )
 
-from ..services import show_metadata, tvmaze, watchlist_add
+from ..services import people, show_metadata, tvmaze, watchlist_add
 from ..services.calendar_view import build_guide
 from ..services.grab import grab_episode
 
@@ -38,12 +38,21 @@ def _require_profile(db: Session, profile_id: int | None) -> None:
 
 
 @router.get("/watchlist", response_model=list[WatchlistOut])
-def get_watchlist(db: Session = Depends(get_db)):
+def get_watchlist(request: Request, who: str = Query("mine"), db: Session = Depends(get_db)):
+    """This device's person's items ("mine", the default) or everyone's ("all")."""
     from ..services import movies
+    people.ensure_owner(db)                  # anything nobody follows yet goes to the owner
+    me = people.current(db, request)
+    q = db.query(WatchlistItem)
+    if who != "all" and me is not None:
+        q = q.filter(WatchlistItem.id.in_(people.followed_by(db, me.id)))
+    items = q.order_by(WatchlistItem.created_at.desc()).all()
+    fol = people.followers(db, [i.id for i in items])
     out = []
     days = movies.keep_days(db)
-    for item in db.query(WatchlistItem).order_by(WatchlistItem.created_at.desc()).all():
+    for item in items:
         row = WatchlistOut.model_validate(item)
+        row.followers = fol.get(item.id, [])
         if item.kind == "movie":
             row.movie_state = movies.state(db, item)
             row.removes_at = movies.removes_on(db, item, days)
@@ -71,19 +80,23 @@ def search_movie_now(item_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/watchlist", response_model=WatchlistOut, status_code=201)
-async def create_watchlist_item(item: WatchlistCreate, db: Session = Depends(get_db)):
+async def create_watchlist_item(item: WatchlistCreate, request: Request, db: Session = Depends(get_db)):
     _require_profile(db, item.profile_id)
     data = item.model_dump()
     if data.get("audience") == "auto":
         data["audience"] = None
     if data.get("kind") == "movie":
         data["tvmaze_id"] = None
-    if data.get("tvmaze_id") and db.query(WatchlistItem).filter(WatchlistItem.tvmaze_id == data["tvmaze_id"]).first():
-        raise HTTPException(status_code=409, detail="That show is already on your watchlist.")
+    me = people.acting(db, request)
+    existing = data.get("tvmaze_id") and db.query(WatchlistItem).filter(
+        WatchlistItem.tvmaze_id == data["tvmaze_id"]).first()
+    if existing:
+        return _join(db, existing, me, "show")
     db_item = WatchlistItem(**data)
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
+    people.follow(db, db_item.id, me.id)
     try:
         await asyncio.wait_for(show_metadata.enrich_item(db_item, show_metadata.tmdb_key(db)), _ENRICH_TIMEOUT)
         db.commit()
@@ -97,34 +110,80 @@ async def create_watchlist_item(item: WatchlistCreate, db: Session = Depends(get
 
 
 @router.post("/watchlist/from-tvmaze", response_model=WatchlistOut, status_code=201)
-async def add_from_tvmaze(body: AddFromTvmazeRequest, db: Session = Depends(get_db)):
+async def add_from_tvmaze(body: AddFromTvmazeRequest, request: Request, db: Session = Depends(get_db)):
     """Add a show picked from Browse, starting at its next new episode or the beginning."""
     if body.profile_id is not None:
         _require_profile(db, body.profile_id)  # an explicit choice must exist
+    me = people.acting(db, request)
     try:
-        return await watchlist_add.create_from_tvmaze(
+        item = await watchlist_add.create_from_tvmaze(
             db, body.tvmaze_id, start=body.start, profile_id=body.profile_id,
         )
     except watchlist_add.AlreadyOnWatchlist:
-        raise HTTPException(status_code=409, detail="That show is already on your watchlist.")
+        existing = db.query(WatchlistItem).filter(WatchlistItem.tvmaze_id == body.tvmaze_id).first()
+        if existing is None:
+            raise HTTPException(status_code=409, detail="That show is already on your watchlist.")
+        return _join(db, existing, me, "show")
     except watchlist_add.ShowNotFound:
         raise HTTPException(status_code=404, detail="TVMaze could not find that show.")
+    people.follow(db, item.id, me.id)
+    return item
 
 
 @router.post("/watchlist/from-tmdb", response_model=WatchlistOut, status_code=201)
-async def add_from_tmdb(body: AddFromTmdbRequest, db: Session = Depends(get_db)):
+async def add_from_tmdb(body: AddFromTmdbRequest, request: Request, db: Session = Depends(get_db)):
     """Add a movie picked from Browse or the Add form. It waits for its digital release."""
     from ..services import tmdb
     if body.profile_id is not None:
         _require_profile(db, body.profile_id)
+    me = people.acting(db, request)
     try:
-        return await watchlist_add.create_from_tmdb(db, body.tmdb_id, body.profile_id, body.audience)
+        item = await watchlist_add.create_from_tmdb(db, body.tmdb_id, body.profile_id, body.audience)
     except watchlist_add.NoTmdbKey:
         raise HTTPException(status_code=400, detail="Add your TMDB API key in Settings → Integrations to add movies.")
     except watchlist_add.AlreadyOnWatchlist:
-        raise HTTPException(status_code=409, detail="That movie is already on your watchlist.")
+        existing = db.query(WatchlistItem).filter(WatchlistItem.tmdb_id == body.tmdb_id,
+                                                  WatchlistItem.kind == "movie").first()
+        if existing is None:
+            raise HTTPException(status_code=409, detail="That movie is already on your watchlist.")
+        return _join(db, existing, me, "movie")
     except tmdb.TMDBUnavailable as exc:
         raise HTTPException(status_code=502, detail=f"Could not reach TMDB ({exc}). Try again in a moment.")
+    people.follow(db, item.id, me.id)
+    return item
+
+
+def _join(db: Session, item: WatchlistItem, me, what: str):
+    """Already on someone's watchlist: follow it too (409 only if already on yours)."""
+    people.ensure_owner(db)                  # an item nobody follows yet is the owner's
+    if not people.follow(db, item.id, me.id):
+        raise HTTPException(status_code=409, detail=f"That {what} is already on your watchlist.")
+    return item
+
+
+@router.post("/watchlist/{item_id}/follow", response_model=WatchlistOut)
+def follow_item(item_id: int, request: Request, db: Session = Depends(get_db)):
+    item = db.get(WatchlistItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    people.ensure_owner(db)                  # an item nobody follows yet is the owner's
+    people.follow(db, item.id, people.acting(db, request).id)
+    row = WatchlistOut.model_validate(item)
+    row.followers = people.followers(db, [item.id]).get(item.id, [])
+    return row
+
+
+@router.post("/watchlist/{item_id}/unfollow")
+def unfollow_item(item_id: int, request: Request, db: Session = Depends(get_db)):
+    """Stop following. The item stays for anyone else who follows it; when nobody
+    does, it goes to the owner (delete it to remove it for good)."""
+    item = db.get(WatchlistItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    left = people.unfollow(db, item.id, people.acting(db, request).id)
+    if left == 0:
+        people.follow(db, item.id, people.owner(db).id)
+    return {"ok": True, "followers": people.followers(db, [item.id]).get(item.id, [])}
 
 
 @router.post("/watchlist/refresh-metadata")
@@ -174,10 +233,20 @@ def update_watchlist_item(
 
 
 @router.delete("/watchlist/{item_id}")
-def delete_watchlist_item(item_id: int, db: Session = Depends(get_db)):
+def delete_watchlist_item(item_id: int, request: Request, everyone: bool = Query(False),
+                          db: Session = Depends(get_db)):
+    """Remove from this person's list. When someone else still follows it, it stays for
+    them (it's only deleted for good when nobody else follows it, or with everyone=true)."""
     db_item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
     if not db_item:
         raise HTTPException(status_code=404, detail="Item not found")
+    me = people.current(db, request)
+    people.ensure_owner(db)
+    if me is not None and not everyone:
+        others = [p for p in people.followers(db, [item_id]).get(item_id, []) if p != me.id]
+        if others:
+            people.unfollow(db, item_id, me.id)
+            return {"ok": True, "unfollowed": True}
     from ..models import Download, MusicAlbum
     album_ids = [a.id for a in db.query(MusicAlbum.id).filter(MusicAlbum.watchlist_id == item_id)]
     if album_ids:

@@ -29,6 +29,7 @@ import { api } from "../api/client";
 import OnboardingWizard from "./OnboardingWizard";
 import Tour, { TOUR_EVENT, tourSeen } from "./Tour";
 import StatusPill from "./StatusPill";
+import { PersonSwitcher } from "../people";
 import CommandPalette from "./CommandPalette";
 
 const nav = [
@@ -202,6 +203,11 @@ export default function Layout() {
           )}
         </div>
 
+        {/* Who's using this device */}
+        <div className={collapsed ? "flex justify-center pt-3" : "px-3 pt-3"}>
+          <PersonSwitcher compact={collapsed} />
+        </div>
+
         {/* Live status pill */}
         <div className={collapsed ? "pt-3" : "px-3 pt-3"} data-tour="status">
           <StatusPill compact={collapsed} />
@@ -343,6 +349,7 @@ export default function Layout() {
       {/* + iOS safe area; on md+ resets to zero (see index.css)              */}
       <main className="flex-1 overflow-y-auto overflow-x-hidden main-scroll">
         <div className="sticky top-0 z-30 flex items-center justify-center gap-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/90 px-4 py-2 backdrop-blur md:hidden">
+          <PersonSwitcher compact />
           <span data-tour="status"><StatusPill /></span>
           <button aria-label="Search or jump to…" data-tour="jump" onClick={() => window.dispatchEvent(new Event("mediamate:palette"))}
                   className="rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-1.5 text-gray-500">

@@ -104,7 +104,7 @@ def test_no_subscribers_is_a_noop(Session):
 def test_notify_fans_out_to_push_and_apprise(Session):
     with patch.object(webpush, "send_all") as push, patch("apprise.Apprise") as ap:
         apprise_notify.notify("", "Title", "Body")
-        push.assert_called_once_with("Title", "Body", "/activity")
+        push.assert_called_once_with("Title", "Body", "/activity", watchlist_id=None, system=True)
         ap.assert_not_called()  # no Apprise URL: push only
         apprise_notify.notify("json://x", "T", "B", url="/library")
         assert push.call_args.args == ("T", "B", "/library")

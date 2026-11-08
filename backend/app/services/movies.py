@@ -166,7 +166,7 @@ def grab(db, item, settings: dict | None = None, *, force: bool = False) -> dict
 
     if settings.get("notify_on_grab", "true").strip().lower() == "true":
         notify(settings.get("apprise_url", ""), title=f"MediaMate — {item.title}",
-               body=f"⬇️ Downloaded: {best['title']}")
+               body=f"⬇️ Downloaded: {best['title']}", watchlist_id=item.id)
     logger.info("Movie grabbed: %s", best["title"])
     return {"status": "started", "title": best["title"], "message": f"Started: {best['title']}"}
 

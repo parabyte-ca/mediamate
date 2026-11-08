@@ -20,6 +20,7 @@ from .routers import (
 from .services import download_poller, journeys
 from .services import media as media_engine
 from .middleware.scrub import ScrubMiddleware
+from .routers import people as people_router
 from .services.secret_settings import install_log_redaction
 
 install_log_redaction()  # mask tokens and API keys that appear in URLs in any log line
@@ -49,6 +50,12 @@ async def lifespan(app: FastAPI):
         except Exception:
             db.rollback()
             logging.getLogger(__name__).exception("Creating the TV/movie quality defaults failed")
+        try:
+            from .services import people
+            people.ensure_owner(db)
+        except Exception:
+            db.rollback()
+            logging.getLogger(__name__).exception("Setting up people failed")
     finally:
         db.close()
 
@@ -123,6 +130,7 @@ app.add_middleware(ScrubMiddleware)
 app.include_router(health.router)  # no auth, must be registered first
 app.include_router(auth.router, prefix="/api")
 app.include_router(backup.router, prefix="/api")
+app.include_router(people_router.router, prefix="/api")
 app.include_router(history.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(watchlist.router, prefix="/api")

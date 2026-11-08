@@ -53,7 +53,7 @@ def get_keys(db: Session) -> tuple[str, str]:
         return pem, public
 
 
-def subscribe(db: Session, sub: dict, label: str | None = None) -> PushSubscription:
+def subscribe(db: Session, sub: dict, label: str | None = None, person_id: int | None = None) -> PushSubscription:
     endpoint = sub.get("endpoint") or ""
     keys = sub.get("keys") or {}
     if not endpoint.startswith("https://") or not keys.get("p256dh") or not keys.get("auth"):
@@ -63,6 +63,8 @@ def subscribe(db: Session, sub: dict, label: str | None = None) -> PushSubscript
         row = PushSubscription(endpoint=endpoint)
         db.add(row)
     row.p256dh, row.auth, row.label, row.failures = keys["p256dh"], keys["auth"], label, 0
+    if person_id is not None:
+        row.person_id = person_id
     db.commit()
     return row
 
@@ -73,13 +75,21 @@ def unsubscribe(db: Session, endpoint: str) -> bool:
     return bool(n)
 
 
-def send_all(title: str, body: str, url: str = "/activity", db: Session | None = None) -> int:
-    """Send to every subscribed device. Returns how many accepted it. Never raises."""
+def send_all(title: str, body: str, url: str = "/activity", db: Session | None = None,
+             watchlist_id: int | None = None, system: bool = False) -> int:
+    """Send to subscribed devices: every one, or (for an alert about a watchlist item, or
+    a system alert) the devices of the people it concerns plus devices not linked to
+    anyone. Returns how many accepted it. Never raises."""
     own = db is None
     db = db or _session_factory()
     sent = 0
     try:
         subs = db.query(PushSubscription).all()
+        if watchlist_id is not None or system:
+            from . import people
+            who = people.recipients(db, watchlist_id)
+            if who is not None:
+                subs = [s for s in subs if s.person_id is None or s.person_id in who]
         if not subs:
             return 0
         from py_vapid import Vapid02
@@ -137,8 +147,10 @@ def has_subscribers() -> bool:
 SYNC = False
 
 
-def send_all_async(title: str, body: str, url: str = "/activity") -> None:
+def send_all_async(title: str, body: str, url: str = "/activity", watchlist_id: int | None = None,
+                   system: bool = False) -> None:
+    kw = {"watchlist_id": watchlist_id, "system": system}
     if SYNC:
-        send_all(title, body, url)
+        send_all(title, body, url, **kw)
     else:
-        threading.Thread(target=send_all, args=(title, body, url), name="webpush", daemon=True).start()
+        threading.Thread(target=send_all, args=(title, body, url), kwargs=kw, name="webpush", daemon=True).start()

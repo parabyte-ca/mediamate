@@ -507,7 +507,7 @@ def grab(db, item, album, settings: dict | None = None, *, force: bool = False) 
 
     if settings.get("notify_on_grab", "true").strip().lower() == "true":
         notify(settings.get("apprise_url", ""), title=f"MediaMate — {item.title}",
-               body=f"🎵 Downloading: {best['title']}")
+               body=f"🎵 Downloading: {best['title']}", watchlist_id=item.id)
     logger.info("Album grabbed: %s", best["title"])
     return {"status": "started", "title": best["title"], "message": f"Started: {best['title']}"}
 

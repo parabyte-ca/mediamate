@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "./ThemeContext";
 import { EventsProvider } from "./events";
+import { PeopleProvider } from "./people";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Search from "./pages/Search";
@@ -57,7 +58,9 @@ export default function App() {
             element={
               <AuthGuard>
                 <EventsProvider>
-                  <Layout />
+                  <PeopleProvider>
+                    <Layout />
+                  </PeopleProvider>
                 </EventsProvider>
               </AuthGuard>
             }

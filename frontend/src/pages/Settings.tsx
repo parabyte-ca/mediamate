@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, Compass, Copy, RefreshCw, Download, Edit2, F
 import { api, SECRET_MASK, type DownloadPath, type FolderRole, type FolderTarget, type FolderSuggestion, type FolderTest, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type PlexSyncStatus, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
 import { PALETTES, useTheme, type Theme } from "../ThemeContext";
+import { Avatar, usePeople } from "../people";
 import ImportPanel from "../components/ImportPanel";
 import { startTour } from "../components/Tour";
 import MediaSettings from "../components/MediaSettings";
@@ -320,6 +321,60 @@ export function FolderSummary({ label, folder, empty }: { label: string; folder?
 }
 
 /** Colour theme and light/dark, saved on this device. */
+const PERSON_COLORS = ["#2563eb", "#db2777", "#16a34a", "#d97706", "#7c3aed", "#0891b2"];
+
+function PeopleSection() {
+  const { people, me, choose, reload } = usePeople();
+  const [name, setName] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const run = async (fn: () => Promise<unknown>) => {
+    setErr(null);
+    try { await fn(); await reload(); } catch (e) { setErr((e as Error).message); }
+  };
+  return (
+    <Section title="People">
+      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+        Everyone shares one library and one set of downloads. Each person sees the shows and movies they follow
+        (Watchlist and Calendar → Mine) and gets phone alerts for those. Each phone or browser remembers who's using it;
+        switch from the menu. System alerts (updates, disk space) go to the owner.
+      </p>
+      <ul className="space-y-2">
+        {people.map((p) => (
+          <li key={p.id} className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+            <div className="flex items-center gap-2">
+              <Avatar person={p} size={28} />
+              <input defaultValue={p.name} aria-label={`Name of ${p.name}`}
+                     onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== p.name && run(() => api.people.update(p.id, { name: e.target.value.trim() }))}
+                     className={`${FIELD} min-w-0 flex-1`} />
+              {p.is_owner && <span className="shrink-0 rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-[11px] text-gray-500">Owner</span>}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <div className="flex gap-1.5" role="radiogroup" aria-label={`Colour for ${p.name}`}>
+                {PERSON_COLORS.map((c) => (
+                  <button key={c} role="radio" aria-checked={p.color === c} aria-label={c} onClick={() => run(() => api.people.update(p.id, { color: c }))}
+                          className={`h-5 w-5 rounded-full ${p.color === c ? "ring-2 ring-offset-2 ring-gray-400 dark:ring-offset-gray-900" : ""}`} style={{ background: c }} />
+                ))}
+              </div>
+              {me?.id === p.id
+                ? <span className="text-xs text-green-600 dark:text-green-400">This device</span>
+                : <button onClick={() => choose(p.id)} className="text-xs text-blue-600 hover:underline dark:text-blue-400">Use on this device</button>}
+              {!p.is_owner && (
+                <button onClick={() => confirm(`Remove ${p.name}? Shows only they follow go to the owner.`) && run(() => api.people.remove(p.id))}
+                        className="ml-auto text-xs text-red-600 hover:underline dark:text-red-400">Remove</button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (name.trim()) run(async () => { await api.people.add(name.trim()); setName(""); }); }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Add a person, e.g. T" className={`${FIELD} max-w-xs`} />
+        <button type="submit" disabled={!name.trim()} className="rounded-lg border border-gray-300 dark:border-gray-600 px-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50">Add</button>
+      </form>
+      {err && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{err}</p>}
+    </Section>
+  );
+}
+
 function AppearanceSection() {
   const { theme, setTheme, palette, setPalette } = useTheme();
   const modes: { id: Theme; label: string }[] = [
@@ -1696,6 +1751,9 @@ export default function Settings() {
             )}
           </div>
         </Section>
+
+        {/* People */}
+        <PeopleSection />
 
         {/* Appearance */}
         <AppearanceSection />

@@ -10,12 +10,24 @@ function _authHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/** Who this device belongs to (Settings → People); sent so the watchlist and
+ *  calendar show their shows, and new items are followed by them. */
+export const PERSON_KEY = "mm-person";
+export function currentPersonId(): number | null {
+  try { const v = localStorage.getItem(PERSON_KEY); return v ? Number(v) : null; } catch { return null; }
+}
+function _personHeader(): Record<string, string> {
+  const id = currentPersonId();
+  return id ? { "X-Person": String(id) } : {};
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
       ..._authHeader(),
+      ..._personHeader(),
       ...(init?.headers as Record<string, string> ?? {}),
     },
   });
@@ -50,7 +62,7 @@ function withToken(path: string, v?: string | null): string {
 function authedFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${BASE}${path}`, {
     ...init,
-    headers: { ..._authHeader(), ...(init?.headers as Record<string, string> ?? {}) },
+    headers: { ..._authHeader(), ..._personHeader(), ...(init?.headers as Record<string, string> ?? {}) },
   });
 }
 
@@ -87,6 +99,8 @@ export interface MusicAlbum {
   /** Why automatic downloads stopped (e.g. qBittorrent can't write the folder); download again to retry. */
   problem: string | null;
 }
+
+export interface Person { id: number; name: string; color: string; is_owner: boolean }
 
 export interface BrowseRelease {
   mbid: string; title: string; artist: string; artist_mbids: string[]; date: string | null; type: string;
@@ -132,6 +146,7 @@ export interface CoverCandidate { mbid: string; title: string; artist: string; d
 
 export interface WatchlistItem {
   id: number;
+  followers?: number[];
   title: string;
   search_query: string;
   quality: string;
@@ -883,7 +898,7 @@ export interface ImportPathSuggestions {
 
 export interface PushConfig {
   public_key: string;
-  devices: { id: number; label: string | null; created_at: string | null }[];
+  devices: { id: number; label: string | null; person_id?: number | null; created_at: string | null }[];
 }
 
 export interface Insights {
@@ -969,12 +984,15 @@ export const api = {
   },
 
   watchlist: {
-    list: () => req<WatchlistItem[]>("/watchlist"),
+    list: (who: "mine" | "all" = "mine") => req<WatchlistItem[]>(`/watchlist?who=${who}`),
+    follow: (id: number) => req<WatchlistItem>(`/watchlist/${id}/follow`, { method: "POST" }),
+    unfollow: (id: number) => req<{ ok: boolean; followers: number[] }>(`/watchlist/${id}/unfollow`, { method: "POST" }),
     create: (data: WatchlistCreate) =>
       req<WatchlistItem>("/watchlist", { method: "POST", body: JSON.stringify(data) }),
     update: (id: number, data: Partial<WatchlistCreate>) =>
       req<WatchlistItem>(`/watchlist/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-    delete: (id: number) => req(`/watchlist/${id}`, { method: "DELETE" }),
+    delete: (id: number, everyone = false) =>
+      req<{ ok: boolean; unfollowed?: boolean }>(`/watchlist/${id}${everyone ? "?everyone=true" : ""}`, { method: "DELETE" }),
     scan: (id: number) => req(`/watchlist/${id}/scan`, { method: "POST" }),
     scanAll: () => req("/scan", { method: "POST" }),
     episodes: {
@@ -1119,10 +1137,21 @@ export const api = {
 
   insights: (days = 30) => req<Insights>(`/insights?days=${days}`),
 
+  people: {
+    list: () => req<Person[]>("/people"),
+    add: (name: string) => req<Person>("/people", { method: "POST", body: JSON.stringify({ name }) }),
+    update: (id: number, data: { name?: string; color?: string }) =>
+      req<Person>(`/people/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    remove: (id: number) => req<{ ok: boolean }>(`/people/${id}`, { method: "DELETE" }),
+  },
+
   push: {
     config: () => req<PushConfig>("/push/config"),
     subscribe: (subscription: PushSubscriptionJSON, label: string) =>
-      req<{ ok: boolean; id: number }>("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription, label }) }),
+      req<{ ok: boolean; id: number }>("/push/subscribe", { method: "POST",
+        body: JSON.stringify({ subscription, label, person_id: currentPersonId() }) }),
+    setPerson: (endpoint: string, person_id: number | null) =>
+      req<{ ok: boolean }>("/push/person", { method: "POST", body: JSON.stringify({ endpoint, person_id }) }),
     unsubscribe: (endpoint: string) =>
       req<{ ok: boolean }>("/push/unsubscribe", { method: "POST", body: JSON.stringify({ endpoint }) }),
     removeDevice: (id: number) => req<{ ok: boolean }>(`/push/devices/${id}`, { method: "DELETE" }),
@@ -1229,7 +1258,8 @@ export const api = {
   },
 
   calendar: {
-    get: (days = 30, back = 7) => req<CalendarResponse>(`/calendar?days=${days}&back=${back}`),
+    get: (days = 30, back = 7, who: "mine" | "all" = "mine") =>
+      req<CalendarResponse>(`/calendar?days=${days}&back=${back}&who=${who}`),
   },
 
   browse: {

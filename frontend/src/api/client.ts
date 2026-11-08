@@ -100,7 +100,7 @@ export interface MusicAlbum {
   problem: string | null;
 }
 
-export interface Person { id: number; name: string; color: string; is_owner: boolean }
+export interface Person { id: number; name: string; color: string; is_owner: boolean; avatar_url: string | null }
 
 export interface BrowseRelease {
   mbid: string; title: string; artist: string; artist_mbids: string[]; date: string | null; type: string;
@@ -565,6 +565,7 @@ export interface Journey {
   status: "active" | "done" | "failed" | "cancelled";
   download_id: number | null;
   media_file_id: number | null;
+  watchlist_id?: number | null;
   poster_url: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -1043,8 +1044,8 @@ export const api = {
   },
 
   activity: {
-    list: (filter: ActivityFilter = "all", limit = 50, offset = 0) =>
-      req<{ total: number; items: Journey[] }>(`/activity?filter=${filter}&limit=${limit}&offset=${offset}`),
+    list: (filter: ActivityFilter = "all", limit = 50, offset = 0, who: "mine" | "all" = "mine") =>
+      req<{ total: number; items: Journey[] }>(`/activity?filter=${filter}&limit=${limit}&offset=${offset}&who=${who}`),
     get: (id: number) => req<Journey>(`/activity/${id}`),
     stats: () => req<ActivityStats>("/activity/stats"),
     cancel: (id: number) => req<{ ok: boolean; msg: string }>(`/activity/${id}/cancel`, { method: "POST" }),
@@ -1143,6 +1144,20 @@ export const api = {
     update: (id: number, data: { name?: string; color?: string }) =>
       req<Person>(`/people/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     remove: (id: number) => req<{ ok: boolean }>(`/people/${id}`, { method: "DELETE" }),
+    /** The picture's URL for an <img> (adds the login token for access from outside). */
+    avatarSrc: (p: Person) => {
+      if (!p.avatar_url) return null;
+      const token = authStore.getToken();
+      return `${p.avatar_url}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+    },
+    setAvatar: async (id: number, file: File): Promise<Person> => {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await authedFetch(`/people/${id}/avatar`, { method: "POST", body: form });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "Upload failed");
+      return res.json();
+    },
+    removeAvatar: (id: number) => req<Person>(`/people/${id}/avatar`, { method: "DELETE" }),
   },
 
   push: {

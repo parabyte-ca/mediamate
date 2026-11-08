@@ -113,6 +113,8 @@ MIGRATIONS: list[tuple[str, str | None]] = [
     ("ALTER TABLE download_paths ADD COLUMN role TEXT", None),
     ("ALTER TABLE download_paths ADD COLUMN music_downloads INTEGER NOT NULL DEFAULT 0", None),
     ("ALTER TABLE push_subscriptions ADD COLUMN person_id INTEGER", None),
+    ("ALTER TABLE people ADD COLUMN avatar BLOB", None),
+    ("ALTER TABLE people ADD COLUMN avatar_at DATETIME", None),
 ]
 
 

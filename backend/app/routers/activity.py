@@ -2,7 +2,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -25,14 +25,22 @@ def _get(db: Session, journey_id: int) -> Journey:
 
 @router.get("")
 def list_activity(
+    request: Request,
     filter: str = Query("all"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    who: str = Query("mine", description="mine (downloads of the shows this device's person follows) or all"),
     db: Session = Depends(get_db),
 ):
     if filter not in _FILTERS:
         raise HTTPException(status_code=400, detail=f"filter must be one of {sorted(_FILTERS)}")
     q = db.query(Journey)
+    from ..services import people
+    me = people.current(db, request)
+    if who != "all" and me is not None:
+        people.ensure_owner(db)
+        mine = people.followed_by(db, me.id)
+        q = q.join(Download, Download.id == Journey.download_id).filter(Download.watchlist_id.in_(mine))
     if filter == "active":
         q = q.filter(Journey.status == "active")
     elif filter == "failed":

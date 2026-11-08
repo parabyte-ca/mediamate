@@ -100,7 +100,7 @@ export function PersonSwitcher({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   if (people.length < 2) return null;
   return (
-    <div className="relative">
+    <div className="relative" data-tour="person">
       <button onClick={() => setOpen((o) => !o)} aria-label="Switch person" aria-expanded={open}
               className={`flex items-center gap-2 rounded-full ${compact ? "" : "pr-2"} hover:bg-gray-100 dark:hover:bg-gray-800`}>
         {me ? <Avatar person={me} size={compact ? 26 : 28} /> : <Users className="h-5 w-5 text-gray-500" />}

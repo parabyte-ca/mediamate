@@ -35,7 +35,7 @@ async function api(path, init) {
 
   for (const scheme of ["light", "dark"]) {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, colorScheme: scheme });
-  await ctx.addInitScript(() => localStorage.setItem('sm-tour', '2'));  // the tour is checked on its own
+  await ctx.addInitScript(() => localStorage.setItem('sm-tour', '3'));  // the tour is checked on its own
     const page = await ctx.newPage();
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
@@ -53,7 +53,7 @@ async function api(path, init) {
   }
 
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, acceptDownloads: true });
-  await ctx.addInitScript(() => localStorage.setItem('sm-tour', '2'));  // the tour is checked on its own
+  await ctx.addInitScript(() => localStorage.setItem('sm-tour', '3'));  // the tour is checked on its own
   const page = await ctx.newPage();
 
   await check("/health reports a version", async () => {
@@ -126,7 +126,7 @@ async function api(path, init) {
   await ctx.close();
 
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  await phone.addInitScript(() => localStorage.setItem('sm-tour', '2'));  // the tour is checked on its own
+  await phone.addInitScript(() => localStorage.setItem('sm-tour', '3'));  // the tour is checked on its own
   const mp = await phone.newPage();
   await check("phone: More tab reaches Updates", async () => {
     await mp.goto(`${BASE}/activity`);

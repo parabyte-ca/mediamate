@@ -29,7 +29,7 @@ import { api } from "../api/client";
 import OnboardingWizard from "./OnboardingWizard";
 import Tour, { TOUR_EVENT, tourSeen } from "./Tour";
 import StatusPill from "./StatusPill";
-import { PersonSwitcher } from "../people";
+import { PersonSwitcher, usePeople } from "../people";
 import CommandPalette from "./CommandPalette";
 
 const nav = [
@@ -120,11 +120,13 @@ export default function Layout() {
       .finally(() => setWizardChecked(true));
   }, []);
 
+  const { people, me } = usePeople();
+  const whoKnown = people.length > 0 && (people.length < 2 || !!me);   // the "who's using this device?" question is answered
   useEffect(() => {
-    if (!wizardChecked || onboarding || tourSeen()) return;
+    if (!wizardChecked || onboarding || !whoKnown || tourSeen()) return;
     const t = setTimeout(() => setTouring(true), 800);
     return () => clearTimeout(t);
-  }, [wizardChecked, onboarding]);
+  }, [wizardChecked, onboarding, whoKnown]);
 
   useEffect(() => {
     const start = () => { setMoreOpen(false); setTouring(true); };
@@ -172,7 +174,7 @@ export default function Layout() {
     <div className="relative flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
       {onboarding && <OnboardingWizard onClose={() => setOnboarding(false)} />}
       <CommandPalette />
-      <Tour open={touring} onClose={() => setTouring(false)} />
+      <Tour open={touring} onClose={() => setTouring(false)} many={people.length > 1} />
 
       {/* ── Sidebar (md and above) ──────────────────────────────────────────── */}
       <aside

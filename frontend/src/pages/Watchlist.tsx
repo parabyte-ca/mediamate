@@ -1035,7 +1035,7 @@ function Followers({ item, onChange }: { item: WatchlistItem; onChange: () => vo
     onChange();
   };
   return (
-    <div className="mt-1.5 flex items-center gap-1.5 px-1 text-xs text-gray-500 dark:text-gray-400">
+    <div className="mt-1.5 flex items-center gap-1.5 px-1 text-xs text-gray-500 dark:text-gray-400" data-tour="follow">
       <div className="flex -space-x-1.5">{who.map((p) => <Avatar key={p.id} person={p} size={20} />)}</div>
       <span className="truncate">{who.map((p) => p.name).join(" & ") || "Nobody"}</span>
       {me && (
@@ -1284,7 +1284,7 @@ export default function Watchlist() {
 
       {/* Mine / Everyone (when more than one person uses MediaMate) */}
       {people.length > 1 && me && (
-        <div className="mb-3 mr-2 inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5" role="tablist" aria-label="Whose watchlist">
+        <div className="mb-3 mr-2 inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5" role="tablist" aria-label="Whose watchlist" data-tour="who">
           {([["mine", "Mine"], ["all", "Everyone"]] as const).map(([id, label]) => (
             <button key={id} role="tab" aria-selected={who === id} onClick={() => setWho(id)}
               className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${who === id

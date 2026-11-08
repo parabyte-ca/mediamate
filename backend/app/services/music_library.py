@@ -890,6 +890,15 @@ def import_download(bind, download_id: int) -> dict:
         files = [local] if os.path.isfile(local) else audio_files(local) if os.path.isdir(local) else []
         files = [f for f in files if os.path.splitext(f)[1].lower() in AUDIO_EXTS]
         if not files:
+            from . import music
+            everything = [local] if os.path.isfile(local) else [
+                os.path.join(h, n) for h, _, ns in os.walk(local) for n in ns] if os.path.isdir(local) else []
+            why = music.not_music(everything)
+            if why:
+                music.reject_download(db, dl, why)
+                if not dl.torrent_hash or os.path.exists(local):
+                    _discard(db, local)
+                return {"ok": False, "msg": why}
             return {"ok": False, "msg": f"No audio files found at {local}"}
         if item and album and any(not (i["title"] and i["album"] and i["track_no"]) for i in map(read, files)):
             try:
@@ -1001,7 +1010,14 @@ def tidy_finished(bind) -> int:
     existed, or while the library was unreachable."""
     from sqlalchemy.orm import Session
     from ..models import Download, MusicAlbum
+    from . import music
+    from .qbittorrent import file_names
     with Session(bind=bind) as db:
+        for d in db.query(Download).filter(Download.music_album_id.isnot(None), Download.status == "downloading",
+                                           Download.qbit_removed.is_(False), Download.torrent_hash.isnot(None)).all():
+            why = music.not_music(file_names(d.torrent_hash))
+            if why:
+                music.reject_download(db, d, why)
         ids = [d.id for d in db.query(Download).join(MusicAlbum, MusicAlbum.id == Download.music_album_id)
                .filter(Download.status.in_(["completed", "seeding"]), Download.qbit_removed.is_(False),
                        MusicAlbum.status == "have").all()]
@@ -1013,6 +1029,19 @@ def tidy_finished(bind) -> int:
         except Exception:
             logger.exception("Tidying album download %s failed", i)
     return n
+
+
+def _discard(db, path: str) -> None:
+    """Send a wrong download's files to the music trash when qBittorrent didn't delete them."""
+    from . import music_doctor
+    if not os.path.exists(path):
+        return
+    rs = roots(db)
+    if music_doctor._root_of(path, rs) and os.path.normpath(path) not in {os.path.normpath(r) for r in rs}:
+        try:
+            music_doctor.trash(path, rs)
+        except OSError as exc:
+            logger.warning("Couldn't move %s to the trash: %s", path, exc)
 
 
 def import_later(bind, download_id: int) -> None:

@@ -63,12 +63,28 @@ def _is_adult(result: dict) -> bool:
     if tpb_cat is not None and _TPB_ADULT_CATEGORY_MIN <= tpb_cat <= _TPB_ADULT_CATEGORY_MAX:
         return True
 
+    # Newznab XXX categories (6000–6999) from Jackett/Prowlarr
+    if result.get("_adult_cat"):
+        return True
+
     # Keyword scan on title
     for kw in _ADULT_KEYWORDS:
         if kw in title_lower:
             return True
 
+    # Whole words: known adult studios/sites and explicit terms ("analog" and
+    # "Milford" still pass; "BackroomCastingCouch" doesn't).
+    from .. import adult
+    words = adult._words(result["title"])
+    if words & (adult.KEYWORDS | adult.GENERIC | _EXPLICIT_WORDS):
+        return True
     return False
+
+
+_EXPLICIT_WORDS = frozenset({
+    "anal", "creampie", "blowjob", "blowjobs", "cumshot", "cumshots", "handjob", "gangbang", "deepthroat",
+    "bukkake", "milf", "milfs", "castingcouch", "threesome", "facials", "squirting", "bbc", "pawg",
+})
 
 
 def search_all(
@@ -160,5 +176,6 @@ def search_all(
     # Strip internal-only fields before returning
     for r in unique:
         r.pop("_tpb_category", None)
+        r.pop("_adult_cat", None)
 
     return sorted(unique, key=lambda r: r["seeds"], reverse=True)

@@ -757,7 +757,8 @@ def run_music_scan() -> None:
 
 
 def run_music_tidy() -> None:
-    """Hourly: clean up finished album torrents that are still in qBittorrent."""
+    """Every 15 minutes: reject album downloads that turn out to be videos, and clean up
+    finished album torrents that are still in qBittorrent."""
     from . import music_library
     from .media import store
     try:
@@ -863,7 +864,7 @@ def start_scheduler() -> None:
     )
     _scheduler.add_job(
         run_music_tidy,
-        trigger=IntervalTrigger(hours=1),
+        trigger=IntervalTrigger(minutes=15),
         id="music_tidy",
         replace_existing=True,
     )

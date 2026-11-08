@@ -696,8 +696,10 @@ def purge_old_trash() -> None:
     try:
         from ..database import SessionLocal
         from . import link_vault
+        from ..routers import shares
         with SessionLocal() as db:
             link_vault.purge(db)
+            shares.purge(db)
     except Exception:
         logger.exception("Expired search-result links weren't purged")
 

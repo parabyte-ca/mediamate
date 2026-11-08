@@ -21,6 +21,7 @@ from .services import download_poller, journeys
 from .services import media as media_engine
 from .middleware.scrub import ScrubMiddleware
 from .routers import people as people_router
+from .routers import shares as shares_router
 from .services.secret_settings import install_log_redaction
 
 install_log_redaction()  # mask tokens and API keys that appear in URLs in any log line
@@ -131,6 +132,7 @@ app.include_router(health.router)  # no auth, must be registered first
 app.include_router(auth.router, prefix="/api")
 app.include_router(backup.router, prefix="/api")
 app.include_router(people_router.router, prefix="/api")
+app.include_router(shares_router.router, prefix="/api")
 app.include_router(history.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(watchlist.router, prefix="/api")

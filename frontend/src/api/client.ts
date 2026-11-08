@@ -100,6 +100,22 @@ export interface MusicAlbum {
   problem: string | null;
 }
 
+export interface ShareLink {
+  id: number; kind: "video" | "album"; target_id: number; title: string; adult: boolean; url: string;
+  shared_by: string | null; created_at: string | null; expires_at: string | null; views: number;
+}
+
+/** Links come back as "/s/<token>" unless a public address is set: use this page's. */
+function fullUrl(l: ShareLink): ShareLink {
+  return l.url.startsWith("/") ? { ...l, url: `${window.location.origin}${l.url}` } : l;
+}
+
+export interface PublicShare {
+  kind: "video" | "album"; title: string; adult: boolean; expires_at: string | null;
+  duration_sec?: number | null; has_cover?: boolean;
+  tracks?: { n: number; title: string; artist: string | null; duration_sec: number | null }[];
+}
+
 export interface Person { id: number; name: string; color: string; is_owner: boolean; avatar_url: string | null }
 
 export interface BrowseRelease {
@@ -1137,6 +1153,26 @@ export const api = {
   },
 
   insights: (days = 30) => req<Insights>(`/insights?days=${days}`),
+
+  shares: {
+    create: async (kind: "video" | "album", id: number, days: 0 | 1 | 7 | 30) =>
+      fullUrl(await req<ShareLink>("/shares", { method: "POST", body: JSON.stringify({ kind, id, days }) })),
+    list: async () => (await req<ShareLink[]>("/shares")).map(fullUrl),
+    revoke: (id: number) => req<{ ok: boolean }>(`/shares/${id}`, { method: "DELETE" }),
+  },
+
+  /** Shared links (no login): plain fetch, so a stale session never redirects to /login. */
+  publicShare: {
+    meta: async (token: string): Promise<PublicShare> => {
+      const res = await fetch(`${BASE}/public/s/${encodeURIComponent(token)}`);
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "This link has expired or was removed.");
+      return res.json();
+    },
+    video: (token: string) => `${BASE}/public/s/${encodeURIComponent(token)}/video`,
+    play: (token: string, from: number) => `${BASE}/public/s/${encodeURIComponent(token)}/play?start=${Math.floor(from)}`,
+    track: (token: string, n: number) => `${BASE}/public/s/${encodeURIComponent(token)}/track/${n}`,
+    cover: (token: string) => `${BASE}/public/s/${encodeURIComponent(token)}/cover`,
+  },
 
   people: {
     list: () => req<Person[]>("/people"),

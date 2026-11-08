@@ -142,3 +142,8 @@ The method was:
   - the Prowlarr/Jackett API key
   - the qBittorrent password
   - the TMDB and TPDB keys
+
+## Share links (added 2026-11-08, v0.33)
+- `/api/public/s/<token>/…` is the only unauthenticated API besides login/status/health. A token is 32 random bytes (urlsafe), reaches only its own video or album, and stops working when it expires or is removed (Settings → Sharing).
+- Public responses carry the title, expiry, adult flag, duration and track titles only: never paths, folder names or ids (asserted in `tests/test_shares.py`). Video goes through the same media-root check and 2-at-a-time conversion limit as the Library preview. The metadata endpoint is rate-limited (60 a minute per address); the page sets `noindex`.
+- Expired and removed links are purged 30 days later.

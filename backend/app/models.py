@@ -1,4 +1,4 @@
-from sqlalchemy import LargeBinary, Column, Integer, String, Boolean, DateTime, Float, ForeignKey, BigInteger, UniqueConstraint
+from sqlalchemy import LargeBinary, Column, Integer, String, Boolean, DateTime, Float, ForeignKey, BigInteger, UniqueConstraint, Text
 from sqlalchemy.sql import func, text
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -229,6 +229,7 @@ class ShareLink(Base):
     target_id = Column(Integer, nullable=False)        # media_files.id | music_lib_albums.id
     title = Column(String, nullable=False)
     adult = Column(Boolean, default=False)             # the page asks "18+?" first
+    clip = Column(Text, nullable=True)                 # teaser: JSON start times; None = whole video
     person_id = Column(Integer, nullable=True)         # who shared it
     created_at = Column(DateTime, server_default=func.now())
     expires_at = Column(DateTime, nullable=True)       # None: until revoked

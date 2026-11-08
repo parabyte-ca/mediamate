@@ -343,7 +343,7 @@ function SharingSection({ publicUrl, onPublicUrl }: { publicUrl: string; onPubli
               <li key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
                 <span className="min-w-0 flex-1 truncate font-medium text-gray-800 dark:text-gray-200" title={l.title}>{l.title}</span>
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  {[l.shared_by && `by ${l.shared_by}`,
+                  {[l.teaser && "teaser", l.shared_by && `by ${l.shared_by}`,
                     l.expires_at ? `until ${new Date(l.expires_at + "Z").toLocaleDateString()}` : "no expiry",
                     `${l.views} view${l.views === 1 ? "" : "s"}`].filter(Boolean).join(" · ")}
                 </span>

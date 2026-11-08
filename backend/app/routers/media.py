@@ -126,12 +126,15 @@ def organise_one(file_id: int, body: dict = Body(default={})):
 
 
 @router.get("/files/{file_id}/thumb")
-def file_thumbnail(file_id: int):
-    """A still frame from about 10% into the file (JPEG, cached)."""
+def file_thumbnail(file_id: int, at: float | None = None):
+    """A still frame from about 10% into the file, or at `at` seconds (JPEG, cached)."""
     row = _servable(file_id)
     if row is None:
         return _err("File not found", 404)
-    jpg = preview.thumbnail(file_id, row["path"], row["duration_sec"])
+    if at is not None and at >= 0:
+        jpg = preview.frame(file_id, row["path"], at)
+    else:
+        jpg = preview.thumbnail(file_id, row["path"], row["duration_sec"])
     if jpg is None:
         return _err("No thumbnail for this file", 404)
     return FileResponse(jpg, media_type="image/jpeg",

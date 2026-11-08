@@ -147,3 +147,4 @@ The method was:
 - `/api/public/s/<token>/…` is the only unauthenticated API besides login/status/health. A token is 32 random bytes (urlsafe), reaches only its own video or album, and stops working when it expires or is removed (Settings → Sharing).
 - Public responses carry the title, expiry, adult flag, duration and track titles only: never paths, folder names or ids (asserted in `tests/test_shares.py`). Video goes through the same media-root check and 2-at-a-time conversion limit as the Library preview. The metadata endpoint is rate-limited (60 a minute per address); the page sets `noindex`.
 - Expired and removed links are purged 30 days later.
+- Teaser links (adult videos, v0.34) serve only the cached ~30 s clip; `/play` returns 404 for them, so a teaser link never reaches the whole video. Teasers nobody has played for 45 days are deleted (rebuilt on demand).

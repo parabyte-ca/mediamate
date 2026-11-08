@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { Check, Copy, Globe, Home, Loader2, Share2, X } from "lucide-react";
-import { api, type ShareLink } from "../api/client";
+import { useEffect, useState } from "react";
+import { Check, Copy, Film, Globe, Home, Loader2, Minus, Play, Plus, Share2, Shuffle, X } from "lucide-react";
+import { api, type ShareLink, type TeaserInfo } from "../api/client";
+import { fmtClock } from "./VideoPlayer";
 
 const DAYS: { v: 0 | 1 | 7 | 30; label: string }[] = [
   { v: 1, label: "1 day" }, { v: 7, label: "7 days" }, { v: 30, label: "30 days" }, { v: 0, label: "Until I remove it" },
@@ -25,6 +26,18 @@ export default function ShareDialog({ kind, id, title, householdPath, onClose }:
   const [done, setDone] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const home = `${window.location.origin}${householdPath}`;
+  const [info, setInfo] = useState<TeaserInfo | null>(null);
+  const [mode, setMode] = useState<"teaser" | "whole">("whole");
+  const [starts, setStarts] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (kind !== "video") return;
+    api.shares.teaserInfo(id).then((t) => {
+      setInfo(t);
+      if (t.adult) { setMode("teaser"); setStarts(t.starts); }
+    }).catch(() => { /* no teaser option */ });
+  }, [kind, id]);
+  const teaser = !!info?.adult && mode === "teaser";
 
   const send = async (url: string, what: string) => {
     try { setDone((await shareOrCopy(url, title)) === "shared" ? `${what} shared` : `${what} copied`); }
@@ -32,7 +45,7 @@ export default function ShareDialog({ kind, id, title, householdPath, onClose }:
   };
   const create = async () => {
     setBusy(true); setErr(null);
-    try { const l = await api.shares.create(kind, id, days); setLink(l); await send(l.url, "Link"); }
+    try { const l = await api.shares.create(kind, id, days, teaser ? starts : undefined); setLink(l); await send(l.url, "Link"); }
     catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -62,7 +75,21 @@ export default function ShareDialog({ kind, id, title, householdPath, onClose }:
           </p>
           {!link ? (
             <>
-              <div className="mt-2 grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Link lasts">
+              {info?.adult && (
+                <>
+                  <div className="mt-2 grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="What to share">
+                    {([["teaser", `Teaser (${Math.round(info.clip_sec * starts.length)} sec)`], ["whole", "Whole video"]] as const).map(([v, label]) => (
+                      <button key={v} role="radio" aria-checked={mode === v} onClick={() => setMode(v)}
+                              className={`rounded-lg border px-2 py-1.5 text-sm ${mode === v ? "border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-300"}`}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {teaser && <TeaserPicker id={id} info={info} starts={starts} onChange={setStarts} />}
+                </>
+              )}
+              <p className="mt-3 text-xs font-medium text-gray-600 dark:text-gray-300">Link lasts</p>
+              <div className="mt-1 grid grid-cols-2 gap-1.5" role="radiogroup" aria-label="Link lasts">
                 {DAYS.map((d) => (
                   <button key={d.v} role="radio" aria-checked={days === d.v} onClick={() => setDays(d.v)}
                           className={`rounded-lg border px-2 py-1.5 text-sm ${days === d.v ? "border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-300"}`}>
@@ -71,7 +98,8 @@ export default function ShareDialog({ kind, id, title, householdPath, onClose }:
                 ))}
               </div>
               <button onClick={create} disabled={busy} className={`${btn} mt-2 w-full bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60`}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}Create link
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
+                {busy && teaser ? "Making the teaser…" : teaser ? "Create teaser link" : "Create link"}
               </button>
             </>
           ) : (
@@ -91,6 +119,62 @@ export default function ShareDialog({ kind, id, title, householdPath, onClose }:
         {done && <p className="mt-3 flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400"><Check className="h-4 w-4" />{done}</p>}
         {err && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{err}</p>}
       </div>
+    </div>
+  );
+}
+
+/** The teaser's moments: a frame and time each, nudged back or forward, plus a
+ *  preview of the finished clip. */
+function TeaserPicker({ id, info, starts, onChange }: {
+  id: number; info: TeaserInfo; starts: number[]; onChange: (s: number[]) => void;
+}) {
+  const [preview, setPreview] = useState<string | null>(null);
+  const dur = info.duration_sec ?? 0;
+  const max = Math.max(0, dur - info.clip_sec);
+  const step = dur > 600 ? 30 : dur > 120 ? 10 : 2;
+  const move = (i: number, by: number) => {
+    setPreview(null);
+    onChange(starts.map((s, j) => (j === i ? Math.min(max, Math.max(0, Math.round(s + by))) : s)));
+  };
+  const shuffle = () => {
+    setPreview(null);
+    const n = starts.length, lo = dur * 0.05, span = Math.max(0, max - lo) / n;
+    onChange(Array.from({ length: n }, (_, i) => Math.round(lo + i * span + Math.random() * span * 0.9)));
+  };
+  const nudge = "rounded p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-30 dark:hover:bg-gray-800";
+
+  return (
+    <div className="mt-2 rounded-lg bg-gray-50 p-2 dark:bg-gray-800/60">
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        {starts.length} moments of {Math.round(info.clip_sec)} sec, joined with short fades, with sound. Move any of them, then preview.
+      </p>
+      <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3" aria-label="Teaser moments">
+        {starts.map((s, i) => (
+          <li key={i} className="min-w-0">
+            <img src={api.shares.frameUrl(id, s)} alt={`Moment ${i + 1} at ${fmtClock(s)}`} loading="lazy"
+                 className="aspect-video w-full rounded bg-gray-200 object-cover dark:bg-gray-700" />
+            <div className="mt-0.5 flex items-center justify-between">
+              <button className={nudge} onClick={() => move(i, -step)} disabled={s <= 0} aria-label={`Moment ${i + 1} earlier`}><Minus className="h-3.5 w-3.5" /></button>
+              <span className="text-xs tabular-nums text-gray-700 dark:text-gray-200">{fmtClock(s)}</span>
+              <button className={nudge} onClick={() => move(i, step)} disabled={s >= max} aria-label={`Moment ${i + 1} later`}><Plus className="h-3.5 w-3.5" /></button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 flex gap-1.5">
+        <button onClick={shuffle} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-700 hover:bg-white dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-900">
+          <Shuffle className="h-3.5 w-3.5" />Other moments
+        </button>
+        <button onClick={() => setPreview(api.shares.teaserUrl(id, starts))} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-700 hover:bg-white dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-900">
+          <Play className="h-3.5 w-3.5" />Preview teaser
+        </button>
+      </div>
+      {preview && (
+        <div className="mt-2">
+          <video key={preview} src={preview} controls autoPlay playsInline className="w-full rounded bg-black" aria-label="Teaser preview" />
+          <p className="mt-1 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"><Film className="h-3.5 w-3.5" />It can take a few seconds to make.</p>
+        </div>
+      )}
     </div>
   );
 }

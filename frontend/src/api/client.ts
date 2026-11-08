@@ -103,6 +103,16 @@ export interface MusicAlbum {
 export interface ShareLink {
   id: number; kind: "video" | "album"; target_id: number; title: string; adult: boolean; url: string;
   shared_by: string | null; created_at: string | null; expires_at: string | null; views: number;
+  teaser?: boolean;
+}
+
+export interface TeaserInfo { adult: boolean; duration_sec: number | null; starts: number[]; clip_sec: number }
+
+function tokenQuery(extra: Record<string, string>): string {
+  const p = new URLSearchParams(extra);
+  const token = authStore.getToken();
+  if (token) p.set("token", token);
+  return p.toString();
 }
 
 /** Links come back as "/s/<token>" unless a public address is set: use this page's. */
@@ -112,7 +122,7 @@ function fullUrl(l: ShareLink): ShareLink {
 
 export interface PublicShare {
   kind: "video" | "album"; title: string; adult: boolean; expires_at: string | null;
-  duration_sec?: number | null; has_cover?: boolean;
+  duration_sec?: number | null; has_cover?: boolean; teaser?: boolean;
   tracks?: { n: number; title: string; artist: string | null; duration_sec: number | null }[];
 }
 
@@ -1155,8 +1165,17 @@ export const api = {
   insights: (days = 30) => req<Insights>(`/insights?days=${days}`),
 
   shares: {
-    create: async (kind: "video" | "album", id: number, days: 0 | 1 | 7 | 30) =>
-      fullUrl(await req<ShareLink>("/shares", { method: "POST", body: JSON.stringify({ kind, id, days }) })),
+    create: async (kind: "video" | "album", id: number, days: 0 | 1 | 7 | 30, teaser?: number[]) =>
+      fullUrl(await req<ShareLink>("/shares", {
+        method: "POST", body: JSON.stringify({ kind, id, days, ...(teaser ? { teaser: { starts: teaser } } : {}) }),
+      })),
+    /** Whether a video can have a teaser (adult only) and its default moments. */
+    teaserInfo: (id: number) => req<TeaserInfo>(`/shares/teaser/${id}`),
+    /** The teaser for these moments, to preview before sharing (made on the server). */
+    teaserUrl: (id: number, starts: number[]) =>
+      `${BASE}/shares/teaser/${id}/clip?${tokenQuery({ starts: starts.map((s) => s.toFixed(1)).join(",") })}`,
+    /** A still frame at `at` seconds, for picking moments. */
+    frameUrl: (id: number, at: number) => `${BASE}/media/files/${id}/thumb?${tokenQuery({ at: String(Math.floor(at)) })}`,
     list: async () => (await req<ShareLink[]>("/shares")).map(fullUrl),
     revoke: (id: number) => req<{ ok: boolean }>(`/shares/${id}`, { method: "DELETE" }),
   },

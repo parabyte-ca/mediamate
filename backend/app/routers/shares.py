@@ -2,6 +2,7 @@
 (/s/<token>) lets anyone with it watch a video or listen to an album in the browser,
 without logging in, until it expires or is revoked. Public responses carry titles only,
 never paths or ids, and a token only ever reaches its own item."""
+import json
 import os
 import secrets
 import time
@@ -39,7 +40,27 @@ def _out(db: Session, s: ShareLink, request: Request) -> dict:
             "url": f"{_base(db, request)}/s/{s.token}", "shared_by": who.name if who else None,
             "created_at": s.created_at.isoformat() if s.created_at else None,
             "expires_at": s.expires_at.isoformat() if s.expires_at else None,
-            "views": s.views or 0}
+            "views": s.views or 0, "teaser": bool(s.clip)}
+
+
+def _starts(s: ShareLink) -> list[float] | None:
+    try:
+        v = json.loads(s.clip) if s.clip else None
+        return [float(x) for x in v] if isinstance(v, list) and v else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _teaser_file(file_id: int, starts: list[float]):
+    """Build (or reuse) the teaser; HTTP errors for the caller."""
+    from ..services.media import teaser
+    row = _video(None, file_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        return teaser.build(file_id, row["path"], starts, row["duration_sec"])
+    except teaser.TeaserError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 def _video(db: Session, file_id: int):
@@ -60,7 +81,9 @@ def _is_adult(db: Session, path: str) -> bool:
 @router.post("/shares", status_code=201)
 def create_share(request: Request, body: dict = Body(...), db: Session = Depends(get_db)):
     from ..services import people
+    from ..services.media import teaser
     kind, target, days = body.get("kind"), body.get("id"), body.get("days", 7)
+    clip = None
     if kind not in ("video", "album") or not isinstance(target, int):
         raise HTTPException(status_code=400, detail="kind (video or album) and id are needed")
     if days not in DAYS:
@@ -71,6 +94,15 @@ def create_share(request: Request, body: dict = Body(...), db: Session = Depends
             raise HTTPException(status_code=404, detail="File not found")
         title = os.path.splitext(row["filename"])[0]
         adult = _is_adult(db, row["path"])
+        if body.get("teaser") is not None:
+            if not adult:
+                raise HTTPException(status_code=400, detail="Teasers are for adult videos")
+            try:
+                starts = teaser.valid((body.get("teaser") or {}).get("starts"), row["duration_sec"])
+            except teaser.TeaserError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            _teaser_file(target, starts)           # made now, so the link plays straight away
+            clip = json.dumps(starts)
     else:
         a = db.get(MusicLibAlbum, target)
         if a is None:
@@ -78,12 +110,40 @@ def create_share(request: Request, body: dict = Body(...), db: Session = Depends
         title = " – ".join(x for x in (a.artist, a.title) if x) or os.path.basename(a.folder)
         adult = False
     me = people.current(db, request)
-    s = ShareLink(token=secrets.token_urlsafe(32), kind=kind, target_id=target, title=title, adult=adult,
+    s = ShareLink(token=secrets.token_urlsafe(32), kind=kind, target_id=target, title=title, adult=adult, clip=clip,
                   person_id=me.id if me else None,
                   expires_at=_now() + timedelta(days=days) if days else None)
     db.add(s)
     db.commit()
     return _out(db, s, request)
+
+
+@router.get("/shares/teaser/{file_id}")
+def teaser_moments(file_id: int, db: Session = Depends(get_db)):
+    """Whether this video can have a teaser (adult only), and the default moments."""
+    from ..services.media import teaser
+    row = _video(db, file_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    starts = teaser.default_moments(row["duration_sec"])
+    return {"adult": _is_adult(db, row["path"]), "duration_sec": row["duration_sec"],
+            "starts": starts, "clip_sec": teaser.clip_len(row["duration_sec"] or 0, len(starts))}
+
+
+@router.get("/shares/teaser/{file_id}/clip")
+def teaser_preview(file_id: int, starts: str, db: Session = Depends(get_db)):
+    """The teaser for these moments (comma-separated seconds), to preview before sharing."""
+    from ..services.media import teaser
+    row = _video(db, file_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        picked = teaser.valid([float(x) for x in starts.split(",") if x.strip()], row["duration_sec"])
+    except (ValueError, teaser.TeaserError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc) if isinstance(exc, teaser.TeaserError)
+                            else "Moments must be numbers")
+    return FileResponse(_teaser_file(file_id, picked), media_type="video/mp4",
+                        headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.get("/shares")
@@ -110,6 +170,8 @@ def purge(db: Session) -> int:
     n = db.query(ShareLink).filter((ShareLink.revoked_at < cut) | (ShareLink.expires_at < cut)).delete(
         synchronize_session=False)
     db.commit()
+    from ..services.media import teaser
+    teaser.prune()
     return n
 
 
@@ -148,7 +210,13 @@ def public_meta(token: str, request: Request, db: Session = Depends(get_db)):
         row = _video(db, s.target_id)
         if row is None:
             raise HTTPException(status_code=404, detail=GONE)
-        out["duration_sec"] = row["duration_sec"]
+        starts = _starts(s)
+        if starts:
+            from ..services.media import teaser
+            out["teaser"] = True
+            out["duration_sec"] = round(teaser.clip_len(row["duration_sec"] or 0, len(starts)) * len(starts), 1)
+        else:
+            out["duration_sec"] = row["duration_sec"]
     else:
         a = db.get(MusicLibAlbum, s.target_id)
         if a is None:
@@ -168,6 +236,15 @@ def public_video(token: str, db: Session = Depends(get_db)):
     s = _live(db, token)
     if s.kind != "video" or _video(db, s.target_id) is None:
         raise HTTPException(status_code=404, detail=GONE)
+    starts = _starts(s)
+    if starts:
+        mp4 = _teaser_file(s.target_id, starts)     # rebuilt if the cache was cleared
+        try:
+            os.utime(mp4)                          # keeps it from being pruned while in use
+        except OSError:
+            pass
+        return FileResponse(mp4, media_type="video/mp4", content_disposition_type="inline",
+                            headers={"Cache-Control": "no-store"})
     row = _video(db, s.target_id)
     return FileResponse(row["path"], content_disposition_type="inline", headers={"Cache-Control": "no-store"})
 
@@ -176,7 +253,7 @@ def public_video(token: str, db: Session = Depends(get_db)):
 def public_play(token: str, start: float = 0.0, db: Session = Depends(get_db)):
     from . import media
     s = _live(db, token)
-    if s.kind != "video":
+    if s.kind != "video" or s.clip:               # a teaser never reaches the whole video
         raise HTTPException(status_code=404, detail=GONE)
     return media.play_file(s.target_id, start)
 

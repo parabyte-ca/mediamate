@@ -218,6 +218,25 @@ class IndexerLink(Base):
     created_at = Column(DateTime, nullable=False)
 
 
+class ShareLink(Base):
+    """A link to one video or album that works without logging in, until it expires or
+    is revoked. Public pages only ever see the title, never paths or ids."""
+    __tablename__ = "share_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String, nullable=False, unique=True, index=True)
+    kind = Column(String, nullable=False)              # video | album
+    target_id = Column(Integer, nullable=False)        # media_files.id | music_lib_albums.id
+    title = Column(String, nullable=False)
+    adult = Column(Boolean, default=False)             # the page asks "18+?" first
+    person_id = Column(Integer, nullable=True)         # who shared it
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime, nullable=True)       # None: until revoked
+    revoked_at = Column(DateTime, nullable=True)
+    views = Column(Integer, default=0)
+    last_viewed_at = Column(DateTime, nullable=True)
+
+
 class MusicRating(Base):
     """An album's MusicBrainz community rating (0–5), cached for Browse → Music."""
     __tablename__ = "music_ratings"

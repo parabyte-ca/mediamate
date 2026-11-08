@@ -3,11 +3,13 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderInput, FolderSearch, Layers, Loader2, MoreHorizontal,
-  CheckCircle2, Music, Pause, Play, Scissors, SkipForward, Square, Star, Stethoscope, Tags, Timer, Trash2, X,
+  CheckCircle2, Music, Pause, Play, Scissors, Share2, SkipForward, Square, Star, Stethoscope, Tags, Timer, Trash2, X,
 } from "lucide-react";
 import { api, type DoctorKind, type DownloadPath, type MediaFile, type MediaJobType, type MediaStats, type OrganisePlan } from "../api/client";
 import { useEvent } from "../events";
 import Stars from "../components/Stars";
+import VideoPlayer from "../components/VideoPlayer";
+import ShareDialog from "../components/ShareDialog";
 import MusicLibrary from "../components/MusicLibrary";
 import DoctorDialog, { type DoctorKindInfo } from "../components/DoctorDialog";
 import { fmtSize } from "../utils";
@@ -109,6 +111,7 @@ type Dialog =
   | { kind: "rename"; file: MediaFile }
   | { kind: "delete"; files: MediaFile[] }
   | { kind: "preview"; file: MediaFile }
+  | { kind: "share"; file: MediaFile }
   | { kind: "organise"; files: MediaFile[] }
   | { kind: "move"; files: MediaFile[] }
   | { kind: "collections"; files: MediaFile[] }
@@ -178,6 +181,7 @@ function RowMenu({ f, onAction }: { f: MediaFile; onAction: (a: string) => void 
         <div ref={menuRef} role="menu" style={pos ?? { top: 0, right: 0, visibility: "hidden" }}
              className="fixed z-40 w-48 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg">
           {item("preview", "Preview", Eye)}
+          {item("share", "Share…", Share2)}
           <div className="sm:hidden">
             {item("encode", "Encode…", Film, busy(f))}
             {item("split", "Split…", Scissors, busy(f))}
@@ -215,92 +219,12 @@ function Thumb({ f, onOpen }: { f: MediaFile; onOpen: () => void }) {
   );
 }
 
-function fmtClock(sec: number): string {
-  const s = Math.max(0, Math.floor(sec));
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
-  return h ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
-}
-
-/** Plays the original file when the browser can; otherwise (or on request) a version
- *  MediaMate converts on the fly. The converted stream has no timeline, so this
- *  dialog shows its own seek bar and restarts the conversion from the chosen point. */
 function PreviewDialog({ file, onClose }: { file: MediaFile; onClose: () => void }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [mode, setMode] = useState<"original" | "converted">("original");
-  const [offset, setOffset] = useState(0);        // where the conversion started (s)
-  const [pos, setPos] = useState(0);              // current position in the file (s)
-  const [note, setNote] = useState<string | null>(null);
-  const duration = file.duration_sec ?? 0;
-
-  const convert = useCallback((from: number, why?: string) => {
-    setMode("converted");
-    setOffset(from);
-    setPos(from);
-    if (why) setNote(why);
-  }, []);
-
-  // The original plays but shows no picture (e.g. HEVC in a browser without it): convert.
-  useEffect(() => {
-    if (mode !== "original") return;
-    const v = videoRef.current;
-    if (!v) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const onMeta = () => {
-      timer = setTimeout(() => {
-        if (v.videoWidth === 0) convert(v.currentTime, "This browser can't show this file's video, so MediaMate is converting it.");
-      }, 2500);
-    };
-    v.addEventListener("loadedmetadata", onMeta);
-    return () => { v.removeEventListener("loadedmetadata", onMeta); if (timer) clearTimeout(timer); };
-  }, [mode, convert]);
-
-  const src = mode === "original" ? api.media.streamUrl(file.id) : api.media.playUrl(file.id, offset);
-
   return (
     <Modal title={file.filename} onClose={onClose} wide>
-      <video
-        key={src}
-        ref={videoRef}
-        src={src}
-        controls
-        autoPlay
-        playsInline
-        className="max-h-[65vh] w-full rounded bg-black"
-        onError={() => mode === "original"
-          ? convert(videoRef.current?.currentTime ?? 0, "This browser can't play this file directly, so MediaMate is converting it.")
-          : setNote("MediaMate couldn't convert this file. Try Download instead.")}
-        onTimeUpdate={(e) => mode === "converted" && setPos(offset + e.currentTarget.currentTime)}
-      />
-
-      {mode === "converted" && duration > 0 && (
-        <div className="mt-3 flex items-center gap-3 text-xs tabular-nums text-gray-600 dark:text-gray-300">
-          <span>{fmtClock(pos)}</span>
-          <input type="range" min={0} max={Math.floor(duration)} step={1} value={Math.min(pos, duration)}
-                 aria-label="Seek" className="flex-1 accent-blue-600"
-                 onChange={(e) => setPos(Number(e.target.value))}
-                 onMouseUp={(e) => convert(Number((e.target as HTMLInputElement).value))}
-                 onTouchEnd={(e) => convert(Number((e.target as HTMLInputElement).value))}
-                 onKeyUp={(e) => convert(Number((e.target as HTMLInputElement).value))} />
-          <span>{fmtClock(duration)}</span>
-        </div>
-      )}
-
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          {note ?? (mode === "original" ? "Playing the original file." : "Converted for your browser as it plays (uses some CPU on the server).")}
-        </p>
-        <div className="flex gap-2">
-          {mode === "original" ? (
-            <button className={btnGhost} title="Use this if there's no picture or no sound"
-                    onClick={() => convert(videoRef.current?.currentTime ?? 0, "Converted for your browser as it plays (uses some CPU on the server).")}>
-              <Film className="h-4 w-4" />Compatible playback
-            </button>
-          ) : (
-            <button className={btnGhost} onClick={() => { setMode("original"); setNote(null); }}>Original file</button>
-          )}
-          <a href={api.media.streamUrl(file.id, true)} className={btnGhost}><Download className="h-4 w-4" />Download</a>
-        </div>
-      </div>
+      <VideoPlayer original={api.media.streamUrl(file.id)} converted={(from) => api.media.playUrl(file.id, from)}
+                   duration={file.duration_sec ?? 0} buttonClass={btnGhost}
+                   extra={<a href={api.media.streamUrl(file.id, true)} className={btnGhost}><Download className="h-4 w-4" />Download</a>} />
     </Modal>
   );
 }
@@ -332,6 +256,9 @@ export default function Library() {
   const load = useCallback(async () => {
     const [f, s] = await Promise.all([api.media.files(), api.media.stats()]);
     setFiles(f);
+    const want = Number(new URLSearchParams(window.location.search).get("preview") || 0);
+    const hit = want ? f.find((x) => x.id === want) : undefined;
+    if (hit) setDialog((d) => d ?? { kind: "preview", file: hit });
     setStats(s);
     setLoading(false);
   }, []);
@@ -414,6 +341,7 @@ export default function Library() {
 
   const onRowAction = (f: MediaFile, a: string) => {
     if (a === "preview") return setDialog({ kind: "preview", file: f });
+    if (a === "share") return setDialog({ kind: "share", file: f });
     if (a === "collections") return setDialog({ kind: "collections", files: [f] });
     if (a === "organise") return setDialog({ kind: "organise", files: [f] });
     if (a === "encode") setDialog({ kind: "encode", files: [f] });
@@ -694,6 +622,10 @@ export default function Library() {
         </Modal>
       )}
       {dialog?.kind === "preview" && <PreviewDialog file={dialog.file} onClose={() => setDialog(null)} />}
+      {dialog?.kind === "share" && (
+        <ShareDialog kind="video" id={dialog.file.id} title={dialog.file.filename}
+                     householdPath={`/library?preview=${dialog.file.id}`} onClose={() => setDialog(null)} />
+      )}
       {dialog?.kind === "doctor" && <DoctorDialog title="Library doctor" kinds={DOCTOR_KINDS} source={api.doctor}
                                                   autoFixLabel="Fix sample clips, leftover files and empty folders automatically (they go to the 30-day trash)"
                                                   onClose={() => setDialog(null)} onChanged={() => { load(); loadAdult(); }} />}

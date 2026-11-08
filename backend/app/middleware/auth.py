@@ -41,8 +41,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS" or not request.url.path.startswith("/api/"):
             return await call_next(request)
 
-        # Specific exempt API paths (login, status)
-        if request.url.path in _EXEMPT:
+        # Specific exempt API paths (login, status), and share links (their token is the key)
+        if request.url.path in _EXEMPT or request.url.path.startswith("/api/public/"):
             return await call_next(request)
 
         # From the home network → always allowed

@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "./ThemeContext";
 import { EventsProvider } from "./events";
 import { PeopleProvider } from "./people";
+import SharePage from "./pages/SharePage";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Search from "./pages/Search";
@@ -54,6 +55,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/s/:token" element={<SharePage />} />
           <Route
             element={
               <AuthGuard>

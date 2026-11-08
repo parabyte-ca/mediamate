@@ -4,6 +4,7 @@ import { api, SECRET_MASK, type DownloadPath, type FolderRole, type FolderTarget
 import { authStore } from "../auth";
 import { PALETTES, useTheme, type Theme } from "../ThemeContext";
 import { Avatar, usePeople } from "../people";
+import type { ShareLink } from "../api/client";
 import ImportPanel from "../components/ImportPanel";
 import { startTour } from "../components/Tour";
 import MediaSettings from "../components/MediaSettings";
@@ -321,6 +322,41 @@ export function FolderSummary({ label, folder, empty }: { label: string; folder?
 }
 
 /** Colour theme and light/dark, saved on this device. */
+function SharingSection({ publicUrl, onPublicUrl }: { publicUrl: string; onPublicUrl: (v: string) => void }) {
+  const [links, setLinks] = useState<ShareLink[] | null>(null);
+  const load = () => api.shares.list().then(setLinks).catch(() => setLinks([]));
+  useEffect(() => { load(); }, []);
+  return (
+    <Section title="Sharing">
+      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+        Share a video or album from the Library (Share…). Anyone with a link can watch or listen in their browser, without
+        logging in, until it expires. Remove a link here to stop it working straight away.
+      </p>
+      <Field label="Public address" value={publicUrl} onChange={onPublicUrl} placeholder="https://mediamate.example.com"
+             hint="Your Cloudflare (or other outside) address, so links work outside the house. Save settings after changing it." />
+      <h3 className="mb-2 mt-4 text-sm font-medium text-gray-700 dark:text-gray-300">Active links</h3>
+      {links === null ? <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+        : links.length === 0 ? <p className="text-xs text-gray-400">No links shared right now.</p>
+        : (
+          <ul className="divide-y divide-gray-100 rounded-lg border border-gray-200 dark:divide-gray-800 dark:border-gray-700">
+            {links.map((l) => (
+              <li key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
+                <span className="min-w-0 flex-1 truncate font-medium text-gray-800 dark:text-gray-200" title={l.title}>{l.title}</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  {[l.shared_by && `by ${l.shared_by}`,
+                    l.expires_at ? `until ${new Date(l.expires_at + "Z").toLocaleDateString()}` : "no expiry",
+                    `${l.views} view${l.views === 1 ? "" : "s"}`].filter(Boolean).join(" · ")}
+                </span>
+                <button onClick={() => navigator.clipboard.writeText(l.url)} className="text-xs text-blue-600 hover:underline dark:text-blue-400">Copy</button>
+                <button onClick={() => api.shares.revoke(l.id).then(load)} className="text-xs text-red-600 hover:underline dark:text-red-400">Remove</button>
+              </li>
+            ))}
+          </ul>
+        )}
+    </Section>
+  );
+}
+
 const PERSON_COLORS = ["#2563eb", "#db2777", "#16a34a", "#d97706", "#7c3aed", "#0891b2"];
 
 function PeopleSection() {
@@ -1764,6 +1800,9 @@ export default function Settings() {
 
         {/* People */}
         <PeopleSection />
+
+        {/* Sharing */}
+        <SharingSection publicUrl={settings.public_url ?? ""} onPublicUrl={(v) => set("public_url", v)} />
 
         {/* Appearance */}
         <AppearanceSection />

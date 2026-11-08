@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Stethoscope, Disc3, FileText, LayoutGrid, List as ListIcon, Star, FolderInput, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Tags, Upload, Wand2, X } from "lucide-react";
+import { AlertTriangle, Stethoscope, Disc3, FileText, LayoutGrid, List as ListIcon, Star, FolderInput, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Share2, Tags, Upload, Wand2, X } from "lucide-react";
 import { api, type MusicDoctorKind, type AlbumTags, type CoverCandidate, type LibAlbum, type MusicBatch, type LibAlbumDetail, type MusicIssue, type TagRow } from "../api/client";
 import Stars from "./Stars";
+import ShareDialog from "./ShareDialog";
 import DoctorDialog, { type DoctorKindInfo } from "./DoctorDialog";
 import { fmtSize } from "../utils";
 
@@ -62,7 +63,7 @@ export default function MusicLibrary() {
   const [rating, setRating] = useState("");
   const [coll, setColl] = useState("");
   const [issue, setIssue] = useState("");
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<number | null>(() => Number(new URLSearchParams(window.location.search).get("album") || 0) || null);
   const [toast, setToast] = useState<string | null>(null);
   const say = (m: string) => { setToast(m); window.setTimeout(() => setToast(null), 5000); };
   const [view, setViewState] = useState<"tiles" | "list">(() => {
@@ -353,6 +354,7 @@ export default function MusicLibrary() {
 }
 
 function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => void; onChanged: (msg?: string) => void }) {
+  const [sharing, setSharing] = useState(false);
   const [a, setA] = useState<LibAlbumDetail | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [playing, setPlaying] = useState<number | null>(null);
@@ -437,6 +439,9 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
               <button className={ghost} disabled={busy !== null} onClick={() => (names ? setNames(null) : api.music.collectionNames().then((r) => setNames(r.names)).catch(() => setNames([])))}>
                 <Tags className="h-4 w-4" />Collections
               </button>
+              <button className={ghost} onClick={() => setSharing(true)} title="Send a link to this album">
+                <Share2 className="h-4 w-4" />Share
+              </button>
             </div>
 
             {names && (
@@ -488,6 +493,10 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
           </>
         )}
       </div>
+      {sharing && a && (
+        <ShareDialog kind="album" id={id} title={[a.artist, a.title].filter(Boolean).join(" – ")}
+                     householdPath={`/library?lib=music&album=${id}`} onClose={() => setSharing(false)} />
+      )}
     </div>
   );
 }

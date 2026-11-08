@@ -491,6 +491,28 @@ class ContentRating(Base):
     genres_checked_at = Column(DateTime, nullable=True)
 
 
+class Person(Base):
+    """Someone in the household with their own watchlist view (no login of their own:
+    each phone or browser remembers who is using it)."""
+    __tablename__ = "people"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    color = Column(String, nullable=True)            # e.g. "#2563eb"
+    is_owner = Column(Boolean, default=False)       # gets system alerts; can't be removed
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class WatchlistFollower(Base):
+    """A person following a watchlist item. The item and its downloads are shared."""
+    __tablename__ = "watchlist_followers"
+    __table_args__ = (UniqueConstraint("person_id", "watchlist_id", name="uq_follower"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    person_id = Column(Integer, ForeignKey("people.id", ondelete="CASCADE"), nullable=False, index=True)
+    watchlist_id = Column(Integer, ForeignKey("watchlist.id", ondelete="CASCADE"), nullable=False, index=True)
+
+
 class PushSubscription(Base):
     """A browser/phone that asked for push notifications (Web Push)."""
     __tablename__ = "push_subscriptions"
@@ -500,6 +522,7 @@ class PushSubscription(Base):
     p256dh = Column(String, nullable=False)
     auth = Column(String, nullable=False)
     label = Column(String, nullable=True)  # e.g. "Chrome on Android"
+    person_id = Column(Integer, nullable=True)  # whose alerts this device gets; None = everyone's
     created_at = Column(DateTime, server_default=func.now())
     last_success_at = Column(DateTime, nullable=True)
     failures = Column(Integer, default=0)

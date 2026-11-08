@@ -157,6 +157,7 @@ class WatchlistOut(BaseModel):
     albums: Optional[dict] = None
 
     model_config = {"from_attributes": True}
+    followers: list[int] = []          # people following it (see services/people.py)
 
 
 # ── Watchlist episode tracking ────────────────────────────────────────────────

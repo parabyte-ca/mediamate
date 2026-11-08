@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Avatar, usePeople } from "../people";
 import { Link } from "react-router-dom";
 import { CalendarDays, CheckCircle2, Clock, Loader2, Search } from "lucide-react";
 import { api, type CalendarEntry } from "../api/client";
@@ -15,6 +16,11 @@ const epLabel = (e: CalendarEntry) =>
   `S${String(e.season).padStart(2, "0")}E${String(e.episode).padStart(2, "0")}`;
 
 export default function Calendar() {
+  const { people, me } = usePeople();
+  const [who, setWho] = useState<"mine" | "all">(() => {
+    try { return localStorage.getItem("mm-watch-who") === "all" ? "all" : "mine"; } catch { return "mine"; }
+  });
+  const pick = (w: "mine" | "all") => { try { localStorage.setItem("mm-watch-who", w); } catch { /* */ } setWho(w); };
   const [entries, setEntries] = useState<CalendarEntry[] | null>(null);
   const [unmatched, setUnmatched] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -23,14 +29,14 @@ export default function Calendar() {
 
   const load = useCallback(async () => {
     try {
-      const r = await api.calendar.get(30, 7);
+      const r = await api.calendar.get(30, 7, people.length > 1 ? who : "all");
       setEntries(r.entries);
       setUnmatched(r.unmatched);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load the calendar.");
     }
-  }, []);
+  }, [who, people.length]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -68,6 +74,17 @@ export default function Calendar() {
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           Episodes of your watchlist shows from the past week to the next 30 days.
         </p>
+        {people.length > 1 && me && (
+          <div className="mt-3 inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5" role="tablist" aria-label="Whose shows">
+            {([["mine", "Mine"], ["all", "Everyone"]] as const).map(([id, label]) => (
+              <button key={id} role="tab" aria-selected={who === id} onClick={() => pick(id)}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${who === id
+                  ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}>
+                {id === "mine" && <Avatar person={me} size={18} />}{label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {note && (

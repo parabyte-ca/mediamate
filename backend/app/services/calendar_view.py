@@ -60,7 +60,7 @@ async def build_guide(db, item, now: datetime | None = None) -> dict:
 
 
 async def build_calendar(db, now: datetime | None = None, days_back: int = 7,
-                         days_ahead: int = 30) -> dict:
+                         days_ahead: int = 30, only: set[int] | None = None) -> dict:
     """Episodes of watchlisted shows airing in [now - days_back, now + days_ahead]."""
     from ..models import WatchlistEpisode, WatchlistItem
 
@@ -68,7 +68,7 @@ async def build_calendar(db, now: datetime | None = None, days_back: int = 7,
     start = now - timedelta(days=days_back)
     end = now + timedelta(days=days_ahead)
 
-    items = db.query(WatchlistItem).all()
+    items = [i for i in db.query(WatchlistItem).all() if only is None or i.id in only]
     have: dict[int, set[tuple[int, int]]] = defaultdict(set)
     for e in db.query(WatchlistEpisode).all():
         have[e.watchlist_id].add((e.season, e.episode))

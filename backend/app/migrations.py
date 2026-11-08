@@ -112,6 +112,7 @@ MIGRATIONS: list[tuple[str, str | None]] = [
     # One Folders list: library roles and the music download folder live on folders.
     ("ALTER TABLE download_paths ADD COLUMN role TEXT", None),
     ("ALTER TABLE download_paths ADD COLUMN music_downloads INTEGER NOT NULL DEFAULT 0", None),
+    ("ALTER TABLE push_subscriptions ADD COLUMN person_id INTEGER", None),
 ]
 
 

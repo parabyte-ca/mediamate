@@ -1,7 +1,7 @@
 """Music on the Watchlist: find artists (MusicBrainz), follow them, manage their albums."""
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -51,17 +51,25 @@ def search_artists(q: str):
 
 
 @router.post("/watchlist/from-musicbrainz", response_model=WatchlistOut, status_code=201)
-def follow_artist(body: FollowRequest, db: Session = Depends(get_db)):
+def follow_artist(body: FollowRequest, request: Request, db: Session = Depends(get_db)):
+    from ..models import WatchlistItem
+    from ..services import people
+    me = people.acting(db, request)
     try:
         item = music.add_artist(db, body.mbid, body.start, body.include_eps, body.download_path_id)
     except music.AlreadyFollowing:
-        raise HTTPException(status_code=409, detail="You already follow that artist.")
+        item = db.query(WatchlistItem).filter(WatchlistItem.kind == "artist", WatchlistItem.mbid == body.mbid).first()
+        people.ensure_owner(db)
+        if item is None or not people.follow(db, item.id, me.id):
+            raise HTTPException(status_code=409, detail="You already follow that artist.")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except musicbrainz.MusicBrainzUnavailable as exc:
         raise HTTPException(status_code=503, detail=f"MusicBrainz is unavailable right now ({exc})")
+    people.follow(db, item.id, me.id)
     row = WatchlistOut.model_validate(item)
     row.albums = music.summary(db, item)
+    row.followers = people.followers(db, [item.id]).get(item.id, [])
     return row
 
 

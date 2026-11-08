@@ -51,11 +51,11 @@ def _int(settings: dict, key: str, default: int) -> int:
         return default
 
 
-def _alert(settings: dict, key: str, title: str, body: str) -> None:
+def _alert(settings: dict, key: str, title: str, body: str, watchlist_id: int | None = None) -> None:
     from .apprise_notify import notify
 
     if _flag(settings, key):
-        notify(settings.get("apprise_url", ""), title=title, body=body)
+        notify(settings.get("apprise_url", ""), title=title, body=body, watchlist_id=watchlist_id)
 
 
 def _mark_history_failed(db, torrent_hash: str | None, msg: str) -> None:
@@ -261,7 +261,7 @@ def _fail_download(db, dl, settings: dict, reason: str, alert_key: str, flag_att
     body = f"{icon} {dl.title} — {reason}."
     if outcome:
         body += f"\n{outcome}"
-    _alert(settings, alert_key, "MediaMate — Download problem", body)
+    _alert(settings, alert_key, "MediaMate — Download problem", body, dl.watchlist_id)
 
 
 def process_download_events() -> None:
@@ -335,7 +335,7 @@ def process_download_events() -> None:
             Download.status.in_(_DONE_STATUSES), Download.notified_complete == False  # noqa: E712
         ).all():
             _alert(settings, "notify_on_complete", "MediaMate — Download complete",
-                   f"✅ {dl.title}")
+                   f"✅ {dl.title}", dl.watchlist_id)
             dl.notified_complete = True
         db.commit()
 

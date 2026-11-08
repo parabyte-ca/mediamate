@@ -282,6 +282,7 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                         apprise_url,
                         title=f"MediaMate — {item.title}",
                         body=f"⬇️ Downloaded: {best['title']}",
+                        watchlist_id=item.id,
                     )
 
             except Exception as e:
@@ -338,6 +339,7 @@ async def _check_statuses_async(db, *, item_id: int | None = None) -> None:
                     apprise_url,
                     title=f"MediaMate — {item.title}",
                     body=f"{item.title} has ended — auto-paused on watchlist.",
+                    watchlist_id=item.id,
                 )
             else:
                 db.commit()

@@ -33,6 +33,7 @@ import {
   type WatchlistItem,
 } from "../api/client";
 import EpisodeGuide from "../components/EpisodeGuide";
+import { Avatar, usePeople } from "../people";
 import Poster from "../components/Poster";
 import { AddArtistDialog, ArtistCard } from "../components/MusicWatch";
 import { fmtAgo, fmtDate, fmtDay } from "../utils";
@@ -1021,7 +1022,37 @@ function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSele
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+const WHO_KEY = "mm-watch-who";
+
+/** Who follows an item, and Follow / Unfollow for this person (two or more people). */
+function Followers({ item, onChange }: { item: WatchlistItem; onChange: () => void }) {
+  const { people, me } = usePeople();
+  if (people.length < 2) return null;
+  const who = people.filter((p) => item.followers?.includes(p.id));
+  const mine = !!me && !!item.followers?.includes(me.id);
+  const toggle = async () => {
+    if (mine) await api.watchlist.unfollow(item.id); else await api.watchlist.follow(item.id);
+    onChange();
+  };
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5 px-1 text-xs text-gray-500 dark:text-gray-400">
+      <div className="flex -space-x-1.5">{who.map((p) => <Avatar key={p.id} person={p} size={20} />)}</div>
+      <span className="truncate">{who.map((p) => p.name).join(" & ") || "Nobody"}</span>
+      {me && (
+        <button onClick={toggle} className="ml-auto shrink-0 font-medium text-blue-600 hover:underline dark:text-blue-400">
+          {mine ? "Unfollow" : "Follow"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function Watchlist() {
+  const { people, me } = usePeople();
+  const [who, setWhoState] = useState<"mine" | "all">(() => {
+    try { return localStorage.getItem(WHO_KEY) === "all" ? "all" : "mine"; } catch { return "mine"; }
+  });
+  const setWho = (w: "mine" | "all") => { try { localStorage.setItem(WHO_KEY, w); } catch { /* */ } setWhoState(w); };
   const [items,      setItems]     = useState<WatchlistItem[]>([]);
   const [paths,      setPaths]     = useState<DownloadPath[]>([]);
   const [loading,    setLoading]   = useState(true);
@@ -1050,7 +1081,7 @@ export default function Watchlist() {
     setLoading(true);
     try {
       const [w, p, pr, st] = await Promise.all([
-        api.watchlist.list(), api.paths.list(), api.profiles.list(), api.settings.get(),
+        api.watchlist.list(people.length > 1 ? who : "all"), api.paths.list(), api.profiles.list(), api.settings.get(),
       ]);
       setItems(w); setPaths(p.filter((x) => x.downloads !== false)); setProfiles(pr);  // only folders downloads can go to
       setDefaultProfileId(st.default_profile_id ? Number(st.default_profile_id) : null);
@@ -1058,7 +1089,7 @@ export default function Watchlist() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [who, people.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Find posters for shows that have none: in rounds (the server paces itself to
   // stay inside TVMaze's rate limit), stopping when everything has been tried or
@@ -1071,7 +1102,7 @@ export default function Watchlist() {
         const r = await api.watchlist.refreshMetadata().catch(() => null);
         if (!r || cancelled) return;
         if (r.matched > 0) {
-          const w = await api.watchlist.list().catch(() => null);
+          const w = await api.watchlist.list(people.length > 1 ? who : "all").catch(() => null);
           if (w && !cancelled) setItems(w);
         }
         if (r.remaining === 0) return;
@@ -1111,8 +1142,14 @@ export default function Watchlist() {
 
   const handleDelete = async (id: number) => {
     const it = items.find((i) => i.id === id);
-    if (!confirm(it?.kind === "artist" ? `Stop following ${it.title}? Downloaded albums stay in your library.` : "Remove this show from the watchlist?")) return;
-    await api.watchlist.delete(id); load();
+    const others = people.filter((p) => p.id !== me?.id && it?.followers?.includes(p.id));
+    const msg = others.length && me
+      ? `Remove ${it?.title} from your list? ${others.map((p) => p.name).join(" & ")} still follow${others.length === 1 ? "s" : ""} it, so it keeps downloading for them.`
+      : it?.kind === "artist" ? `Stop following ${it.title}? Downloaded albums stay in your library.` : "Remove this show from the watchlist?";
+    if (!confirm(msg)) return;
+    const r = await api.watchlist.delete(id);
+    if (r.unfollowed) showToast("Removed from your list");
+    load();
   };
 
   const handleToggle = async (item: WatchlistItem) => {
@@ -1245,6 +1282,19 @@ export default function Watchlist() {
         </div>
       </div>
 
+      {/* Mine / Everyone (when more than one person uses MediaMate) */}
+      {people.length > 1 && me && (
+        <div className="mb-3 mr-2 inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5" role="tablist" aria-label="Whose watchlist">
+          {([["mine", "Mine"], ["all", "Everyone"]] as const).map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={who === id} onClick={() => setWho(id)}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${who === id
+                ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}>
+              {id === "mine" && <Avatar person={me} size={18} />}{label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* TV shows / Movies / Music (always shown, so Music is reachable on an empty watchlist) */}
       {(
         <div className="mb-3 flex max-w-full overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 p-0.5 sm:inline-flex" role="tablist" aria-label="Show">
@@ -1351,7 +1401,7 @@ export default function Watchlist() {
             </p>
           )}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {filtered.map((item) => isArtist(item) ? (
+            {filtered.map((item) => <div key={item.id} className="min-w-0">{isArtist(item) ? (
               <ArtistCard
                 key={item.id}
                 item={item}
@@ -1391,7 +1441,7 @@ export default function Watchlist() {
                 onRefresh={load}
                 onToast={showToast}
               />
-            ))}
+            )}<Followers item={item} onChange={load} /></div>)}
           </div>
         </>
       )}

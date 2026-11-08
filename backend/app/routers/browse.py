@@ -1,6 +1,6 @@
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -107,14 +107,17 @@ def rebuild_taste(db: Session = Depends(get_db)):
 
 
 @router.post("/browse/music/add")
-def browse_music_add(body: dict, db: Session = Depends(get_db)):
+def browse_music_add(body: dict, request: Request, db: Session = Depends(get_db)):
     """Follow the artist (future releases) and want this album."""
-    from ..services import music, music_discover, musicbrainz
+    from ..services import music, music_discover, musicbrainz, people
     artist, rg = str(body.get("artist_mbid") or ""), str(body.get("mbid") or "")
     if not artist or not rg:
         raise HTTPException(status_code=400, detail="artist_mbid and mbid are needed")
     try:
-        return music_discover.add(db, artist, rg, str(body.get("title") or ""), body.get("date"), body.get("type"))
+        out = music_discover.add(db, artist, rg, str(body.get("title") or ""), body.get("date"), body.get("type"))
+        people.ensure_owner(db)
+        people.follow(db, out["watchlist_id"], people.acting(db, request).id)
+        return out
     except music.AlreadyFollowing:
         raise HTTPException(status_code=409, detail="Already following")
     except musicbrainz.MusicBrainzUnavailable as exc:

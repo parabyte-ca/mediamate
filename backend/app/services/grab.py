@@ -94,6 +94,6 @@ def grab_episode(db, item, season: int, episode: int) -> dict:
 
     if settings.get("notify_on_grab", "true").strip().lower() == "true":
         notify(settings.get("apprise_url", ""), title=f"MediaMate — {item.title}",
-               body=f"⬇️ Downloaded: {best['title']}")
+               body=f"⬇️ Downloaded: {best['title']}", watchlist_id=item.id)
     logger.info("Manual grab: %s", best["title"])
     return {"status": "started", "title": best["title"], "message": f"Started: {best['title']}"}

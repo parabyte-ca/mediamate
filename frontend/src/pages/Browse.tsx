@@ -467,6 +467,13 @@ function MusicBrowse() {
                 {[r.date ? fmtDay(r.date) : null, r.type !== "Album" ? r.type : null,
                   list === "popular" && r.listens ? `${r.listens.toLocaleString()} listens` : null].filter(Boolean).join(" · ")}
               </p>
+              {r.rating != null && (
+                <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300"
+                   title={`MusicBrainz rating: ${r.rating.toFixed(1)} out of 5 from ${r.rating_votes} votes`}>
+                  <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />{r.rating.toFixed(1)}
+                  <span className="text-gray-400 dark:text-gray-500">({r.rating_votes})</span>
+                </p>
+              )}
               {r.why && <p className="mt-0.5 truncate text-xs text-amber-700 dark:text-amber-400" title={r.why}>{r.why}</p>}
               <div className="mt-auto flex flex-wrap items-center gap-2 pt-2">
                 {r.in_library ? (

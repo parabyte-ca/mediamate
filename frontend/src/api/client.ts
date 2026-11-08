@@ -92,6 +92,7 @@ export interface BrowseRelease {
   mbid: string; title: string; artist: string; artist_mbids: string[]; date: string | null; type: string;
   cover: string | null; listens: number; tags: string[];
   following: boolean; status: AlbumStatus | null; in_library: boolean; score: number; why: string | null;
+  rating: number | null; rating_votes: number;
 }
 
 export interface BrowseMusic {

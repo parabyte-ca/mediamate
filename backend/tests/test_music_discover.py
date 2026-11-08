@@ -150,3 +150,22 @@ def test_various_artists_dont_inflate_your_taste(lb, mine):
 def test_not_artists(name):
     assert md.not_an_artist(name)
     assert not md.not_an_artist("Vanessa Carlton")
+
+
+def test_ratings_from_musicbrainz(lb, mine, monkeypatch):
+    from app.models import MusicRating
+    asked = []
+
+    def rating(mbid):
+        asked.append(mbid)
+        return {"rg-new-1": (4.25, 12), "rg-new-2": (5.0, 1)}.get(mbid, (None, 0))
+    monkeypatch.setattr(musicbrainz, "rating", rating)
+    rows = md.releases("new", mine.get_bind())
+    r = {x["title"]: x for x in md.rank(mine, rows, for_you=False)["releases"]}
+    assert (r["Glow"]["rating"], r["Glow"]["rating_votes"]) == (4.2, 12)    # 4.25 shown to one decimal
+    assert r["Bangers"]["rating"] is None                                    # one vote isn't a rating
+    assert sorted(asked) == ["rg-new-1", "rg-new-2"]
+    assert mine.query(MusicRating).count() == 2
+    md._cache.clear()
+    md.releases("new", mine.get_bind())
+    assert len(asked) == 2                                                   # cached for a week

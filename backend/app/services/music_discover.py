@@ -31,7 +31,10 @@ TOP_TAGS = 40
 SYNC = False                       # tests run lookups inline
 
 _cache: dict[str, tuple[float, list]] = {}
-_jobs = {"taste": False, "tags": False}
+_jobs = {"taste": False, "tags": False, "ratings": False}
+MAX_RATING_LOOKUPS = 150           # per list refresh (about 2½ minutes at 1 request a second)
+RATING_FRESH = timedelta(days=7)
+MIN_VOTES = 2                      # one vote isn't a rating
 _lock = threading.Lock()
 
 
@@ -99,6 +102,7 @@ def releases(kind: str, bind=None) -> list[dict]:
     rows = _fresh() if kind == "new" else _popular()
     _cache[kind] = (now, rows)
     _start("tags", _learn_release_artists, bind, rows)
+    _start("ratings", _learn_ratings, bind, rows)
     return rows
 
 
@@ -190,6 +194,40 @@ def _learn_release_artists(bind, rows: list[dict]) -> None:
             if artist_tags(db, r["artist"], mbid) is None:
                 artist_tags(db, r["artist"], mbid, lookup=True)
                 n += 1
+
+
+def _learn_ratings(bind, rows: list[dict]) -> None:
+    """MusicBrainz community ratings for the listed albums, a week at a time."""
+    from ..models import MusicRating
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with _session(bind) as db:
+        have = {r.mbid: r for r in db.query(MusicRating).filter(MusicRating.mbid.in_([x["mbid"] for x in rows]))}
+        n = 0
+        for x in rows:
+            row = have.get(x["mbid"])
+            if row is not None and row.checked_at and now - row.checked_at < RATING_FRESH:
+                continue
+            if n >= MAX_RATING_LOOKUPS:
+                break
+            n += 1
+            try:
+                value, votes = musicbrainz.rating(x["mbid"])
+            except musicbrainz.MusicBrainzUnavailable as exc:
+                logger.info("Rating lookup stopped: %s", exc)
+                break
+            if row is None:
+                row = MusicRating(mbid=x["mbid"])
+                db.add(row)
+            row.value, row.votes, row.checked_at = value, votes, now
+            db.commit()
+
+
+def ratings(db, mbids) -> dict[str, tuple[float, int]]:
+    """{release group: (rating, votes)} for albums with enough votes."""
+    from ..models import MusicRating
+    return {r.mbid: (round(r.value, 1), r.votes) for r in
+            db.query(MusicRating).filter(MusicRating.mbid.in_(list(mbids)), MusicRating.votes >= MIN_VOTES,
+                                         MusicRating.value.isnot(None))}
 
 
 # ── taste ───────────────────────────────────────────────────────────────────
@@ -294,9 +332,11 @@ def rank(db, rows: list[dict], for_you: bool) -> dict:
         owned.setdefault((_name_key(a.artist), music._key(a.title)), a.format)
     artists = {w.mbid: w for w in db.query(WatchlistItem).filter(WatchlistItem.kind == "artist") if w.mbid}
     albums = {a.mbid: a for a in db.query(MusicAlbum)}
+    rated = ratings(db, [r["mbid"] for r in rows])
     out = []
     for r in rows:
         r = dict(r)
+        r["rating"], r["rating_votes"] = rated.get(r["mbid"], (None, 0))
         key = _name_key(r["artist"])
         mbid = (r["artist_mbids"] or [None])[0]
         r["following"] = bool(set(r["artist_mbids"]) & followed)

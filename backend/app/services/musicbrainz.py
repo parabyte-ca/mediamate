@@ -53,6 +53,13 @@ def _get(path: str, **params) -> dict:
     return r.json()
 
 
+def rating(release_group_mbid: str) -> tuple[float | None, int]:
+    """(average 0–5, votes) of a release group's community rating."""
+    data = _get(f"/release-group/{release_group_mbid}", inc="ratings")
+    r = data.get("rating") or {}
+    return r.get("value"), int(r.get("votes-count") or 0)
+
+
 def cover_url(release_group_mbid: str) -> str:
     return COVER.format(mbid=release_group_mbid)
 

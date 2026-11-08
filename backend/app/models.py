@@ -208,6 +208,17 @@ class MusicArtistTag(Base):
     checked_at = Column(DateTime, nullable=True)
 
 
+class MusicRating(Base):
+    """An album's MusicBrainz community rating (0–5), cached for Browse → Music."""
+    __tablename__ = "music_ratings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    mbid = Column(String, nullable=False, unique=True, index=True)   # release group
+    value = Column(Float, nullable=True)
+    votes = Column(Integer, nullable=True)
+    checked_at = Column(DateTime, nullable=True)
+
+
 class MusicTrack(Base):
     __tablename__ = "music_tracks"
 

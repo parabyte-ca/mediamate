@@ -1,5 +1,5 @@
 """
-Unit tests for GET /backup/export and POST /backup/restore.
+Unit tests for POST /backup/export and POST /backup/restore.
 
 Strategy
 ────────
@@ -96,13 +96,13 @@ def _make_valid_zip(db_path: str) -> bytes:
 class TestExportBackup:
     def test_returns_200_with_zip_content_type(self, api_client):
         client, _, _ = api_client
-        resp = client.get("/backup/export")
+        resp = client.post("/backup/export", json={"passphrase": "correct horse"})
         assert resp.status_code == 200
         assert "application/zip" in resp.headers["content-type"]
 
     def test_zip_contains_required_files(self, api_client):
         client, _, _ = api_client
-        resp = client.get("/backup/export")
+        resp = client.post("/backup/export", json={"passphrase": "correct horse"})
         assert resp.status_code == 200
 
         with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
@@ -114,7 +114,7 @@ class TestExportBackup:
 
     def test_backup_meta_is_valid_json_with_required_keys(self, api_client):
         client, _, _ = api_client
-        resp = client.get("/backup/export")
+        resp = client.post("/backup/export", json={"passphrase": "correct horse"})
         assert resp.status_code == 200
 
         with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
@@ -122,11 +122,11 @@ class TestExportBackup:
 
         assert "created_at" in meta
         assert "app_version" in meta
-        assert "db_path" in meta
+        assert meta["encrypted"] and meta["salt"] and "db_path" not in meta
 
     def test_content_disposition_has_date_in_filename(self, api_client):
         client, _, _ = api_client
-        resp = client.get("/backup/export")
+        resp = client.post("/backup/export", json={"passphrase": "correct horse"})
         assert resp.status_code == 200
         cd = resp.headers.get("content-disposition", "")
         assert "mediamate-backup-" in cd
@@ -225,3 +225,62 @@ class TestRestoreBackup:
         )
         assert resp.status_code == 400
         assert "backup_meta.json" in resp.json()["detail"]
+
+
+# ── Secrets in backups (security audit 2) ─────────────────────────────────────
+
+SECRETS = {"plex_token": "plex-SECRET-123456", "qbit_password": "qbit-SECRET-654321",
+           "session_secret": "session-SECRET-abcdef", "vapid_private_key": "vapid-SECRET-zzz999",
+           "tpdb_api_key": "tpdb-SECRET-777777", "plex_url": "http://plex.lan:32400"}
+LINK = "http://prowlarr:9696/1/download?apikey=PROWLARR-SECRET-KEY-42&link=abc"
+
+
+def _seed(Session):
+    from app.models import Download, Setting
+    with Session() as s:
+        for k, v in SECRETS.items():
+            s.merge(Setting(key=k, value=v))
+        s.add(Download(title="x", magnet_link=LINK, status="completed"))
+        s.commit()
+
+
+def test_export_never_contains_a_secret(api_client, tmp_db):
+    client, db_path, _ = api_client
+    _seed(tmp_db[1])
+    resp = client.post("/backup/export", json={"passphrase": "correct horse"})
+    assert resp.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        blob = b"".join(zf.read(n) for n in zf.namelist())
+        settings = json.loads(zf.read("settings.json"))
+    for k, v in SECRETS.items():
+        if k == "plex_url":
+            assert v.encode() in blob                      # not a secret: readable
+        else:
+            assert v.encode() not in blob and settings[k].startswith("enc:")
+    assert b"PROWLARR-SECRET-KEY-42" not in blob
+
+
+def test_export_needs_a_passphrase(api_client):
+    client, _, _ = api_client
+    assert client.post("/backup/export", json={"passphrase": "short"}).status_code == 400
+    assert client.post("/backup/export", json={}).status_code == 400
+    assert client.get("/backup/export").status_code == 405
+
+
+def test_restore_with_the_passphrase_brings_secrets_back(api_client, tmp_db):
+    import sqlite3
+    client, db_path, _ = api_client
+    _seed(tmp_db[1])
+    z = client.post("/backup/export", json={"passphrase": "correct horse"}).content
+    assert client.post("/backup/restore", files={"file": ("b.zip", z, "application/zip")}).status_code == 400
+    bad = client.post("/backup/restore", files={"file": ("b.zip", z, "application/zip")},
+                      data={"passphrase": "wrong horse"})
+    assert bad.status_code == 400 and "Wrong passphrase" in bad.json()["detail"]
+    ok = client.post("/backup/restore", files={"file": ("b.zip", z, "application/zip")},
+                     data={"passphrase": "correct horse"})
+    assert ok.status_code == 200
+    con = sqlite3.connect(db_path)
+    got = dict(con.execute("SELECT key, value FROM settings").fetchall())
+    link = con.execute("SELECT magnet_link FROM downloads").fetchone()[0]
+    con.close()
+    assert all(got[k] == v for k, v in SECRETS.items()) and link == LINK

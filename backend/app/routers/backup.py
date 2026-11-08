@@ -9,13 +9,16 @@ Data included in every backup ZIP
                     DATABASE_URL environment variable; the default inside the
                     Docker container is /app/data/screenmate.db.
 
+  Secrets (passwords, API keys, tokens, indexer links) are encrypted with the
+  passphrase given at export: services/backup_crypto.py.
+
   settings.json     Human-readable snapshot of the 'settings' table at the
                     moment of export.  Intended for disaster-recovery reference
                     only — when restoring, the database file is overwritten
                     directly; this file is not re-imported separately.
 
   backup_meta.json  Metadata: creation timestamp (ISO 8601 UTC), app version
-                    (from APP_VERSION env var), and the original DB path.
+                    (from APP_VERSION env var), and the encryption salt/check.
 
 No persistent configuration files exist outside the database.  All user
 settings are stored in the 'settings' table within the SQLite database, so a
@@ -28,7 +31,7 @@ import os
 import zipfile
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -50,28 +53,29 @@ _DB_PATH: str = DATABASE_URL.replace("sqlite:///", "", 1)
 # ── Export ────────────────────────────────────────────────────────────────────
 
 
-@router.get("/backup/export")
-def export_backup(db: Session = Depends(get_db)):
-    """Stream an in-memory ZIP containing the database and a settings snapshot."""
-    settings_dict = {s.key: s.value for s in db.query(Setting).all()}
+@router.post("/backup/export")
+def export_backup(body: dict, db: Session = Depends(get_db)):
+    """Stream a ZIP of the database and a settings snapshot. Every secret in it is
+    encrypted with the passphrase (see services/backup_crypto.py)."""
+    from ..services import backup_crypto
+    passphrase = str((body or {}).get("passphrase") or "")
+    try:
+        db_bytes, sealed, settings_dict = backup_crypto.seal(_DB_PATH, passphrase)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="The database file wasn't found")
 
     now_utc = datetime.now(timezone.utc)
     meta = {
         "created_at": now_utc.isoformat(),
         "app_version": os.environ.get("APP_VERSION", "dev"),
-        "db_path": _DB_PATH,
+        **sealed,
     }
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        if os.path.exists(_DB_PATH):
-            zf.write(_DB_PATH, "screenmate.db")
-        else:
-            logger.warning(
-                "DB file not found at %s — backup will not include screenmate.db",
-                _DB_PATH,
-            )
-
+        zf.writestr("screenmate.db", db_bytes)
         zf.writestr("settings.json", json.dumps(settings_dict, indent=2))
         zf.writestr("backup_meta.json", json.dumps(meta, indent=2))
 
@@ -88,7 +92,7 @@ def export_backup(db: Session = Depends(get_db)):
 
 
 @router.post("/backup/restore")
-async def restore_backup(file: UploadFile = File(...)):
+async def restore_backup(file: UploadFile = File(...), passphrase: str = Form("")):
     """Replace the live database with the screenmate.db found in a backup ZIP.
 
     Restore procedure
@@ -149,6 +153,15 @@ async def restore_backup(file: UploadFile = File(...)):
                 logger.info("Scheduler paused for database restore")
 
             db_bytes = zf.read("screenmate.db")
+            from ..services import backup_crypto
+            if backup_crypto.is_sealed(meta):
+                if not passphrase:
+                    raise HTTPException(status_code=400,
+                                        detail="This backup is encrypted. Enter the passphrase it was made with.")
+                try:
+                    db_bytes = backup_crypto.unseal(db_bytes, meta, passphrase)
+                except backup_crypto.WrongPassphrase:
+                    raise HTTPException(status_code=400, detail="Wrong passphrase for this backup.")
 
             # Write to a sibling temp file first so the live DB is never left
             # in a partially overwritten state if we are interrupted.
@@ -170,6 +183,8 @@ async def restore_backup(file: UploadFile = File(...)):
                 meta.get("created_at", "unknown"),
             )
 
+        except HTTPException:
+            raise
         except Exception as exc:
             # Clean up the temp file if it was left behind.
             if os.path.exists(tmp_path):

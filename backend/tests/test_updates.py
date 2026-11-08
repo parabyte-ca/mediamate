@@ -25,6 +25,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from tests.helpers import from_address
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -701,7 +703,7 @@ class TestUpdateEndpointsBehindAuthMiddleware:
         with patch("app.middleware.auth.SessionLocal", return_value=db_session), \
              patch.object(db_session, "close"), \
              patch("app.services.updater._get_folder", return_value=upgrade_dir):
-            yield TestClient(app), make_token("s3cret", "hunter2")
+            yield TestClient(from_address(app, "192.168.1.20")), make_token("s3cret", "hunter2")
 
     def test_cloudflare_request_without_token_is_rejected(self, secured):
         client, _ = secured

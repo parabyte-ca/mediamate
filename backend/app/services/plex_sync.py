@@ -387,7 +387,8 @@ def sync() -> dict:
     try:
         return _sync(c)
     except (PlexError, httpx.HTTPError, ET.ParseError) as exc:
-        result = {"ok": False, "msg": f"Couldn't reach Plex: {exc}", "at": _now()}
+        from .secret_settings import scrub
+        result = {"ok": False, "msg": scrub(f"Couldn't reach Plex: {exc}", c.get("token", "")), "at": _now()}
         store.set_setting(LAST_KEY, json.dumps(result))
         return result
     finally:

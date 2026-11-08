@@ -625,6 +625,9 @@ export default function Settings() {
   const [backupFile,       setBackupFile]       = useState<File | null>(null);
   const [restoringBackup,  setRestoringBackup]  = useState(false);
   const [restoreResult,    setRestoreResult]    = useState<RestoreResponse | null>(null);
+  const [backupPass,       setBackupPass]       = useState("");
+  const [backupPass2,      setBackupPass2]      = useState("");
+  const [restorePass,      setRestorePass]      = useState("");
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -803,10 +806,12 @@ export default function Settings() {
   };
 
   const handleExportBackup = async () => {
+    if (backupPass.length < 8) { setExportError("Choose a passphrase of at least 8 characters."); return; }
+    if (backupPass !== backupPass2) { setExportError("The two passphrases don't match."); return; }
     setExportingBackup(true);
     setExportError(null);
     try {
-      const res = await api.backup.export();
+      const res = await api.backup.export(backupPass);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: "Export failed" }));
         setExportError(err.detail ?? "Export failed");
@@ -837,8 +842,9 @@ export default function Settings() {
     setRestoringBackup(true);
     setRestoreResult(null);
     try {
-      const res = await api.backup.restore(backupFile);
-      const body: RestoreResponse = await res.json().catch(() => ({ ok: false, error: "Unexpected response from server" }));
+      const res = await api.backup.restore(backupFile, restorePass);
+      const raw = await res.json().catch(() => ({ ok: false, error: "Unexpected response from server" }));
+      const body: RestoreResponse = res.ok ? raw : { ok: false, error: raw.error ?? (typeof raw.detail === "string" ? raw.detail : "Restore failed") };
       setRestoreResult(body);
       if (body.ok) {
         setTimeout(() => window.location.reload(), 2000);
@@ -1614,8 +1620,16 @@ export default function Settings() {
               <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Export backup</h3>
               <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                 Download a ZIP file containing your database and settings. Use this before upgrading or migrating to a new server.
+                Passwords, API keys and tokens inside it are encrypted with a passphrase you choose; everything else stays readable.
               </p>
             </div>
+            <div className="grid max-w-md gap-2 sm:grid-cols-2">
+              <input type="password" autoComplete="new-password" placeholder="Passphrase (8+ characters)" value={backupPass}
+                     onChange={(e) => setBackupPass(e.target.value)} className={FIELD} />
+              <input type="password" autoComplete="new-password" placeholder="Passphrase again" value={backupPass2}
+                     onChange={(e) => setBackupPass2(e.target.value)} className={FIELD} />
+            </div>
+            <p className="text-xs text-amber-600 dark:text-amber-400">Keep this passphrase: without it, the passwords and keys in the backup can't be restored.</p>
             <button
               onClick={handleExportBackup}
               disabled={exportingBackup}
@@ -1655,6 +1669,10 @@ export default function Settings() {
               />
             </label>
             {backupFile && (
+              <input type="password" autoComplete="off" placeholder="Backup passphrase (for encrypted backups)" value={restorePass}
+                     onChange={(e) => setRestorePass(e.target.value)} className={`${FIELD} max-w-md`} />
+            )}
+            {backupFile && (
               <button
                 onClick={handleRestoreBackup}
                 disabled={restoringBackup}
@@ -1685,7 +1703,7 @@ export default function Settings() {
         {/* Security */}
         <Section title="Security">
           <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
-            Set a password to require login when MediaMate is accessed via Cloudflare tunnel.
+            Set a password to require login for anyone outside your home network: through Cloudflare, a reverse proxy passing on an outside address, or a forwarded port. Devices on your home network (192.168.x, 10.x, 172.16–31.x) never need it.
             Local network access is always unrestricted. Leave blank to disable authentication.
           </p>
           <div className="space-y-3">

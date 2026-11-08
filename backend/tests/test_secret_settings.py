@@ -23,6 +23,7 @@ SECRETS = {
     "jellyfin_api_key": "jf0123456789abcdef",
     "digest_smtp_password": "smtp-secret-99",
     "ui_password": "hunter2-ui",
+    "tpdb_api_key": "tpdb-key-0123456789",
     "session_secret": "a" * 64,
     "vapid_private_key": "-----BEGIN PRIVATE KEY-----\nMIGHAgEA\n-----END PRIVATE KEY-----",
 }

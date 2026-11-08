@@ -54,15 +54,17 @@ class LoginRequest(BaseModel):
 
 @router.get("/auth/status")
 def auth_status(request: Request, db: Session = Depends(get_db)):
-    via_cf = "cf-connecting-ip" in request.headers
+    from ..middleware.auth import from_home
     row = db.query(Setting).filter(Setting.key == "ui_password").first()
     password_set = bool(row and row.value)
-    return {"auth_required": password_set and via_cf}
+    return {"auth_required": password_set and not from_home(request)}
 
 
 @router.post("/auth/login")
 def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
-    client_ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "unknown")
+    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    client_ip = (request.headers.get("cf-connecting-ip") or forwarded
+                 or (request.client.host if request.client else "unknown"))
     _check_rate_limit(client_ip)
 
     row = db.query(Setting).filter(Setting.key == "ui_password").first()

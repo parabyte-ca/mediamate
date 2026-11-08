@@ -1,4 +1,5 @@
 import hmac
+import ipaddress
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -11,6 +12,29 @@ from ..services.token import make_token
 _EXEMPT = {"/health", "/api/auth/login", "/api/auth/status"}
 
 
+def _private(addr: str | None) -> bool:
+    try:
+        ip = ipaddress.ip_address((addr or "").strip().strip("[]"))
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback
+
+
+def from_home(request: Request) -> bool:
+    """A request from the home network: no Cloudflare header, the client address is
+    private (192.168.x, 10.x, 172.16–31.x, localhost), and so is every address a proxy
+    in between reports (X-Forwarded-For / X-Real-IP)."""
+    h = request.headers
+    if "cf-connecting-ip" in h:
+        return False
+    if not _private(request.client.host if request.client else None):
+        return False
+    forwarded = [a for a in (h.get("x-forwarded-for") or "").split(",") if a.strip()]
+    if h.get("x-real-ip"):
+        forwarded.append(h["x-real-ip"])
+    return all(_private(a) for a in forwarded)
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # OPTIONS (CORS pre-flights) and non-API paths (static files, SPA) always pass through
@@ -21,11 +45,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if request.url.path in _EXEMPT:
             return await call_next(request)
 
-        # No CF-Connecting-IP header → local network access → always allowed
-        if "cf-connecting-ip" not in request.headers:
+        # From the home network → always allowed
+        if from_home(request):
             return await call_next(request)
 
-        # CF request: load password + secret
+        # Anything else (Cloudflare, a public address, a proxy forwarding one): load password + secret
         db = SessionLocal()
         try:
             rows = {

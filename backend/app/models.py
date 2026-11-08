@@ -208,6 +208,16 @@ class MusicArtistTag(Base):
     checked_at = Column(DateTime, nullable=True)
 
 
+class IndexerLink(Base):
+    """A search result's real download link (it may hold an indexer API key or a
+    tracker passkey); the page only ever sees mmlink:<id>."""
+    __tablename__ = "indexer_links"
+
+    id = Column(String, primary_key=True)
+    link = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
 class MusicRating(Base):
     """An album's MusicBrainz community rating (0–5), cached for Browse → Music."""
     __tablename__ = "music_ratings"

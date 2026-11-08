@@ -19,6 +19,7 @@ from .routers import (
 )
 from .services import download_poller, journeys
 from .services import media as media_engine
+from .middleware.scrub import ScrubMiddleware
 from .services.secret_settings import install_log_redaction
 
 install_log_redaction()  # mask tokens and API keys that appear in URLs in any log line
@@ -116,6 +117,8 @@ app.add_middleware(
 )
 # AuthMiddleware is added after CORSMiddleware so CORS pre-flights are exempt
 app.add_middleware(AuthMiddleware)
+# Outermost: no JSON response leaves with a secret in it (security audit 2)
+app.add_middleware(ScrubMiddleware)
 
 app.include_router(health.router)  # no auth, must be registered first
 app.include_router(auth.router, prefix="/api")

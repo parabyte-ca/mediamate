@@ -691,6 +691,13 @@ def purge_old_trash() -> None:
         trash.cleanup_trash(max_age_days=30)
     except Exception:
         logger.exception("Trash cleanup failed")
+    try:
+        from ..database import SessionLocal
+        from . import link_vault
+        with SessionLocal() as db:
+            link_vault.purge(db)
+    except Exception:
+        logger.exception("Expired search-result links weren't purged")
 
 
 def run_movie_housekeeping() -> None:

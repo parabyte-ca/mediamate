@@ -93,6 +93,7 @@ def browse_music(list: str = "new", for_you: bool = True, db: Session = Depends(
     except music_discover.Unavailable as exc:
         raise HTTPException(status_code=502, detail=f"Could not reach ListenBrainz ({exc}). Try again in a moment.")
     out = music_discover.rank(db, rows, for_you)
+    out["ratings_pending"] = music_discover.start_ratings(db, out["releases"], rows)
     if not out["taste_ready"]:
         music_discover.start_taste(db.get_bind())
     return {"list": list, "for_you": for_you, **out}

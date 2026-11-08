@@ -102,7 +102,6 @@ def releases(kind: str, bind=None) -> list[dict]:
     rows = _fresh() if kind == "new" else _popular()
     _cache[kind] = (now, rows)
     _start("tags", _learn_release_artists, bind, rows)
-    _start("ratings", _learn_ratings, bind, rows)
     return rows
 
 
@@ -204,6 +203,8 @@ def _learn_ratings(bind, rows: list[dict]) -> None:
         have = {r.mbid: r for r in db.query(MusicRating).filter(MusicRating.mbid.in_([x["mbid"] for x in rows]))}
         n = 0
         for x in rows:
+            if x["mbid"] in have and have[x["mbid"]].checked_at == now:
+                continue                                        # listed twice
             row = have.get(x["mbid"])
             if row is not None and row.checked_at and now - row.checked_at < RATING_FRESH:
                 continue
@@ -216,10 +217,30 @@ def _learn_ratings(bind, rows: list[dict]) -> None:
                 logger.info("Rating lookup stopped: %s", exc)
                 break
             if row is None:
-                row = MusicRating(mbid=x["mbid"])
+                row = have[x["mbid"]] = MusicRating(mbid=x["mbid"])
                 db.add(row)
             row.value, row.votes, row.checked_at = value, votes, now
             db.commit()
+
+
+def unrated(db, rows: list[dict]) -> list[dict]:
+    """Listed albums whose rating hasn't been looked up this week."""
+    from ..models import MusicRating
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - RATING_FRESH
+    fresh = {m for (m,) in db.query(MusicRating.mbid).filter(MusicRating.mbid.in_([r["mbid"] for r in rows]),
+                                                              MusicRating.checked_at >= cutoff)}
+    return [r for r in rows if r["mbid"] not in fresh]
+
+
+def start_ratings(db, shown: list[dict], everything: list[dict]) -> int:
+    """Look up missing ratings in the background, the albums on screen first.
+    Returns how many on-screen albums are still waiting."""
+    todo = unrated(db, shown)
+    first = {r["mbid"] for r in todo}
+    rest = [r for r in unrated(db, everything) if r["mbid"] not in first]
+    if todo or rest:
+        _start("ratings", _learn_ratings, db.get_bind(), todo + rest)
+    return len(todo)
 
 
 def ratings(db, mbids) -> dict[str, tuple[float, int]]:

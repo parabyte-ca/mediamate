@@ -97,7 +97,7 @@ export interface BrowseRelease {
 
 export interface BrowseMusic {
   list: "new" | "popular"; for_you: boolean; releases: BrowseRelease[];
-  taste: string[]; taste_ready: boolean; learning: number; building: boolean;
+  taste: string[]; taste_ready: boolean; learning: number; building: boolean; ratings_pending: number;
 }
 
 export type MusicIssue = "untagged" | "missing_tracks" | "low_bitrate" | "duplicate";

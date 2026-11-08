@@ -61,6 +61,11 @@ export function PeopleProvider({ children }: { children: ReactNode }) {
 }
 
 export function Avatar({ person, size = 28 }: { person: Person; size?: number }) {
+  const src = api.people.avatarSrc(person);
+  if (src) {
+    return <img src={src} alt={person.name} title={person.name} width={size} height={size}
+                className="inline-block shrink-0 rounded-full object-cover" style={{ width: size, height: size }} />;
+  }
   return (
     <span className="inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white"
           style={{ background: person.color, width: size, height: size, fontSize: size * 0.45 }}
@@ -95,7 +100,7 @@ export function PersonSwitcher({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   if (people.length < 2) return null;
   return (
-    <div className="relative">
+    <div className="relative" data-tour="person">
       <button onClick={() => setOpen((o) => !o)} aria-label="Switch person" aria-expanded={open}
               className={`flex items-center gap-2 rounded-full ${compact ? "" : "pr-2"} hover:bg-gray-100 dark:hover:bg-gray-800`}>
         {me ? <Avatar person={me} size={compact ? 26 : 28} /> : <Users className="h-5 w-5 text-gray-500" />}

@@ -159,3 +159,67 @@ def test_a_device_changes_hands(db, api):
     api.post("/api/push/person", json={"endpoint": sub["endpoint"], "person_id": t["id"]})
     db.expire_all()
     assert db.query(PushSubscription).one().person_id == t["id"]
+
+
+def test_activity_mine_shows_only_my_shows(db, api):
+    from app.models import Download, Journey
+    from app.routers import activity
+    api.app.include_router(activity.router, prefix="/api")
+    me, t = _two(api)
+    sev = _show(db, "Severance")
+    bluey = api.post("/api/watchlist", json={"title": "Bluey", "search_query": "Bluey"},
+                     headers={"X-Person": str(t["id"])}).json()
+    for title, wid in (("Severance S01E01", sev.id), ("Bluey S01E01", bluey["id"]), ("Manual.Movie.2020", None)):
+        d = Download(title=title, status="completed", watchlist_id=wid)
+        db.add(d)
+        db.flush()
+        db.add(Journey(title=title, source="download", download_id=d.id, status="done"))
+    db.commit()
+    titles = lambda r: sorted(i["title"] for i in r.json()["items"])  # noqa: E731
+    assert titles(api.get("/api/activity", headers={"X-Person": str(t["id"])})) == ["Bluey S01E01"]
+    assert titles(api.get("/api/activity", headers={"X-Person": str(me["id"])})) == ["Severance S01E01"]
+    every = api.get("/api/activity?who=all", headers={"X-Person": str(t["id"])})
+    assert len(every.json()["items"]) == 3
+    item = next(i for i in every.json()["items"] if i["title"] == "Bluey S01E01")
+    assert item["watchlist_id"] == bluey["id"]
+
+
+def _png(w, h, color=(200, 30, 30), exif_rotate=False):
+    import io
+    from PIL import Image
+    img = Image.new("RGB", (w, h), color)
+    img.paste((30, 30, 200), (w // 2, 0, w, h))        # left half red, right half blue
+    buf = io.BytesIO()
+    if exif_rotate:
+        exif = Image.Exif()
+        exif[0x0112] = 6                              # "rotate 90° clockwise" (a portrait phone photo)
+        img.save(buf, "JPEG", exif=exif)
+    else:
+        img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_avatars(db, api):
+    import io
+    from PIL import Image
+    me, t = _two(api)
+    assert t["avatar_url"] is None
+    r = api.post(f"/api/people/{t['id']}/avatar", files={"file": ("t.png", _png(300, 200), "image/png")})
+    assert r.status_code == 200 and r.json()["avatar_url"].startswith(f"/api/people/{t['id']}/avatar?v=")
+    pic = api.get(f"/api/people/{t['id']}/avatar")
+    assert pic.headers["content-type"] == "image/jpeg"
+    assert Image.open(io.BytesIO(pic.content)).size == (256, 256)
+    assert api.post(f"/api/people/{t['id']}/avatar", files={"file": ("x.txt", b"not a picture", "text/plain")}).status_code == 400
+    assert api.delete(f"/api/people/{t['id']}/avatar").json()["avatar_url"] is None
+    assert api.get(f"/api/people/{t['id']}/avatar").status_code == 404
+
+
+def test_phone_photos_are_turned_upright():
+    import io
+    from PIL import Image
+    out = Image.open(io.BytesIO(people.make_avatar(_png(400, 100, exif_rotate=True))))
+    assert out.size == (256, 256)
+    top, bottom = out.getpixel((128, 20)), out.getpixel((128, 236))
+    assert top[0] > 150 > top[2] and bottom[2] > 150 > bottom[0]     # turned: red on top, blue below
+    with pytest.raises(ValueError):
+        people.make_avatar(b"x" * (people.MAX_AVATAR + 1))

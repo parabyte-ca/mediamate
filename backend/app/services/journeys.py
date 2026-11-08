@@ -194,17 +194,17 @@ def _steps(db: Session, j: Journey, with_logs: bool = False) -> list[dict]:
 
 def snapshot(db: Session, j: Journey, with_logs: bool = False) -> dict:
     steps = _steps(db, j, with_logs)
-    poster = None
+    poster = watchlist_id = None
     if j.download_id:
         row = db.execute(text(
-            "SELECT w.poster_url FROM downloads d JOIN watchlist w ON w.id = d.watchlist_id"
+            "SELECT w.poster_url, w.id FROM downloads d JOIN watchlist w ON w.id = d.watchlist_id"
             " WHERE d.id = :id"), {"id": j.download_id}).first()
-        poster = row[0] if row else None
+        poster, watchlist_id = (row[0], row[1]) if row else (None, None)
     cur = _current_index(steps) if steps else -1
     return {
         "id": j.id, "title": j.title, "source": j.source, "status": j.status,
         "download_id": j.download_id, "media_file_id": j.media_file_id,
-        "poster_url": poster,
+        "poster_url": poster, "watchlist_id": watchlist_id,
         "created_at": _iso(j.created_at), "updated_at": _iso(j.updated_at),
         "current_step": cur,
         "saved_bytes": sum(s.get("saved_bytes") or 0 for s in steps),

@@ -110,5 +110,30 @@ def recipients(db: Session, watchlist_id: int | None) -> set[int] | None:
 
 
 def out(p: Person) -> dict:
+    url = None
+    if p.avatar and p.avatar_at:
+        url = f"/api/people/{p.id}/avatar?v={int(p.avatar_at.timestamp())}"
     return {"id": p.id, "name": p.name, "color": p.color or COLORS[(p.id - 1) % len(COLORS)],
-            "is_owner": bool(p.is_owner)}
+            "is_owner": bool(p.is_owner), "avatar_url": url}
+
+
+MAX_AVATAR = 5 * 1024 * 1024
+AVATAR_SIZE = 256
+
+
+def make_avatar(data: bytes) -> bytes:
+    """A 256×256 JPEG: upright (phone photos carry their rotation in EXIF), centre
+    cropped to a square. Raises ValueError for anything that isn't an image."""
+    import io
+    from PIL import Image, ImageOps, UnidentifiedImageError
+    if len(data) > MAX_AVATAR:
+        raise ValueError("That picture is over 5 MB")
+    try:
+        img = Image.open(io.BytesIO(data))
+        img = ImageOps.exif_transpose(img)
+    except (UnidentifiedImageError, OSError):
+        raise ValueError("That isn't a picture MediaMate can read. Use a JPG or PNG.")
+    img = ImageOps.fit(img.convert("RGB"), (AVATAR_SIZE, AVATAR_SIZE), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=85)
+    return buf.getvalue()

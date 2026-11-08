@@ -8,20 +8,29 @@ import { ArrowLeft, ArrowRight, X } from "lucide-react";
 
 export const TOUR_KEY = "sm-tour";
 /** Bump when the tour changes enough that everyone should see it again. */
-export const TOUR_VERSION = "2";
+export const TOUR_VERSION = "3";
 export const TOUR_EVENT = "mediamate:tour";
 
 type Step = {
   /** data-tour values to try, first visible one wins (desktop vs phone). */
   targets?: string[];
+  /** Open this page first (the target lives there). */
+  route?: string;
+  /** Who sees the step: only households with two or more people, or only one. */
+  people?: "many" | "one";
   title: string;
   body: string;
 };
 
-const STEPS: Step[] = [
+const ALL_STEPS: Step[] = [
   {
     title: "Welcome to MediaMate",
-    body: "MediaMate finds shows and movies, downloads them, and gets them ready to watch. Here's a quick look around.",
+    body: "MediaMate finds shows, movies and music, downloads each one once for the whole household, and gets it ready to watch in Plex. Here's a quick look around.",
+  },
+  {
+    targets: ["person"], people: "many",
+    title: "This is you",
+    body: "MediaMate remembers who's using this phone or computer. Your watchlist, calendar and alerts follow it. Tap your picture to switch person.",
   },
   {
     targets: ["nav-search"],
@@ -31,32 +40,52 @@ const STEPS: Step[] = [
   {
     targets: ["nav-watchlist"],
     title: "Watchlist",
-    body: "Follow a show and new episodes download by themselves. Add a movie and it downloads once it's out. TV shows and Movies have their own tabs.",
+    body: "Follow shows, movies and artists. New episodes, movies once they're out digitally, and new albums download by themselves.",
+  },
+  {
+    targets: ["who"], route: "/watchlist", people: "many",
+    title: "Mine or Everyone",
+    body: "Mine is what you follow. Everyone is the whole household's list: tap Follow on anything to add it to yours. A show downloads once, however many people follow it.",
+  },
+  {
+    targets: ["follow"], route: "/watchlist", people: "many",
+    title: "Who follows what",
+    body: "Each card shows who follows it. Removing a shared show only takes it off your list; it keeps downloading for everyone else.",
   },
   {
     targets: ["nav-browse", "nav-more"],
     title: "Browse",
-    body: "See what's airing and what's coming to cinemas. Add a show, or a movie that isn't out yet: it downloads when it's released digitally.",
+    body: "See what's airing, what's coming to cinemas, and new music picked for your taste. Add anything to your list from here.",
   },
   {
     targets: ["nav-calendar", "nav-more"],
     title: "Calendar",
-    body: "See what's airing and what's coming up. On a phone, Calendar, Insights, History and Settings are under More.",
+    body: "Episodes coming up for your shows (switch to Everyone for the whole household's). On a phone, Calendar, Insights, History and Settings are under More.",
   },
   {
     targets: ["nav-activity"],
     title: "Activity",
-    body: "Watch downloads and processing as they happen. Tap one to see its details.",
+    body: "Downloads and processing as they happen. Mine shows your shows' downloads; tap one to see its details.",
   },
   {
     targets: ["status"],
     title: "At a glance",
-    body: "A quick count of what's running right now, and anything that needs a look.",
+    body: "A quick count of what's running right now for the whole household, and anything that needs a look.",
   },
   {
     targets: ["nav-library"],
     title: "Library",
-    body: "Everything MediaMate has found. Tap a picture to play it.",
+    body: "Everything MediaMate has found, shared by everyone. Tap a picture to play it.",
+  },
+  {
+    people: "many",
+    title: "Your alerts",
+    body: "Turn on phone alerts in Settings → Notifications. You'll hear about the shows you follow; updates and other system alerts go to the owner.",
+  },
+  {
+    people: "one",
+    title: "Share with your household",
+    body: "Add people in Settings → People. Each gets their own watchlist, calendar and alerts, with one shared library and no extra downloads.",
   },
   {
     targets: ["jump"],
@@ -66,7 +95,7 @@ const STEPS: Step[] = [
   {
     targets: ["themes"],
     title: "Make it yours",
-    body: "Pick colours and light or dark. It's saved on this device. You'll also find it in Settings → Appearance (under More on a phone).",
+    body: "Pick colours and light or dark; it's saved on this device. Add a picture of yourself in Settings → People.",
   },
   {
     title: "You're all set",
@@ -107,7 +136,8 @@ const CARD_W = 320;
 
 type Box = { top: number; left: number; width: number; height: number };
 
-export default function Tour({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function Tour({ open, onClose, many = false }: { open: boolean; onClose: () => void; many?: boolean }) {
+  const STEPS = ALL_STEPS.filter((st) => !st.people || st.people === (many ? "many" : "one"));
   const [i, setI] = useState(0);
   const [box, setBox] = useState<Box | null>(null);
   const [vw, setVw] = useState(() => window.innerWidth);
@@ -139,16 +169,28 @@ export default function Tour({ open, onClose }: { open: boolean; onClose: () => 
         setBox({ top: r.top - PAD, left: r.left - PAD, width: r.width + PAD * 2, height: r.height + PAD * 2 });
       });
     };
-    findTarget(step.targets)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    if (step.route && window.location.pathname !== step.route) navigate(step.route);
+    // The target may appear a moment later (a page that is still loading): keep looking briefly.
+    let tries = 0;
+    const poll = window.setInterval(() => {
+      const el = findTarget(step.targets);
+      if (el || ++tries > 12) {
+        window.clearInterval(poll);
+        el?.scrollIntoView({ block: "center", inline: "nearest" });
+        measure();
+      }
+    }, 150);
+    findTarget(step.targets)?.scrollIntoView({ block: "center", inline: "nearest" });
     measure();
     window.addEventListener("resize", measure);
     window.addEventListener("scroll", measure, true);
     return () => {
+      window.clearInterval(poll);
       cancelAnimationFrame(frame);
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };
-  }, [open, i, step.targets]);
+  }, [open, i, step.targets, step.route]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keyboard: Esc skips, arrows move. Focus goes to the card for screen readers.
   useEffect(() => {

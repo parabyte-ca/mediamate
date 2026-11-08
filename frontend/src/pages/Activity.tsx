@@ -5,6 +5,7 @@ import { api, type ActivityFilter, type Journey, type ProgressEvent } from "../a
 import { useEvent, useLiveConnected } from "../events";
 import { fmtAgo, fmtSize } from "../utils";
 import JourneyDrawer from "../components/JourneyDrawer";
+import { Avatar, usePeople } from "../people";
 import Poster from "../components/Poster";
 import {
   applyProgress, fmtEta, fmtSpeed, ProgressBar, STATUS_STYLE, StatusIcon, StepStrip,
@@ -81,6 +82,17 @@ function JourneyCard({ j, onOpen }: { j: Journey; onOpen: () => void }) {
 }
 
 export default function Activity() {
+  const { people, me } = usePeople();
+  const [who, setWhoState] = useState<"mine" | "all">(() => {
+    try { return localStorage.getItem("mm-watch-who") === "all" ? "all" : "mine"; } catch { return "mine"; }
+  });
+  const setWho = (w: "mine" | "all") => { try { localStorage.setItem("mm-watch-who", w); } catch { /* */ } setWhoState(w); };
+  const scope = people.length > 1 && me ? who : "all";
+  const [mineIds, setMineIds] = useState<Set<number> | null>(null);
+  useEffect(() => {
+    if (scope !== "mine") { setMineIds(null); return; }
+    api.watchlist.list("mine").then((w) => setMineIds(new Set(w.map((i) => i.id)))).catch(() => setMineIds(null));
+  }, [scope]);
   const [params, setParams] = useSearchParams();
   const filter = (params.get("filter") as ActivityFilter) || "all";
   const openId = params.get("open") ? Number(params.get("open")) : null;
@@ -93,13 +105,13 @@ export default function Activity() {
 
   const load = useCallback(async () => {
     try {
-      const r = await api.activity.list(filter, 100);
+      const r = await api.activity.list(filter, 100, 0, scope);
       setItems(r.items);
       setTotal(r.total);
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, scope]);
 
   useEffect(() => {
     setLoading(true);
@@ -109,7 +121,7 @@ export default function Activity() {
   // Live updates: upsert snapshots, apply transient progress, drop removed rows.
   useEvent<Journey>("journey.updated", (snap) => {
     const had = itemsRef.current.some((j) => j.id === snap.id);
-    const keep = matches(snap, filter);
+    const keep = matches(snap, filter) && (!mineIds || (snap.watchlist_id != null && mineIds.has(snap.watchlist_id)));
     if (had !== keep) setTotal((t) => t + (keep ? 1 : -1));
     setItems((cur) => {
       const rest = cur.filter((j) => j.id !== snap.id);
@@ -163,6 +175,18 @@ export default function Activity() {
         </div>
       </div>
 
+      {people.length > 1 && me && (
+        <div className="mb-3 inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5" role="tablist" aria-label="Whose downloads">
+          {([["mine", "Mine"], ["all", "Everyone"]] as const).map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={who === id} onClick={() => setWho(id)}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium ${who === id
+                ? "bg-blue-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"}`}>
+              {id === "mine" && <Avatar person={me} size={18} />}{label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="mb-3 flex gap-2 overflow-x-auto" role="tablist">
         {FILTERS.map((f) => (
           <button key={f.value} role="tab" aria-selected={filter === f.value} onClick={() => setFilter(f.value)}
@@ -182,7 +206,9 @@ export default function Activity() {
         ) : items.length === 0 ? (
           <div className="p-10 text-center text-sm text-gray-500 dark:text-gray-400">
             <ActivityIcon className="mx-auto mb-2 h-6 w-6 text-gray-300 dark:text-gray-600" />
-            {filter === "all"
+            {scope === "mine" && filter === "all"
+              ? "Nothing for your shows yet. Switch to Everyone to see the whole household's downloads and encodes."
+              : filter === "all"
               ? "Nothing yet. Downloads and encodes will show up here as they happen."
               : "Nothing matches this filter."}
           </div>

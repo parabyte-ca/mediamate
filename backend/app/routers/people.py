@@ -1,5 +1,7 @@
 """/api/people — who's in the household (each with their own watchlist view)."""
-from fastapi import APIRouter, Body, Depends, HTTPException
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -58,3 +60,35 @@ def remove_person(person_id: int, db: Session = Depends(get_db)):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {"ok": True}
+
+
+@router.post("/people/{person_id}/avatar")
+async def set_avatar(person_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    p = db.get(Person, person_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        p.avatar = people.make_avatar(await file.read(people.MAX_AVATAR + 1))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    p.avatar_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    db.commit()
+    return people.out(p)
+
+
+@router.delete("/people/{person_id}/avatar")
+def remove_avatar(person_id: int, db: Session = Depends(get_db)):
+    p = db.get(Person, person_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    p.avatar = p.avatar_at = None
+    db.commit()
+    return people.out(p)
+
+
+@router.get("/people/{person_id}/avatar")
+def get_avatar(person_id: int, db: Session = Depends(get_db)):
+    p = db.get(Person, person_id)
+    if p is None or not p.avatar:
+        raise HTTPException(status_code=404, detail="No picture")
+    return Response(p.avatar, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=31536000"})

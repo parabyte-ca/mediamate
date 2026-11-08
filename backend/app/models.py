@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, BigInteger, UniqueConstraint
+from sqlalchemy import LargeBinary, Column, Integer, String, Boolean, DateTime, Float, ForeignKey, BigInteger, UniqueConstraint
 from sqlalchemy.sql import func, text
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -500,6 +500,8 @@ class Person(Base):
     name = Column(String, nullable=False)
     color = Column(String, nullable=True)            # e.g. "#2563eb"
     is_owner = Column(Boolean, default=False)       # gets system alerts; can't be removed
+    avatar = Column(LargeBinary, nullable=True)     # 256×256 JPEG
+    avatar_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
 

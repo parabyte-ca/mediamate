@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, Compass, Copy, RefreshCw, Download, Edit2, FolderOpen, Loader2, MinusCircle, Plus, Save, Star, Stethoscope, Trash2, Upload, XCircle } from "lucide-react";
+import { AlertCircle, Camera, CheckCircle2, Compass, Copy, RefreshCw, Download, Edit2, FolderOpen, Loader2, MinusCircle, Plus, Save, Star, Stethoscope, Trash2, Upload, XCircle } from "lucide-react";
 import { api, SECRET_MASK, type DownloadPath, type FolderRole, type FolderTarget, type FolderSuggestion, type FolderTest, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type PlexSyncStatus, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
 import { PALETTES, useTheme, type Theme } from "../ThemeContext";
@@ -342,7 +342,14 @@ function PeopleSection() {
         {people.map((p) => (
           <li key={p.id} className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
             <div className="flex items-center gap-2">
-              <Avatar person={p} size={28} />
+              <label className="relative shrink-0 cursor-pointer" title="Choose a picture">
+                <Avatar person={p} size={40} />
+                <span className="absolute -bottom-1 -right-1 rounded-full bg-white p-0.5 shadow dark:bg-gray-800">
+                  <Camera className="h-3 w-3 text-gray-600 dark:text-gray-300" />
+                </span>
+                <input type="file" accept="image/*" className="hidden" aria-label={`Picture for ${p.name}`}
+                       onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) run(() => api.people.setAvatar(p.id, f)); }} />
+              </label>
               <input defaultValue={p.name} aria-label={`Name of ${p.name}`}
                      onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== p.name && run(() => api.people.update(p.id, { name: e.target.value.trim() }))}
                      className={`${FIELD} min-w-0 flex-1`} />
@@ -355,6 +362,9 @@ function PeopleSection() {
                           className={`h-5 w-5 rounded-full ${p.color === c ? "ring-2 ring-offset-2 ring-gray-400 dark:ring-offset-gray-900" : ""}`} style={{ background: c }} />
                 ))}
               </div>
+              {p.avatar_url && (
+                <button onClick={() => run(() => api.people.removeAvatar(p.id))} className="text-xs text-gray-500 hover:underline">Remove picture</button>
+              )}
               {me?.id === p.id
                 ? <span className="text-xs text-green-600 dark:text-green-400">This device</span>
                 : <button onClick={() => choose(p.id)} className="text-xs text-blue-600 hover:underline dark:text-blue-400">Use on this device</button>}

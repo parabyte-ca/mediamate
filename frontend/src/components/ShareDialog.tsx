@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Film, Globe, Home, Loader2, Minus, Play, Plus, Share2, Shuffle, X } from "lucide-react";
 import { api, type ShareLink, type TeaserInfo } from "../api/client";
 import { fmtClock } from "./VideoPlayer";
@@ -13,6 +13,30 @@ async function shareOrCopy(url: string, title: string): Promise<"shared" | "copi
   }
   await navigator.clipboard.writeText(url);
   return "copied";
+}
+
+/** Make the teaser on the server and wait for it, reporting progress. */
+async function makeTeaser(id: number, starts: number[], onPct: (n: number) => void, cancelled: () => boolean): Promise<void> {
+  let st = await api.shares.teaserBuild(id, starts);
+  while (st.state === "queued" || st.state === "building") {
+    if (cancelled()) throw new Error("cancelled");
+    onPct(st.pct);
+    await new Promise((r) => setTimeout(r, 1500));
+    st = await api.shares.teaserStatus(st.key);
+  }
+  if (st.state === "error") throw new Error(st.error || "Couldn't make the teaser");
+  onPct(100);
+}
+
+function Progress({ pct, label }: { pct: number; label: string }) {
+  return (
+    <div className="mt-2" role="status" aria-live="polite">
+      <div className="flex justify-between text-xs text-gray-600 dark:text-gray-300"><span>{label}</span><span className="tabular-nums">{pct}%</span></div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+        <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${Math.max(4, pct)}%` }} />
+      </div>
+    </div>
+  );
 }
 
 /** Share a video or album: a household link (opens it in MediaMate) or a public link
@@ -38,6 +62,7 @@ export default function ShareDialog({ kind, id, title, householdPath, onClose }:
     }).catch(() => { /* no teaser option */ });
   }, [kind, id]);
   const teaser = !!info?.adult && mode === "teaser";
+  const [makePct, setMakePct] = useState<number | null>(null);
 
   const send = async (url: string, what: string) => {
     try { setDone((await shareOrCopy(url, title)) === "shared" ? `${what} shared` : `${what} copied`); }
@@ -45,9 +70,14 @@ export default function ShareDialog({ kind, id, title, householdPath, onClose }:
   };
   const create = async () => {
     setBusy(true); setErr(null);
-    try { const l = await api.shares.create(kind, id, days, teaser ? starts : undefined); setLink(l); await send(l.url, "Link"); }
+    try {
+      if (teaser) {
+        setMakePct(0);
+        await makeTeaser(id, starts, setMakePct, () => false);
+      }
+      const l = await api.shares.create(kind, id, days, teaser ? starts : undefined); setLink(l); await send(l.url, "Link"); }
     catch (e) { setErr((e as Error).message); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setMakePct(null); }
   };
   const btn = "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium";
 
@@ -101,6 +131,7 @@ export default function ShareDialog({ kind, id, title, householdPath, onClose }:
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
                 {busy && teaser ? "Making the teaser…" : teaser ? "Create teaser link" : "Create link"}
               </button>
+              {makePct !== null && <Progress pct={makePct} label="Making the teaser" />}
             </>
           ) : (
             <div className="mt-2 space-y-2">
@@ -129,15 +160,31 @@ function TeaserPicker({ id, info, starts, onChange }: {
   id: number; info: TeaserInfo; starts: number[]; onChange: (s: number[]) => void;
 }) {
   const [preview, setPreview] = useState<string | null>(null);
+  const [pct, setPct] = useState<number | null>(null);
+  const [perr, setPerr] = useState<string | null>(null);
+  const run = useRef(0);
+  const doPreview = async () => {
+    const mine = ++run.current;
+    setPreview(null); setPerr(null); setPct(0);
+    try {
+      await makeTeaser(id, starts, (n) => mine === run.current && setPct(n), () => mine !== run.current);
+      if (mine === run.current) setPreview(api.shares.teaserUrl(id, starts));
+    } catch (e) {
+      if (mine === run.current && (e as Error).message !== "cancelled") setPerr((e as Error).message);
+    } finally {
+      if (mine === run.current) setPct(null);
+    }
+  };
+  const stop = () => { run.current++; setPct(null); };
   const dur = info.duration_sec ?? 0;
   const max = Math.max(0, dur - info.clip_sec);
   const step = dur > 600 ? 30 : dur > 120 ? 10 : 2;
   const move = (i: number, by: number) => {
-    setPreview(null);
+    stop(); setPreview(null);
     onChange(starts.map((s, j) => (j === i ? Math.min(max, Math.max(0, Math.round(s + by))) : s)));
   };
   const shuffle = () => {
-    setPreview(null);
+    stop(); setPreview(null);
     const n = starts.length, lo = dur * 0.05, span = Math.max(0, max - lo) / n;
     onChange(Array.from({ length: n }, (_, i) => Math.round(lo + i * span + Math.random() * span * 0.9)));
   };
@@ -165,14 +212,26 @@ function TeaserPicker({ id, info, starts, onChange }: {
         <button onClick={shuffle} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-700 hover:bg-white dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-900">
           <Shuffle className="h-3.5 w-3.5" />Other moments
         </button>
-        <button onClick={() => setPreview(api.shares.teaserUrl(id, starts))} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-700 hover:bg-white dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-900">
-          <Play className="h-3.5 w-3.5" />Preview teaser
+        <button onClick={doPreview} disabled={pct !== null} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-gray-300 px-2 py-1.5 text-xs text-gray-700 hover:bg-white dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-900">
+          {pct !== null ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}Preview teaser
         </button>
       </div>
+      {pct !== null && (
+        <>
+          <Progress pct={pct} label="Making the teaser" />
+          <button onClick={stop} className="mt-1 text-xs text-gray-500 underline dark:text-gray-400">Stop waiting</button>
+        </>
+      )}
+      {perr && (
+        <p className="mt-2 text-xs text-red-600 dark:text-red-400">
+          {perr} <button onClick={doPreview} className="underline">Try again</button>
+        </p>
+      )}
       {preview && (
         <div className="mt-2">
-          <video key={preview} src={preview} controls autoPlay playsInline className="w-full rounded bg-black" aria-label="Teaser preview" />
-          <p className="mt-1 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"><Film className="h-3.5 w-3.5" />It can take a few seconds to make.</p>
+          <video key={preview} src={preview} controls autoPlay playsInline className="w-full rounded bg-black" aria-label="Teaser preview"
+                 onError={() => { setPreview(null); setPerr("Couldn't play the teaser."); }} />
+          <p className="mt-1 flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400"><Film className="h-3.5 w-3.5" />This is what people with the link will see.</p>
         </div>
       )}
     </div>

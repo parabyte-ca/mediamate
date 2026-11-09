@@ -50,7 +50,9 @@ export default function SharePage() {
             <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
               {meta.expires_at ? `This link works until ${new Date(meta.expires_at + "Z").toLocaleString()}.` : "Shared with you."}
             </p>
-            {meta.kind === "video" && meta.teaser ? (
+            {meta.kind === "video" && meta.teaser && meta.ready === false ? (
+              <TeaserWait token={token} onReady={setMeta} />
+            ) : meta.kind === "video" && meta.teaser ? (
               <video src={api.publicShare.video(token)} controls playsInline className="w-full rounded-lg bg-black" aria-label={meta.title} />
             ) : meta.kind === "video" ? (
               <VideoPlayer original={api.publicShare.video(token)} converted={(from) => api.publicShare.play(token, from)}
@@ -107,6 +109,21 @@ function AlbumPlayer({ token, meta }: { token: string; meta: PublicShare }) {
           </li>
         ))}
       </ol>
+    </div>
+  );
+}
+
+/** A teaser link opened before its clip is made: check again every 5 seconds. */
+function TeaserWait({ token, onReady }: { token: string; onReady: (m: PublicShare) => void }) {
+  useEffect(() => {
+    const t = setInterval(() => {
+      api.publicShare.meta(token).then((m) => { if (m.ready !== false) onReady(m); }).catch(() => { /* keep waiting */ });
+    }, 5000);
+    return () => clearInterval(t);
+  }, [token, onReady]);
+  return (
+    <div className="flex items-center justify-center gap-2 rounded-lg bg-gray-100 p-8 text-sm text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+      <Loader2 className="h-4 w-4 animate-spin" />Getting the teaser ready…
     </div>
   );
 }

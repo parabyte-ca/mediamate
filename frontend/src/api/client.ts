@@ -106,6 +106,8 @@ export interface ShareLink {
   teaser?: boolean;
 }
 
+export interface TeaserBuild { key: string; state: "queued" | "building" | "done" | "error"; pct: number; error: string | null }
+
 export interface TeaserInfo { adult: boolean; duration_sec: number | null; starts: number[]; clip_sec: number }
 
 function tokenQuery(extra: Record<string, string>): string {
@@ -122,7 +124,7 @@ function fullUrl(l: ShareLink): ShareLink {
 
 export interface PublicShare {
   kind: "video" | "album"; title: string; adult: boolean; expires_at: string | null;
-  duration_sec?: number | null; has_cover?: boolean; teaser?: boolean;
+  duration_sec?: number | null; has_cover?: boolean; teaser?: boolean; ready?: boolean;
   tracks?: { n: number; title: string; artist: string | null; duration_sec: number | null }[];
 }
 
@@ -1171,7 +1173,11 @@ export const api = {
       })),
     /** Whether a video can have a teaser (adult only) and its default moments. */
     teaserInfo: (id: number) => req<TeaserInfo>(`/shares/teaser/${id}`),
-    /** The teaser for these moments, to preview before sharing (made on the server). */
+    /** Start (or join) making the teaser for these moments; poll with teaserStatus. */
+    teaserBuild: (id: number, starts: number[]) =>
+      req<TeaserBuild>(`/shares/teaser/${id}/build`, { method: "POST", body: JSON.stringify({ starts }) }),
+    teaserStatus: (key: string) => req<TeaserBuild>(`/shares/teaser/build/${encodeURIComponent(key)}`),
+    /** The finished teaser for these moments (409 until teaserBuild is done). */
     teaserUrl: (id: number, starts: number[]) =>
       `${BASE}/shares/teaser/${id}/clip?${tokenQuery({ starts: starts.map((s) => s.toFixed(1)).join(",") })}`,
     /** A still frame at `at` seconds, for picking moments. */

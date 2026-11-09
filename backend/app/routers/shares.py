@@ -51,16 +51,11 @@ def _starts(s: ShareLink) -> list[float] | None:
         return None
 
 
-def _teaser_file(file_id: int, starts: list[float]):
-    """Build (or reuse) the teaser; HTTP errors for the caller."""
-    from ..services.media import teaser
+def _teaser_row(file_id: int):
     row = _video(None, file_id)
     if row is None:
         raise HTTPException(status_code=404, detail="File not found")
-    try:
-        return teaser.build(file_id, row["path"], starts, row["duration_sec"])
-    except teaser.TeaserError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    return row
 
 
 def _video(db: Session, file_id: int):
@@ -101,7 +96,8 @@ def create_share(request: Request, body: dict = Body(...), db: Session = Depends
                 starts = teaser.valid((body.get("teaser") or {}).get("starts"), row["duration_sec"])
             except teaser.TeaserError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
-            _teaser_file(target, starts)           # made now, so the link plays straight away
+            if teaser.ready(target, row["path"], starts) is None:
+                teaser.start(target, row["path"], starts, row["duration_sec"])   # finishes in the background
             clip = json.dumps(starts)
     else:
         a = db.get(MusicLibAlbum, target)
@@ -130,20 +126,46 @@ def teaser_moments(file_id: int, db: Session = Depends(get_db)):
             "starts": starts, "clip_sec": teaser.clip_len(row["duration_sec"] or 0, len(starts))}
 
 
-@router.get("/shares/teaser/{file_id}/clip")
-def teaser_preview(file_id: int, starts: str, db: Session = Depends(get_db)):
-    """The teaser for these moments (comma-separated seconds), to preview before sharing."""
+def _picked(starts, duration) -> list[float]:
     from ..services.media import teaser
-    row = _video(db, file_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="File not found")
     try:
-        picked = teaser.valid([float(x) for x in starts.split(",") if x.strip()], row["duration_sec"])
-    except (ValueError, teaser.TeaserError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc) if isinstance(exc, teaser.TeaserError)
-                            else "Moments must be numbers")
-    return FileResponse(_teaser_file(file_id, picked), media_type="video/mp4",
-                        headers={"Cache-Control": "private, max-age=3600"})
+        if isinstance(starts, str):
+            starts = [float(x) for x in starts.split(",") if x.strip()]
+        return teaser.valid(starts, duration)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Moments must be numbers")
+    except teaser.TeaserError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/shares/teaser/{file_id}/build")
+def teaser_build(file_id: int, body: dict = Body(...)):
+    """Start (or join) making the teaser for these moments; poll /shares/teaser/build/{key}."""
+    from ..services.media import teaser
+    row = _teaser_row(file_id)
+    k = teaser.start(file_id, row["path"], _picked(body.get("starts"), row["duration_sec"]), row["duration_sec"])
+    return {"key": k, **(teaser.status(k) or {})}
+
+
+@router.get("/shares/teaser/build/{key}")
+def teaser_build_status(key: str):
+    from ..services.media import teaser
+    st = teaser.status(key) if key.replace("-", "").isalnum() else None
+    if st is None:
+        raise HTTPException(status_code=404, detail="No such teaser")
+    return {"key": key, **st}
+
+
+@router.get("/shares/teaser/{file_id}/clip")
+def teaser_preview(file_id: int, starts: str):
+    """The finished teaser for these moments (comma-separated seconds). Never builds:
+    409 until POST /build has finished."""
+    from ..services.media import teaser
+    row = _teaser_row(file_id)
+    mp4 = teaser.ready(file_id, row["path"], _picked(starts, row["duration_sec"]))
+    if mp4 is None:
+        raise HTTPException(status_code=409, detail="The teaser is still being made")
+    return FileResponse(mp4, media_type="video/mp4", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.get("/shares")
@@ -214,6 +236,9 @@ def public_meta(token: str, request: Request, db: Session = Depends(get_db)):
         if starts:
             from ..services.media import teaser
             out["teaser"] = True
+            out["ready"] = teaser.ready(s.target_id, row["path"], starts) is not None
+            if not out["ready"]:
+                teaser.start(s.target_id, row["path"], starts, row["duration_sec"])
             out["duration_sec"] = round(teaser.clip_len(row["duration_sec"] or 0, len(starts)) * len(starts), 1)
         else:
             out["duration_sec"] = row["duration_sec"]
@@ -238,7 +263,13 @@ def public_video(token: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=GONE)
     starts = _starts(s)
     if starts:
-        mp4 = _teaser_file(s.target_id, starts)     # rebuilt if the cache was cleared
+        from ..services.media import teaser
+        row = _teaser_row(s.target_id)
+        mp4 = teaser.ready(s.target_id, row["path"], starts)
+        if mp4 is None:                             # still being made, or the cache was cleared
+            teaser.start(s.target_id, row["path"], starts, row["duration_sec"])
+            raise HTTPException(status_code=503, detail="The teaser is being made. Try again in a minute.",
+                                headers={"Retry-After": "10"})
         try:
             os.utime(mp4)                          # keeps it from being pruned while in use
         except OSError:

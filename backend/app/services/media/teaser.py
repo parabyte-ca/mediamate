@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import subprocess
+import threading
 from pathlib import Path
 
 from . import encoder, preview
@@ -20,7 +21,7 @@ MOMENTS = 6
 CLIP_S = 5.0                # each moment
 MAX_TOTAL_S = 30.0
 FADE_S = 0.25
-BUILD_TIMEOUT_S = 180
+BUILD_TIMEOUT_S = 300
 
 
 class TeaserError(Exception):
@@ -66,21 +67,31 @@ def valid(starts, duration: float | None) -> list[float]:
     return sorted(out)
 
 
-def has_audio(path: str) -> bool:
+def probe(path: str) -> tuple[int, bool]:
+    """(index of the real video stream among video streams, has audio). Skips cover art
+    (attached pictures), which some MP4s carry as their first video stream."""
     try:
-        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
-                            "stream=index", "-of", "csv=p=0", path],
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                            "stream=codec_type:stream_disposition=attached_pic", "-of", "json", path],
                            capture_output=True, text=True, timeout=30, check=False)
-        return bool(r.stdout.strip())
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+        streams = json.loads(r.stdout or "{}").get("streams", [])
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return 0, False
+    vids = [st for st in streams if st.get("codec_type") == "video"]
+    vi = next((i for i, st in enumerate(vids) if not (st.get("disposition") or {}).get("attached_pic")), 0)
+    return vi, any(st.get("codec_type") == "audio" for st in streams)
+
+
+def has_audio(path: str) -> bool:
+    return probe(path)[1]
 
 
 def teaser_cmd(src: str, starts: list[float], length: float, dest: str,
-               audio: bool = True, nvenc: bool | None = None) -> list[str]:
-    """One ffmpeg run: every moment as its own seeked input, faded, then joined."""
+               audio: bool = True, nvenc: bool | None = None, video_index: int = 0) -> list[str]:
+    """One ffmpeg run: every moment as its own seeked input, faded, then joined.
+    Progress goes to stdout (-progress pipe:1)."""
     use_nvenc = encoder.NVENC_AVAILABLE if nvenc is None else nvenc
-    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-nostdin"]
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-nostdin", "-progress", "pipe:1", "-nostats"]
     for s in starts:
         cmd += ["-ss", str(s), "-t", str(length), "-i", src]
     n = len(starts)
@@ -89,9 +100,9 @@ def teaser_cmd(src: str, starts: list[float], length: float, dest: str,
     fo = max(0.0, length - FADE_S)
     parts, joins = [], []
     for i in range(n):
-        parts.append(f"[{i}:v:0]scale=-2:'min(720,ih)',fps=30,setsar=1,format=yuv420p,"
+        parts.append(f"[{i}:v:{video_index}]scale=-2:'min(720,ih)',fps=30,setsar=1,format=yuv420p,"
                      f"fade=t=in:st=0:d={FADE_S},fade=t=out:st={fo}:d={FADE_S},"
-                     f"setpts=PTS-STARTPTS[v{i}]")
+                     f"trim=0:{length},setpts=PTS-STARTPTS[v{i}]")
         if audio:
             parts.append(f"[{i}:a:0]aresample=48000,aformat=channel_layouts=stereo,"
                          f"afade=t=in:st=0:d={FADE_S},afade=t=out:st={fo}:d={FADE_S},"
@@ -106,7 +117,7 @@ def teaser_cmd(src: str, starts: list[float], length: float, dest: str,
         parts.append(f"{''.join(joins)}concat=n={n}:v=1:a=0[v]")
         maps = ["-map", "[v]", "-map", f"{n}:a:0", "-shortest"]
     video = (["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"] if use_nvenc
-             else ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"])
+             else ["-c:v", "libx264", "-preset", "superfast", "-crf", "23", "-threads", "0"])
     return cmd + ["-filter_complex", ";".join(parts), *maps, *video,
                   "-c:a", "aac", "-ac", "2", "-b:a", "128k", "-movflags", "+faststart", dest]
 
@@ -121,31 +132,98 @@ def path_for(file_id: int, path: str, starts: list[float]) -> Path:
     return cache_dir() / f"{key(file_id, path, starts)}.mp4"
 
 
-def build(file_id: int, path: str, starts: list[float], duration: float | None) -> Path:
-    """The teaser for these moments, making it if needed. Raises TeaserError."""
+_teaser_slots = threading.BoundedSemaphore(1)     # one teaser at a time; never blocks previews
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
+
+
+def _run(job: dict, path: str, starts: list[float], length: float, out: Path) -> None:
+    tmp = out.with_suffix(".tmp.mp4")
+    total_ms = max(1.0, length * len(starts) * 1_000_000)
+    try:
+        with _teaser_slots:
+            job["state"] = "building"
+            vi, audio = probe(path)
+            cmd = teaser_cmd(path, starts, length, str(tmp), audio=audio, video_index=vi)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    stdin=subprocess.DEVNULL, text=True)
+            timer = threading.Timer(BUILD_TIMEOUT_S, proc.kill)
+            timer.start()
+            try:
+                for line in proc.stdout:
+                    if line.startswith("out_time_ms=") or line.startswith("out_time_us="):
+                        try:
+                            job["pct"] = min(99, int(int(line.split("=", 1)[1]) / total_ms * 100))
+                        except ValueError:
+                            pass
+                err = proc.stderr.read()
+                proc.wait()
+            finally:
+                timed_out = not timer.is_alive() and proc.returncode not in (0,)
+                timer.cancel()
+            if proc.returncode == 0 and tmp.is_file() and tmp.stat().st_size > 0:
+                os.replace(tmp, out)
+                job.update(state="done", pct=100)
+                return
+            last = next((ln for ln in reversed((err or "").strip().splitlines()) if ln.strip()), "")
+            logger.warning("Teaser failed for %s: %s", path, (err or "")[-600:])
+            if timed_out:
+                job.update(state="error", error="Making the teaser took too long. Try fewer moments.")
+            else:
+                job.update(state="error", error=f"Couldn't make the teaser{': ' + last if last else ''}")
+    except OSError as exc:
+        job.update(state="error", error=f"Couldn't make the teaser: {exc.strerror or exc}")
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def start(file_id: int, path: str, starts: list[float], duration: float | None) -> str:
+    """Start (or join) the build of this teaser in the background; returns its key."""
     out = path_for(file_id, path, starts)
-    if out.is_file() and out.stat().st_size > 0:
-        return out
+    k = out.stem
+    with _jobs_lock:
+        job = _jobs.get(k)
+        if out.is_file() and out.stat().st_size > 0:
+            _jobs[k] = {"state": "done", "pct": 100, "error": None}
+            return k
+        if job and job["state"] in ("queued", "building"):
+            return k
+        job = _jobs[k] = {"state": "queued", "pct": 0, "error": None}
     out.parent.mkdir(parents=True, exist_ok=True)
     length = clip_len(float(duration or 0), len(starts))
-    tmp = out.with_suffix(".tmp.mp4")
-    with preview._player_slots:            # shares the 2-at-a-time limit with conversions
-        if out.is_file() and out.stat().st_size > 0:
-            return out
-        try:
-            r = subprocess.run(teaser_cmd(path, starts, length, str(tmp), audio=has_audio(path)),
-                               capture_output=True, text=True, timeout=BUILD_TIMEOUT_S, check=False)
-            if r.returncode != 0 or not tmp.is_file() or tmp.stat().st_size == 0:
-                logger.info("Teaser failed for %s: %s", path, (r.stderr or "")[-400:])
-                raise TeaserError("Couldn't make the teaser from this video")
-            os.replace(tmp, out)
-        except subprocess.TimeoutExpired:
-            raise TeaserError("Making the teaser took too long")
-        except OSError as exc:
-            raise TeaserError(f"Couldn't make the teaser: {exc.strerror or exc}")
-        finally:
-            tmp.unlink(missing_ok=True)
-    return out
+    threading.Thread(target=_run, args=(job, path, starts, length, out), daemon=True,
+                     name=f"teaser-{k}").start()
+    return k
+
+
+def status(k: str) -> dict | None:
+    with _jobs_lock:
+        job = _jobs.get(k)
+    if job is None:
+        f = cache_dir() / f"{k}.mp4"
+        return {"state": "done", "pct": 100, "error": None} if f.is_file() else None
+    return dict(job)
+
+
+def ready(file_id: int, path: str, starts: list[float]) -> Path | None:
+    out = path_for(file_id, path, starts)
+    return out if out.is_file() and out.stat().st_size > 0 else None
+
+
+def build(file_id: int, path: str, starts: list[float], duration: float | None,
+          wait: float = BUILD_TIMEOUT_S + 10) -> Path:
+    """Build and wait (tests and scripts). Raises TeaserError."""
+    import time
+    k = start(file_id, path, starts, duration)
+    end = time.monotonic() + wait
+    while time.monotonic() < end:
+        st = status(k) or {}
+        if st.get("state") == "done":
+            return path_for(file_id, path, starts)
+        if st.get("state") == "error":
+            raise TeaserError(st.get("error") or "Couldn't make the teaser")
+        time.sleep(0.2)
+    raise TeaserError("Making the teaser took too long")
 
 
 def remove(file_id: int, path: str | None, starts: list[float]) -> None:

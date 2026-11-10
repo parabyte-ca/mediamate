@@ -35,7 +35,8 @@ logger = logging.getLogger(__name__)
 
 REPORT_KEY = "music_doctor_report"
 SAFE = ("junk", "empty", "missing")
-BATCH = {"untagged": "fix_tags", "no_cover": "covers", "not_embedded": "embed"}
+BATCH = {"untagged": "fix_tags", "no_cover": "covers", "not_embedded": "embed",
+         "low_bitrate": "upgrade", "missing_tracks": "complete"}
 JUNK_EXTS = {".exe", ".url", ".lnk", ".sfv", ".md5", ".nzb", ".bat", ".scr", ".com", ".par2", ".website",
              ".torrent"}
 JUNK_NAMES = {"thumbs.db", "desktop.ini"}
@@ -257,24 +258,22 @@ def check(db) -> dict:
                          if os.path.normpath(a.folder) == os.path.normpath(dest) else f"Would move to {dest}")
                 issues.append(_issue("placement", a.folder, f"{name}: {where}", "Organise for Plex",
                                      album_id=a.id, target=dest))
+        from . import music_follow
         for kind in ("missing_tracks", "low_bitrate"):
-            if kind not in flags:
+            if kind not in flags or music_follow.dismissed(a):
                 continue
             item, wa = _watch_album(db, a)
             what = ("Some tracks are missing" if kind == "missing_tracks"
                     else f"Lossy, under {music_library.LOW_BITRATE} kbps on average")
-            if wa is None:
-                hint = (f"Follow {a.artist} on the Watchlist to download a better copy" if item is None
-                        else "Not in this artist's discography on the Watchlist")
-                issues.append(_issue(kind, a.folder, f"{name}: {what}. {hint}", "Download a better copy",
-                                     album_id=a.id, fixable=False))
-            elif wa.status in ("wanted", "grabbed"):
+            if wa is not None and wa.status in ("wanted", "grabbed"):
                 issues.append(_issue(kind, a.folder, f"{name}: {what}. A better copy is already "
                                      f"{'wanted' if wa.status == 'wanted' else 'downloading'}",
                                      "Download a better copy", album_id=a.id, fixable=False))
-            else:
-                issues.append(_issue(kind, a.folder, f"{name}: {what}", "Mark Wanted on the Watchlist",
-                                     album_id=a.id, watch_album_id=wa.id))
+                continue
+            follow = "" if item is not None else f" (follows {a.artist}, new releases only)"
+            issues.append(_issue(kind, a.folder, f"{name}: {what}",
+                                 ("Find missing tracks" if kind == "missing_tracks" else "Upgrade to FLAC") + follow,
+                                 album_id=a.id))
 
     order = {k: i for i, k in enumerate(LABEL)}
     issues.sort(key=lambda i: (order[i["kind"]], i["path"]))
@@ -415,7 +414,7 @@ def last_report(db) -> dict | None:
         return None
 
 
-def fix_ids(db, ids: list[str], bind=None) -> dict:
+def fix_ids(db, ids: list[str], bind=None, person_id: int | None = None) -> dict:
     """Fix chosen problems from the last report. Tags, artwork and covers in files
     start one background bulk action (MusicBrainz is slow); the rest happen now."""
     from . import music_batch
@@ -431,7 +430,7 @@ def fix_ids(db, ids: list[str], bind=None) -> dict:
         elif slow:
             action = BATCH[slow[0]["kind"]]
             try:
-                music_batch.start(action, [i["album_id"] for i in slow], bind=bind)
+                music_batch.start(action, [i["album_id"] for i in slow], bind=bind, person_id=person_id)
                 started = f"{music_batch.LABELS[action]} for {len(slow)} album{'s' if len(slow) != 1 else ''}"
                 for i in slow:
                     i["result"] = "Started in the background"

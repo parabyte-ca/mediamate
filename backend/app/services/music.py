@@ -417,7 +417,8 @@ def music_folder(db, item):
     return download_folder(db, None)
 
 
-def grab(db, item, album, settings: dict | None = None, *, force: bool = False) -> dict:
+def grab(db, item, album, settings: dict | None = None, *, force: bool = False,
+         lossless: bool | None = None) -> dict:
     """Look for an album and start downloading the best copy.
     Returns {"status": waiting | already | not_found | duplicate | started, "message"}."""
     from ..models import Download, DownloadHistory, Setting
@@ -452,6 +453,8 @@ def grab(db, item, album, settings: dict | None = None, *, force: bool = False) 
         min_seeds = 3
     age = _hours_out(album)
     lossless_only = (not force and age is not None and age < FALLBACK_AFTER_HOURS) or upgrade_of is not None
+    if lossless is not None:                     # the caller decides (finding missing tracks of an MP3 album)
+        lossless_only = lossless
 
     with WATCHLIST_LOCK:
         cands = find_candidates(item, album, min_seeds, failed_hashes(db, item.id), failed_titles(db, item.id),

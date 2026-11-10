@@ -369,6 +369,11 @@ def scan(bind=None) -> dict:
             mark_duplicates(db)
             db.commit()
             covers = fill_covers(db)
+            try:
+                from . import music_follow
+                music_follow.notify_after_scan(db)
+            except Exception:
+                logger.exception("Music upgrade notice failed")
             return {"ok": True, "roots": rs, "albums": db.query(MusicLibAlbum).count(),
                     "tracks": db.query(MusicTrack).count(), "removed": removed, "covers": covers}
     finally:

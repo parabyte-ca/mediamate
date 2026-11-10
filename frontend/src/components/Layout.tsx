@@ -1,3 +1,4 @@
+import { PlayerProvider, PlayerSpacer } from "./MusicPlayer";
 import { useState, useEffect } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -171,6 +172,7 @@ export default function Layout() {
   // relative: absolutely positioned children (e.g. sr-only inputs) stay inside the app
   // instead of stretching the page, which made the whole page scroll on phones.
   return (
+    <PlayerProvider>
     <div className="relative flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
       {onboarding && <OnboardingWizard onClose={() => setOnboarding(false)} />}
       <CommandPalette />
@@ -368,6 +370,7 @@ export default function Layout() {
           </div>
         )}
         <Outlet />
+        <PlayerSpacer />
       </main>
 
       {/* ── Bottom tab bar (mobile only, hidden on md+) ─────────────────────── */}
@@ -454,5 +457,6 @@ export default function Layout() {
         </div>
       )}
     </div>
+    </PlayerProvider>
   );
 }

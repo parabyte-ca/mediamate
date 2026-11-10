@@ -194,6 +194,7 @@ class MusicLibAlbum(Base):
     plex_dirty = Column(Integer, nullable=False, default=0, server_default="0")
     scanned_at = Column(DateTime, nullable=True)
     cover_checked_at = Column(DateTime, nullable=True)   # last MusicBrainz cover lookup that found none
+    upgrade_dismissed_at = Column(DateTime, nullable=True)  # "Not now" on a better copy (asks again after 90 days)
 
 
 class MusicArtistTag(Base):

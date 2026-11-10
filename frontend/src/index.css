@@ -9,6 +9,10 @@
   }
 }
 
+/* The music player sits above the phone tab bar, or floats bottom-right on wider screens. */
+:root { --player-bottom: calc(57px + env(safe-area-inset-bottom, 0px)); }
+@media (min-width: 768px) { :root { --player-bottom: 1rem; } }
+
 /* Mobile: clear the fixed bottom tab bar + iOS home indicator safe area */
 .main-scroll {
   padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));

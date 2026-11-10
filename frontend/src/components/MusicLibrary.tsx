@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Stethoscope, Disc3, FileText, LayoutGrid, List as ListIcon, Star, FolderInput, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Share2, Tags, Upload, Wand2, X } from "lucide-react";
+import { AlertTriangle, Stethoscope, Disc3, FileText, LayoutGrid, List as ListIcon, Star, FolderInput, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Share2, Tags, Upload, Wand2, X, UserPlus, UserCheck, ArrowUpCircle } from "lucide-react";
 import { api, type MusicDoctorKind, type AlbumTags, type CoverCandidate, type LibAlbum, type MusicBatch, type LibAlbumDetail, type MusicIssue, type TagRow } from "../api/client";
 import Stars from "./Stars";
+import { PlayAlbumButton, usePlayer } from "./MusicPlayer";
 import ShareDialog from "./ShareDialog";
 import DoctorDialog, { type DoctorKindInfo } from "./DoctorDialog";
 import { fmtSize } from "../utils";
@@ -17,6 +18,19 @@ const ISSUE: Record<MusicIssue, [string, string]> = {
   duplicate: ["Duplicate", "The same album is in another folder too. Keep the better copy and delete the other."],
 };
 
+/** Low quality and missing tracks ask whether to get a better copy. */
+const BETTER = {
+  low_bitrate: { mode: "upgrade" as const, yes: "Upgrade", question: "Look for a FLAC copy? The old files go to the trash once it's in",
+                 what: (a: LibAlbumDetail) => `Low quality (${(a.format ?? "lossy").toUpperCase()}, ${Math.round(avgKbps(a))} kbps)` },
+  missing_tracks: { mode: "complete" as const, yes: "Find missing", question: "Look for a complete copy?",
+                    what: (a: LibAlbumDetail) => `Missing tracks (${a.track_list.length} here)` },
+};
+
+function avgKbps(a: LibAlbumDetail): number {
+  const b = a.track_list.map((t) => t.bitrate).filter((x): x is number => !!x);
+  return b.length ? b.reduce((s, x) => s + x, 0) / b.length : 0;
+}
+
 const DOCTOR_KINDS: DoctorKindInfo<MusicDoctorKind>[] = [
   { kind: "broken", title: "Can't be read", hint: "Damaged or incomplete audio files. Fixing moves them to the 30-day trash." },
   { kind: "duplicate", title: "Duplicate albums", hint: "The best copy is kept: lossless first, then bitrate, then the most tracks. Fixing moves the other copy to the trash.",
@@ -27,8 +41,10 @@ const DOCTOR_KINDS: DoctorKindInfo<MusicDoctorKind>[] = [
   { kind: "untagged", title: "Missing tags", hint: "Fixing fills them in from MusicBrainz in the background (about a second per album). Live and bootleg albums: use Edit tags on the album instead.", fixAll: "Fix tags for all", fixOne: "Fix tags" },
   { kind: "no_cover", title: "No artwork", hint: "Fixing looks on MusicBrainz in the background. For live and bootleg albums, upload a picture from the album.", fixAll: "Find artwork for all", fixOne: "Find artwork" },
   { kind: "not_embedded", title: "Cover not in the files", hint: "Some players and phones only show artwork that's inside the files.", fixAll: "Put covers in all", fixOne: "Put in files" },
-  { kind: "missing_tracks", title: "Missing tracks", hint: "Fixing marks the album Wanted on the artist's Watchlist card, so a complete copy downloads. Then the duplicate check keeps the better one.", fixAll: "Want all", fixOne: "Want" },
-  { kind: "low_bitrate", title: "Low bitrate", hint: "Lossy copies under 220 kbps. Fixing marks the album Wanted, so a FLAC or 320 kbps copy downloads.", fixAll: "Want all", fixOne: "Want" },
+  { kind: "missing_tracks", title: "Missing tracks", hint: "Find missing looks for a complete copy now (following the artist, new releases only, if you don't yet). The old files go to the trash once it's in. \"Not now\" in the album stops asking for 90 days.", fixAll: "Find all missing", fixOne: "Find missing",
+    confirm: (n) => `Look for a complete copy of ${n === 1 ? "this album" : `${n} albums`}? Artists you don't follow yet are followed (new releases only).` },
+  { kind: "low_bitrate", title: "Low quality", hint: "Lossy copies under 220 kbps. Upgrade looks for a FLAC copy now (following the artist, new releases only, if you don't yet); the old files go to the trash once it's in.", fixAll: "Upgrade all", fixOne: "Upgrade",
+    confirm: (n) => `Look for a FLAC copy of ${n === 1 ? "this album" : `${n} albums`}? Artists you don't follow yet are followed (new releases only).` },
   { kind: "missing", title: "Folder is gone", hint: "Listed in the Library, but the folder isn't there any more." },
   { kind: "junk", title: "Leftover files", hint: "Download clutter such as .url, .sfv and Thumbs.db. .cue, .log, .nfo and .txt notes are kept." },
   { kind: "empty", title: "Empty folders", hint: "Fixed automatically when that's on." },
@@ -73,7 +89,7 @@ export default function MusicLibrary() {
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [batch, setBatch] = useState<MusicBatch | null>(null);
   const [failedOpen, setFailedOpen] = useState(false);
-  const [doctor, setDoctor] = useState(false);
+  const [doctor, setDoctor] = useState(() => new URLSearchParams(window.location.search).get("doctor") === "1");
 
   const load = useCallback(async () => {
     const [a, s] = await Promise.all([api.music.library(), api.music.libraryStatus()]);
@@ -102,7 +118,7 @@ export default function MusicLibrary() {
   }, [batch?.running, load]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const togglePick = (id: number) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const runBulk = async (action: "covers" | "fix_tags" | "organise" | "embed") => {
+  const runBulk = async (action: "covers" | "fix_tags" | "organise" | "embed" | "upgrade" | "complete" | "follow") => {
     try { setBatch(await api.music.bulk({ action, album_ids: [...picked] })); setPicked(new Set()); }
     catch (e) { say((e as Error).message); }
   };
@@ -234,6 +250,8 @@ export default function MusicLibrary() {
           <button className={ghost} disabled={batch?.running} onClick={() => runBulk("fix_tags")}><Wand2 className="h-4 w-4" />Fix tags</button>
           <button className={ghost} disabled={batch?.running} onClick={() => runBulk("organise")}><FolderInput className="h-4 w-4" />Organise for Plex</button>
           <button className={ghost} disabled={batch?.running} onClick={() => runBulk("embed")} title="Put each album's cover inside its tracks"><ImagePlus className="h-4 w-4" />Put covers in files</button>
+          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("follow")} title="Follow each album's artist on the Watchlist (new releases only)"><UserPlus className="h-4 w-4" />Follow artists</button>
+          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("upgrade")} title="Look for a FLAC copy of each album; the old files go to the trash once it's in"><ArrowUpCircle className="h-4 w-4" />Upgrade quality</button>
           <span className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2 dark:border-gray-600 dark:bg-gray-900" title="Rate them all">
             <Star className="h-3.5 w-3.5 text-gray-400" /><Stars value={0} label="the selected albums" onChange={(n) => rateMany(n)} />
           </span>
@@ -276,6 +294,7 @@ export default function MusicLibrary() {
                   <td className="px-3 py-2"><input type="checkbox" aria-label={`Select ${a.title}`} checked={picked.has(a.id)} onChange={() => togglePick(a.id)} /></td>
                   <td className="max-w-0 px-2 py-2">
                     <div className="flex items-center gap-3">
+                      <PlayAlbumButton albumId={a.id} label={`${a.title} by ${a.artist}`} className="h-8 w-8 shrink-0" />
                       <button type="button" onClick={() => setOpen(a.id)} aria-label={`Open ${a.title} by ${a.artist}`} className="shrink-0">
                         <Cover a={a} className="h-10 w-10 rounded" />
                       </button>
@@ -311,6 +330,7 @@ export default function MusicLibrary() {
               <button type="button" onClick={() => setOpen(a.id)} className="block w-full text-left" aria-label={`Open ${a.title} by ${a.artist}`}>
                 <Cover a={a} className="aspect-square w-full" />
               </button>
+              <PlayAlbumButton albumId={a.id} label={`${a.title} by ${a.artist}`} className="absolute right-2 top-2 z-10 h-9 w-9" />
               <div className="p-2.5">
                 <button type="button" onClick={() => setOpen(a.id)} className="block w-full text-left">
                   <p className="truncate text-sm font-semibold text-gray-900 hover:text-blue-600 dark:text-gray-100 dark:hover:text-blue-400" title={a.title ?? ""}>{a.title}</p>
@@ -357,13 +377,14 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
   const [sharing, setSharing] = useState(false);
   const [a, setA] = useState<LibAlbumDetail | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [playing, setPlaying] = useState<number | null>(null);
+  const player = usePlayer();
+  const playingId = player.playing && player.current?.albumId === id ? player.current.id : null;
   const [names, setNames] = useState<string[] | null>(null);
   const [fresh, setFresh] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
-  const audio = useRef<HTMLAudioElement>(null);
+  const [following, setFollowing] = useState(false);
 
   const load = useCallback(() => api.music.libraryAlbum(id).then(setA).catch((e) => setError(e.message)), [id]);
   useEffect(() => { load(); }, [load]);
@@ -373,12 +394,10 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
     return () => window.removeEventListener("keydown", k);
   }, [onClose, editing, coverOpen]);
 
-  const play = (tid: number) => {
-    const el = audio.current;
-    if (!el) return;
-    if (playing === tid) { el.pause(); setPlaying(null); return; }
-    el.src = api.music.trackUrl(tid);
-    el.play().then(() => setPlaying(tid)).catch(() => setError("This browser can't play that file"));
+  const play = (tid?: number) => {
+    if (tid == null) return;
+    if (player.current?.id === tid) { player.toggle(); return; }
+    player.playAlbum(id, tid).catch((e) => setError((e as Error).message));
   };
   const act = async (key: string, fn: () => Promise<string>) => {
     setBusy(key); setError(null);
@@ -407,13 +426,40 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
               <button onClick={onClose} aria-label="Close" className="self-start rounded p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"><X className="h-4 w-4" /></button>
             </div>
 
-            {a.issues.length > 0 && (
+            {a.issues.filter((i) => !(i in BETTER) || a.upgrade_dismissed).length > 0 && (
               <ul className="space-y-1 border-b border-gray-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 dark:border-gray-700 dark:bg-amber-950/30 dark:text-amber-200">
-                {a.issues.map((i) => <li key={i} className="flex gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span><b>{ISSUE[i][0]}.</b> {ISSUE[i][1]}</span></li>)}
+                {a.issues.filter((i) => !(i in BETTER) || a.upgrade_dismissed).map((i) => <li key={i} className="flex gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span><b>{ISSUE[i][0]}.</b> {ISSUE[i][1]}</span></li>)}
               </ul>
             )}
+            {!a.upgrade_dismissed && a.issues.filter((i) => i in BETTER).map((i) => {
+              const b = BETTER[i as keyof typeof BETTER];
+              return (
+                <div key={i} role="region" aria-label={b.question} className="flex flex-wrap items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+                  <ArrowUpCircle className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 flex-1"><b>{b.what(a)}.</b> {b.question}{a.followed_artist_id ? "" : ` (follows ${a.artist}, new releases only)`}</span>
+                  <button className={primary} disabled={busy !== null} onClick={() => act(i, async () => (await api.music.betterCopy(id, b.mode)).message)}>
+                    {busy === i ? <Loader2 className="h-4 w-4 animate-spin" /> : null}{b.yes}
+                  </button>
+                  <button className={ghost} disabled={busy !== null} onClick={() => act("notnow", async () => (await api.music.notNow(id)).msg)}>Not now</button>
+                </div>
+              );
+            })}
 
             <div className="flex flex-wrap gap-2 px-4 pt-3">
+              <button className={primary} onClick={() => play(a.track_list[0]?.id)} disabled={!a.track_list.length}>
+                {player.current?.albumId === id && player.playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                {player.current?.albumId === id && player.playing ? "Pause" : "Play album"}
+              </button>
+              {a.followed_artist_id ? (
+                <Link to="/watchlist?type=music" className={ghost} title={`${a.artist} is on the Watchlist`}>
+                  <UserCheck className="h-4 w-4" />Following
+                </Link>
+              ) : a.artist && !/^various( artists)?$/i.test(a.artist.trim()) ? (
+                <button className={ghost} disabled={busy !== null} onClick={() => setFollowing(true)}
+                        title={`Follow ${a.artist} on the Watchlist to get new albums`}>
+                  <UserPlus className="h-4 w-4" />Follow {a.artist}
+                </button>
+              ) : null}
               <button className={ghost} disabled={busy !== null} onClick={() => setEditing(true)}
                       title="Change the album and track tags yourself (live recordings and bootlegs too)">
                 <PencilLine className="h-4 w-4" />Edit tags
@@ -468,9 +514,9 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
             <ol className="divide-y divide-gray-100 p-2 dark:divide-gray-800">
               {a.track_list.map((t) => (
                 <li key={t.id} className="flex items-center gap-2 px-2 py-1.5">
-                  <button onClick={() => play(t.id)} aria-label={`${playing === t.id ? "Pause" : "Play"} ${t.title}`}
+                  <button onClick={() => play(t.id)} aria-label={`${playingId === t.id ? "Pause" : "Play"} ${t.title}`}
                           className="rounded-full p-1.5 text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950">
-                    {playing === t.id ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                    {playingId === t.id ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                   </button>
                   <span className="w-8 text-right text-xs tabular-nums text-gray-400">{t.disc_no && t.disc_no > 1 ? `${t.disc_no}-` : ""}{t.track_no ?? "–"}</span>
                   <span className="min-w-0 flex-1">
@@ -486,13 +532,28 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
                                    onSaved={(m) => { setEditing(false); load(); onChanged(m); }} />}
             {coverOpen && <CoverDialog a={a} onClose={() => setCoverOpen(false)}
                                        onSaved={(m) => { setCoverOpen(false); load(); onChanged(m); }} />}
-            <audio ref={audio} onEnded={() => setPlaying(null)} className="hidden" />
             <div className="flex justify-end border-t border-gray-200 p-3 dark:border-gray-700">
               <button className={primary} onClick={onClose}>Done</button>
             </div>
           </>
         )}
       </div>
+      {following && a && (
+        <Overlay title={`Follow ${a.artist}`} onClose={() => setFollowing(false)}>
+          <p className="text-sm text-gray-600 dark:text-gray-300">{a.artist} goes on the Watchlist. Which albums should MediaMate download?</p>
+          <div className="mt-3 grid gap-2">
+            {([["none", "New releases only", "Albums from now on"],
+               ["all", "New releases and everything I'm missing", "Albums you already have are skipped"]] as const).map(([v, t, sub]) => (
+              <button key={v} className="rounded-lg border border-gray-300 px-3 py-2 text-left hover:border-blue-500 hover:bg-blue-50 dark:border-gray-600 dark:hover:bg-blue-950/40"
+                      disabled={busy !== null}
+                      onClick={() => { setFollowing(false); act("follow", async () => (await api.music.followArtist(id, v)).msg); }}>
+                <span className="block text-sm font-medium text-gray-900 dark:text-gray-100">{t}</span>
+                <span className="block text-xs text-gray-500 dark:text-gray-400">{sub}</span>
+              </button>
+            ))}
+          </div>
+        </Overlay>
+      )}
       {sharing && a && (
         <ShareDialog kind="album" id={id} title={[a.artist, a.title].filter(Boolean).join(" – ")}
                      householdPath={`/library?lib=music&album=${id}`} onClose={() => setSharing(false)} />

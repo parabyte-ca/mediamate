@@ -168,7 +168,7 @@ def test_tag_and_artwork_fixes_run_in_the_background(root, monkeypatch):
     clip(music / "Unknown" / "rip" / "track.flac")
     ml.scan()
     seen = []
-    monkeypatch.setattr(music_batch, "start", lambda action, ids, bind=None: seen.append((action, ids)))
+    monkeypatch.setattr(music_batch, "start", lambda action, ids, bind=None, person_id=None: seen.append((action, ids)))
     r = check(Session)
     with Session() as db:
         db.merge(Setting(key=doctor.AUTO_KEY, value="false"))
@@ -180,28 +180,35 @@ def test_tag_and_artwork_fixes_run_in_the_background(root, monkeypatch):
     assert seen[1][0] == "covers" and both["done"] == 1
 
 
-def test_low_bitrate_marks_the_album_wanted(root):
+def test_low_bitrate_offers_an_upgrade(root, monkeypatch):
+    from app.services import music_batch
     client, Session, music = root
     folder = music / "Lo" / "Fi (2001)"
     for i in (1, 2):
         clip(folder / f"{i:02d} - t{i}.mp3", kbps=128, artist="Lo", albumartist="Lo", album="Fi", date="2001",
              title=f"t{i}", tracknumber=f"{i}/2")
     ml.scan()
-    r = check(Session)
-    low = kinds(r, "low_bitrate")[0]
-    assert low["fixable"] is False and "Follow Lo" in low["detail"]
+    low = kinds(check(Session), "low_bitrate")[0]
+    assert low.get("fixable", True) and low["fix"] == "Upgrade to FLAC (follows Lo, new releases only)"
+    seen = []
+    monkeypatch.setattr(music_batch, "start", lambda action, ids, bind=None, person_id=None: seen.append((action, ids)))
+    with Session() as db:
+        md.run(db, auto_fix=False)
+        md.fix_ids(db, [low["id"]])
+    assert seen == [("upgrade", [low["album_id"]])]
     with Session() as db:
         item = WatchlistItem(kind="artist", mbid="art-1", title="Lo", search_query="Lo")
         db.add(item)
         db.flush()
-        db.add(MusicAlbum(watchlist_id=item.id, mbid="rg-fi", title="Fi", status="have"))
+        db.add(MusicAlbum(watchlist_id=item.id, mbid="rg-fi", title="Fi", status="wanted"))
         db.commit()
     low = kinds(check(Session), "low_bitrate")[0]
-    assert low.get("fixable", True) and low["watch_album_id"]
+    assert low["fixable"] is False and "already wanted" in low["detail"]
     with Session() as db:
-        assert "Wanted" in md.fix(db, low, [str(music)])
-        assert db.query(MusicAlbum).one().status == "wanted"
-    assert "already wanted" in kinds(check(Session), "low_bitrate")[0]["detail"]
+        a = db.query(MusicLibAlbum).one()
+        a.upgrade_dismissed_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+        db.commit()
+    assert kinds(check(Session), "low_bitrate") == []                    # "Not now": not asked for 90 days
 
 
 def test_old_trash_is_purged(tmp_path):

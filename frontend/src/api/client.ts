@@ -157,7 +157,10 @@ export interface LibTrack {
   size_bytes: number | null; file: string;
 }
 
-export interface LibAlbumDetail extends LibAlbum { track_list: LibTrack[] }
+export interface LibAlbumDetail extends LibAlbum {
+  track_list: LibTrack[]; followed_artist_id: number | null; upgrade_dismissed: boolean;
+}
+export interface BetterCopyResult { status: "started" | "wanted" | "not_found" | "error" | "already" | string; message: string }
 
 export interface TagRow { path: string; file: string; title: string; artist: string; track_no: number | null; disc_no: number | null }
 export interface AlbumTags {
@@ -995,7 +998,13 @@ export const api = {
       req<{ ok: boolean; msg: string }>(`/music/library/albums/${id}/cover/musicbrainz`, {
         method: "POST", body: JSON.stringify({ mbid, embed }) }),
     embedCover: (id: number) => req<{ ok: boolean; msg: string }>(`/music/library/albums/${id}/cover/embed`, { method: "POST" }),
-    bulk: (body: { action: "covers" | "fix_tags" | "organise" | "embed" | "rate" | "collect"; album_ids: number[];
+    followArtist: (id: number, start: "none" | "new" | "all" = "none") =>
+      req<{ watchlist_id: number; artist: string; already: boolean; msg: string }>(`/music/library/albums/${id}/follow-artist`,
+        { method: "POST", body: JSON.stringify({ start }) }),
+    betterCopy: (id: number, mode: "upgrade" | "complete") =>
+      req<BetterCopyResult>(`/music/library/albums/${id}/better-copy`, { method: "POST", body: JSON.stringify({ mode }) }),
+    notNow: (id: number) => req<{ ok: boolean; msg: string }>(`/music/library/albums/${id}/not-now`, { method: "POST" }),
+    bulk: (body: { action: "covers" | "fix_tags" | "organise" | "embed" | "rate" | "collect" | "upgrade" | "complete" | "follow"; album_ids: number[];
                    stars?: number; add?: string[]; remove?: string[] }) =>
       req<MusicBatch & { done: number; sent?: number; errors?: string[]; ok?: boolean }>("/music/library/bulk", {
         method: "POST", body: JSON.stringify(body) }),

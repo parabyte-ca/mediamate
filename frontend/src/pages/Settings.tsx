@@ -1584,6 +1584,11 @@ export default function Settings() {
               onChange={(v) => set("notify_on_grab", v ? "true" : "false")}
             />
             <CheckRow
+              label="Music albums could be upgraded or have missing tracks (after a library scan, at most daily)"
+              checked={(settings.music_upgrade_notify ?? "true") === "true"}
+              onChange={(v) => set("music_upgrade_notify", v ? "true" : "false")}
+            />
+            <CheckRow
               label="A download completes"
               checked={(settings.notify_on_complete ?? "true") === "true"}
               onChange={(v) => set("notify_on_complete", v ? "true" : "false")}

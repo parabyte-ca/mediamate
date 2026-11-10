@@ -101,6 +101,16 @@ def albums(mbid: str, include_eps: bool = False) -> list[dict]:
     return sorted(out, key=lambda g: (g["date"] or "9999", g["title"].lower()))
 
 
+def release_group_artist(release_group_mbid: str) -> dict | None:
+    """The main credited artist of a release group: {mbid, name}, or None."""
+    data = _get(f"/release-group/{release_group_mbid}", inc="artist-credits")
+    for credit in data.get("artist-credit") or []:
+        a = credit.get("artist") if isinstance(credit, dict) else None
+        if a and a.get("id"):
+            return {"mbid": a["id"], "name": a.get("name", "")}
+    return None
+
+
 def find_release_group(artist_name: str, album_title: str) -> str | None:
     """The best-matching release group's id for an artist and album title, or None."""
     q = f'releasegroup:"{album_title}" AND artist:"{artist_name}"'

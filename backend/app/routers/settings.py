@@ -49,6 +49,7 @@ DEFAULTS: dict[str, str] = {
     "browse_country": "US",
     "qbit_music_category": "music",
     "music_remove_after_import": "true",
+    "music_upgrade_notify": "true",        # a notice after scans when albums could be upgraded or completed
     "public_url": "",                      # e.g. https://mediamate.example.com, for share links   # remove album torrents once imported; raw files to the music trash    # qBittorrent category for album downloads
     "music_download_path_id": "",
     "organise_music_dir": "",          # music library: Artist/Album (Year)/NN - Title      # Folders entry albums download to ("" = a folder named Music)

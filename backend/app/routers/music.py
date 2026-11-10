@@ -140,7 +140,8 @@ def _lib_album_out(a: MusicLibAlbum) -> dict:
             "has_cover": bool(a.cover), "mb_release_group_id": a.mb_release_group_id,
             "issues": json.loads(a.issues or "[]"), "rating": a.rating,
             "collections": json.loads(a.collections or "[]"), "plex_dirty": a.plex_dirty,
-            "scanned_at": a.scanned_at.isoformat() if a.scanned_at else None}
+            "scanned_at": a.scanned_at.isoformat() if a.scanned_at else None,
+            "upgrade_dismissed": a.upgrade_dismissed_at is not None}
 
 
 def _lib_album(db: Session, album_id: int) -> MusicLibAlbum:
@@ -161,7 +162,10 @@ def library_album(album_id: int, db: Session = Depends(get_db)):
     a = _lib_album(db, album_id)
     tracks = (db.query(MusicTrack).filter(MusicTrack.album_id == a.id)
               .order_by(MusicTrack.disc_no, MusicTrack.track_no, MusicTrack.path).all())
-    return {**_lib_album_out(a), "track_list": [
+    from ..services import music_follow
+    item = music_follow.followed(db, a)
+    return {**_lib_album_out(a), "followed_artist_id": item.id if item else None,
+            "upgrade_dismissed": music_follow.dismissed(a), "track_list": [
         {"id": t.id, "title": t.title or os.path.splitext(os.path.basename(t.path))[0], "artist": t.artist,
          "track_no": t.track_no, "disc_no": t.disc_no, "format": t.format, "bitrate": t.bitrate,
          "lossless": t.lossless, "duration_sec": t.duration_sec, "size_bytes": t.size_bytes,
@@ -437,7 +441,7 @@ class AlbumBulk(BaseModel):
 
 
 @router.post("/music/library/bulk")
-def library_bulk(body: AlbumBulk):
+def library_bulk(body: AlbumBulk, request: Request, db: Session = Depends(get_db)):
     """Rate or collect many albums now; covers, tags, organising and embedding run in
     the background (see /music/library/bulk/status)."""
     from ..services import music_batch, plex_sync
@@ -458,7 +462,9 @@ def library_bulk(body: AlbumBulk):
             sent += r.get("plex") == "sent"
         return {"ok": not errors, "done": done, "sent": sent, "errors": errors}
     try:
-        return music_batch.start(body.action, body.album_ids)
+        from ..services import people
+        me = people.current(db, request) if body.action in ("upgrade", "complete", "follow") else None
+        return music_batch.start(body.action, body.album_ids, person_id=me.id if me else None)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except RuntimeError as exc:
@@ -495,7 +501,62 @@ class DoctorFixIn(BaseModel):
 
 
 @router.post("/music/doctor/fix")
-def music_doctor_fix(body: DoctorFixIn, db: Session = Depends(get_db)):
-    from ..services import music_doctor
-    r = music_doctor.fix_ids(db, [str(i) for i in body.ids])
+def music_doctor_fix(body: DoctorFixIn, request: Request, db: Session = Depends(get_db)):
+    from ..services import music_doctor, people
+    me = people.current(db, request)
+    r = music_doctor.fix_ids(db, [str(i) for i in body.ids], person_id=me.id if me else None)
     return {"done": r["done"], "errors": r["errors"], "started": r["started"], **_doctor_out(db, r["report"])}
+
+
+# ── following artists and better copies, from the library ───────────────────
+
+class LibFollow(BaseModel):
+    start: str = "none"
+
+
+@router.post("/music/library/albums/{album_id}/follow-artist")
+def library_follow_artist(album_id: int, body: LibFollow, request: Request, db: Session = Depends(get_db)):
+    """Follow this album's artist on the Watchlist (new releases only by default)."""
+    from ..services import music_follow, people
+    a = _lib_album(db, album_id)
+    if body.start not in music.STARTS:
+        raise HTTPException(status_code=422, detail="start must be none, new, latest or all")
+    me = people.acting(db, request)
+    try:
+        item, new = music_follow.follow(db, a, me.id, body.start)
+    except music_follow.NotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except musicbrainz.MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz is unavailable right now ({exc})")
+    db.commit()
+    return {"watchlist_id": item.id, "artist": item.title, "already": not new,
+            "msg": f"Already following {item.title}" if not new else f"Now following {item.title}"}
+
+
+class BetterCopy(BaseModel):
+    mode: str
+
+
+@router.post("/music/library/albums/{album_id}/better-copy")
+def library_better_copy(album_id: int, body: BetterCopy, request: Request, db: Session = Depends(get_db)):
+    """Look for a lossless copy ("upgrade") or one with all the tracks ("complete")."""
+    from ..services import music_follow, people
+    a = _lib_album(db, album_id)
+    if body.mode not in ("upgrade", "complete"):
+        raise HTTPException(status_code=422, detail="mode must be upgrade or complete")
+    me = people.acting(db, request)
+    try:
+        return music_follow.better_copy(db, a, body.mode, me.id)
+    except musicbrainz.MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz is unavailable right now ({exc})")
+
+
+@router.post("/music/library/albums/{album_id}/not-now")
+def library_not_now(album_id: int, db: Session = Depends(get_db)):
+    """Stop asking about a better copy of this album for 90 days."""
+    from datetime import datetime, timezone
+    from ..services import music_follow
+    a = _lib_album(db, album_id)
+    a.upgrade_dismissed_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"ok": True, "msg": f"Won't ask about this album for {music_follow.DISMISS_DAYS} days"}

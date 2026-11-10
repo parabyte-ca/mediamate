@@ -13,12 +13,14 @@ from . import music_library, musicbrainz
 
 logger = logging.getLogger(__name__)
 
-ACTIONS = ("covers", "fix_tags", "organise", "embed")
+ACTIONS = ("covers", "fix_tags", "organise", "embed", "upgrade", "complete", "follow")
 LABELS = {"covers": "Finding artwork", "fix_tags": "Fixing tags", "organise": "Organising for Plex",
-          "embed": "Putting covers in files"}
+          "embed": "Putting covers in files", "upgrade": "Looking for better copies",
+          "complete": "Looking for complete copies", "follow": "Following artists"}
 SYNC = False                         # tests run batches inline
 
 _lock = threading.Lock()
+_person: dict = {}                   # who started a follow/upgrade batch (they follow the artists)
 _state: dict = {"running": False, "action": None, "label": None, "done": 0, "total": 0,
                 "changed": 0, "failed": [], "msg": None, "finished_at": None}
 
@@ -35,6 +37,18 @@ def _files(db, album) -> list[str]:
 
 def _one(db, action: str, album) -> bool:
     """Do ``action`` on one album. True if something changed. Raises with a reason."""
+    if action in ("upgrade", "complete", "follow"):
+        from . import music_follow
+        if action == "follow":
+            try:
+                _, new = music_follow.follow(db, album, _person.get("id"))
+            except music_follow.NotFound as exc:
+                raise ValueError(str(exc))
+            return new
+        res = music_follow.better_copy(db, album, action, _person.get("id"))
+        if res["status"] not in ("started", "wanted", "already"):
+            raise ValueError(res["message"])
+        return res["status"] == "started"
     if not os.path.isdir(album.folder):
         raise ValueError("folder is gone; scan again")
     files = _files(db, album)
@@ -87,7 +101,7 @@ def _run(bind, action: str, ids: list[int]) -> None:
                     try:
                         if _one(db, action, album):
                             _state["changed"] += 1
-                        if action != "organise" and db.get(MusicLibAlbum, album_id) is not None:
+                        if action in ("covers", "fix_tags", "embed") and db.get(MusicLibAlbum, album_id) is not None:
                             music_library.scan_folder(db, album.folder)
                     except (ValueError, OSError, musicbrainz.MusicBrainzUnavailable) as exc:
                         _state["failed"].append(f"{label}: {exc}")
@@ -101,7 +115,8 @@ def _run(bind, action: str, ids: list[int]) -> None:
     finally:
         n, ok = _state["total"], _state["changed"]
         verb = {"covers": "got artwork", "fix_tags": "tagged", "organise": "organised",
-                "embed": "had covers put in their files"}[action]
+                "embed": "had covers put in their files", "upgrade": "started downloading a better copy",
+                "complete": "started downloading a complete copy", "follow": "newly followed"}[action]
         _state["msg"] = f"{ok} of {n} album{'s' if n != 1 else ''} {verb}" + (
             f"; {len(_state['failed'])} couldn't be" if _state["failed"] else "")
         _state["running"] = False
@@ -109,7 +124,7 @@ def _run(bind, action: str, ids: list[int]) -> None:
         logger.info("Music batch: %s", _state["msg"])
 
 
-def start(action: str, ids: list[int], bind=None) -> dict:
+def start(action: str, ids: list[int], bind=None, person_id: int | None = None) -> dict:
     """Start a batch. Raises ValueError for a bad action, RuntimeError if one is running."""
     from .media import store
     if action not in ACTIONS:
@@ -120,6 +135,8 @@ def start(action: str, ids: list[int], bind=None) -> dict:
     with _lock:
         if _state["running"]:
             raise RuntimeError(f"{_state['label']} is still running ({_state['done']} of {_state['total']})")
+        _person.clear()
+        _person["id"] = person_id
         _state.update(running=True, action=action, label=LABELS[action], done=0, total=len(ids), changed=0,
                       failed=[], msg=None, finished_at=None)
     bind = bind or store._engine()

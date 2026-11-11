@@ -198,3 +198,45 @@ def test_current_step_of_finished_journey_skips_skipped_tail():
     steps = [{"status": "done"}, {"status": "skipped"}, {"status": "skipped"}]
     assert journeys._current_index(steps) == 0
     assert journeys._current_index([{"status": "done"}, {"status": "failed"}, {"status": "skipped"}]) == 1
+
+
+def test_a_retried_encode_that_succeeds_is_done(Session, published):
+    fid = _file()
+    first = store.create_job(fid, "encode")
+    store.set_job_status(first, "error")
+    retry = store.create_job(fid, "encode")
+    with Session() as db:
+        snap = journeys.snapshot(db, db.query(Journey).one())
+        assert [s["status"] for s in snap["steps"]] == ["retried", "pending"]
+        assert db.query(Journey).one().status == "active"
+    store.set_job_status(retry, "done")
+    with Session() as db:
+        j = db.query(Journey).one()
+        snap = journeys.snapshot(db, j)
+        assert [s["status"] for s in snap["steps"]] == ["retried", "done"]
+        assert j.status == "done" and snap["current_step"] == 1
+
+
+def test_a_failure_without_a_retry_still_fails(Session, published):
+    fid = _file()
+    enc = store.create_job(fid, "encode")
+    store.set_job_status(enc, "done")
+    split = store.create_job(fid, "split")
+    store.set_job_status(split, "error")
+    with Session() as db:
+        j = db.query(Journey).one()
+        assert [s["status"] for s in journeys.snapshot(db, j)["steps"]] == ["done", "failed"]
+        assert j.status == "failed"
+
+
+def test_repair_rederives_journeys_cached_as_failed(Session, published):
+    fid = _file()
+    first = store.create_job(fid, "encode")
+    store.set_job_status(first, "error")
+    retry = store.create_job(fid, "encode")
+    store.set_job_status(retry, "done")
+    with Session() as db:
+        db.query(Journey).update({Journey.status: "failed"})       # as left by older versions
+        db.commit()
+        assert journeys.repair_retried(db) == 1
+        assert db.query(Journey).one().status == "done"

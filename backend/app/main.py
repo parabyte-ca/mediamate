@@ -84,6 +84,10 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         journeys.backfill(db)
+        if not db.query(Setting).filter(Setting.key == "journeys_retried_v1").first():
+            journeys.repair_retried(db)          # retried-and-done journeys that still read failed
+            db.add(Setting(key="journeys_retried_v1", value="1"))
+            db.commit()
     except Exception:
         logging.getLogger(__name__).exception("Journey backfill failed")
     finally:

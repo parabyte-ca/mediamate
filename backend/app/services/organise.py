@@ -345,13 +345,43 @@ def _watchlist_by_title(db: Session, title: str):
     return next((w for w in db.query(WatchlistItem).all() if _key(w.title) == k), None) if k else None
 
 
+def audience_of(settings: dict, path: str) -> str | None:
+    """Which organise folder a file is in now: general, mature, or None (neither)."""
+    p = os.path.abspath(path)
+    for key, aud in (("organise_tv_mature_dir", "mature"), ("organise_movie_mature_dir", "mature"),
+                     ("organise_tv_dir", "general"), ("organise_movie_dir", "general")):
+        root = (settings.get(key) or "").strip()
+        if root and p.startswith(os.path.abspath(root).rstrip("/") + "/"):
+            return aud
+    return None
+
+
+def show_folder_audience(settings: dict, path: str, hint: str | None) -> str | None:
+    """Where a show already lives: mature if its folder is in Mature TV Shows, general
+    if it's in TV Shows, None for a show that isn't in either yet."""
+    for aud in ("mature", "general"):
+        root = _root(settings, "episode", aud)
+        if not root or (aud == "general" and root == _root(settings, "episode", "mature")):
+            continue
+        try:
+            dest, _p = target_for(settings, path, hint, aud)
+        except OrganiseError:
+            return None
+        first = os.path.relpath(dest, root).split(os.sep)[0]
+        if first and first != ".." and os.path.isdir(os.path.join(root, first)):
+            return aud
+    return None
+
+
 def plan(db: Session, path: str, download_id: int | None = None, override: str | None = None,
          lookup: bool = True) -> dict:
     """Where a file would go and why: {target, kind, audience, reason, show_hint, settings}.
     Raises OrganiseError.
 
-    The audience is the override if given, else the watchlist show's setting (the show the
-    download came from, or one with the same name), else the age rating (services/ratings)."""
+    The audience, first that applies: the override given here; the Watchlist show's
+    setting; your per-title choice (Move to Mature / Kid-friendly); the folder the file
+    is already in (where it is is your decision); the folder its show already lives in;
+    otherwise the age rating (services/ratings)."""
     from . import ratings
     guard(path, db)
     settings = get_settings(db)
@@ -360,13 +390,26 @@ def plan(db: Session, path: str, download_id: int | None = None, override: str |
     if item is None and parsed.kind == "episode":
         item = _watchlist_by_title(db, parsed.title)
     hint = item.title if item is not None else None
+    title = hint or parsed.title
+    choice = getattr(item, "audience", None) if item is not None else None
+    mine = ratings.override(db, "tv" if parsed.kind == "episode" else "movie", title, parsed.year) \
+        if parsed.kind in ("episode", "movie") else None
+    placed = audience_of(settings, path)
+    show_in = show_folder_audience(settings, path, hint) if parsed.kind == "episode" else None
     if override in (ratings.GENERAL, ratings.MATURE):
         aud, why = override, "chosen by you"
     elif not mature_folders_set(settings):
         aud, why = ratings.GENERAL, ""
+    elif choice in (ratings.GENERAL, ratings.MATURE):
+        aud, why = choice, "set on the Watchlist"
+    elif mine in (ratings.GENERAL, ratings.MATURE):
+        aud, why = mine, "your choice (Kid-friendly)" if mine == ratings.GENERAL else "your choice (Mature)"
+    elif placed is not None:
+        aud, why = placed, "already in the " + ("Mature" if placed == ratings.MATURE else "regular") + " folder"
+    elif show_in is not None:
+        aud, why = show_in, "the show is already in the " + ("Mature" if show_in == ratings.MATURE else "regular") + " folder"
     else:
-        aud, why = ratings.audience(db, parsed.kind, hint or parsed.title, parsed.year,
-                                    watchlist_item=item, lookup=lookup)
+        aud, why = ratings.audience(db, parsed.kind, title, parsed.year, watchlist_item=item, lookup=lookup)
     genre, confidence = None, None
     if parsed.kind == "movie":
         from . import movie_genres

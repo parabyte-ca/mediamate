@@ -48,14 +48,25 @@ MAX_RATING_LOOKUPS = 200     # new TMDB lookups per check; the rest use the cach
 
 
 def _audience_of(settings: dict, path: str) -> str | None:
-    """Which organise folder a file is in now: general, mature, or None (neither)."""
-    p = os.path.abspath(path)
-    for key, aud in (("organise_tv_mature_dir", "mature"), ("organise_movie_mature_dir", "mature"),
-                     ("organise_tv_dir", "general"), ("organise_movie_dir", "general")):
-        root = (settings.get(key) or "").strip()
-        if root and p.startswith(os.path.abspath(root).rstrip("/") + "/"):
-            return aud
-    return None
+    from . import organise
+    return organise.audience_of(settings, path)
+
+
+def _clearly_adult(db, settings: dict, path: str, where: dict, lookup: bool = True) -> str | None:
+    """The rating, when a file in a regular folder is rated clearly for adults (R, NC-17,
+    TV-MA…) and you haven't said otherwise. Where a file is counts as your decision; only
+    an adult rating is worth asking about again (Keep here remembers the answer)."""
+    from . import organise, ratings
+    if not organise.mature_folders_set(settings) or not where.get("reason", "").startswith("already in the regular"):
+        return None
+    if where.get("kind") not in ("episode", "movie"):
+        return None
+    p = organise.parse(path)
+    cert = ratings.certification(db, "tv" if p.kind == "episode" else "movie", where.get("show_hint") or p.title,
+                                 p.year, lookup=lookup)
+    return cert if (cert or "").strip().upper() in ratings.ADULT else None
+
+
 _lock = threading.Lock()
 
 
@@ -219,21 +230,17 @@ def check(db: Session) -> dict:
                 continue
             lookups[0] += 1
             dest = where["target"]
+            adult = _clearly_adult(db, settings, path, where, lookup=lookups[0] <= MAX_RATING_LOOKUPS)
+            if adult:
+                to = organise.plan(db, path, override="mature", lookup=False)["target"]
+                issues.append(_issue("audience", path, f"In a regular folder but rated {adult}: {to}",
+                                     "Move to Mature", file_id=row["id"], target=to, audience="mature",
+                                     keep_here=True))
+                continue
             if os.path.abspath(dest) == os.path.abspath(path):
                 continue
-            now_in = _audience_of(settings, path)
-            wrong_audience = (organise.mature_folders_set(settings) and now_in is not None
-                              and now_in != where["audience"])
-            if wrong_audience:
-                which = "Mature" if where["audience"] == "mature" else "regular"
-                issues.append(_issue("audience", path, f"Belongs in the {which} folder ({where['reason']}): {dest}",
-                                     "Move to Mature" if where["audience"] == "mature" else "Move to regular",
-                                     file_id=row["id"], target=dest, audience=where["audience"],
-                                     # Making something more visible to the kids is one at a time.
-                                     **({} if where["audience"] == "mature" else {"bulk": False})))
-            else:
-                issues.append(_issue("name", path, f"Would become {dest}", "Rename & organise",
-                                     file_id=row["id"], target=dest, audience=where["audience"]))
+            issues.append(_issue("name", path, f"Would become {dest}", "Rename & organise",
+                                 file_id=row["id"], target=dest, audience=where["audience"]))
 
     # Size against the folder's target: bigger (shrink only when asked) or below the preferred range.
     try:
@@ -488,3 +495,23 @@ def scheduled_run() -> None:
 def refresh_media_servers(db) -> None:
     from .auto_organise import _refresh_media_servers
     _refresh_media_servers(db)
+
+
+def forget_audience(db, title_key: str, kind: str) -> int:
+    """Drop the saved "rated for adults" questions about one title (after Keep here or a move)."""
+    from . import organise, ratings
+    with _lock:
+        report = last_report(db)
+        if not report:
+            return 0
+        keep, gone = [], 0
+        for i in report.get("issues", []):
+            p = organise.parse(i.get("path", ""))
+            if i.get("kind") == "audience" and p.kind == kind and ratings._key(p.title or "") == title_key:
+                gone += 1
+            else:
+                keep.append(i)
+        if gone:
+            report["issues"], report["total"] = keep, max(0, report.get("total", 0) - gone)
+            _set(db, REPORT_KEY, json.dumps(report))
+        return gone

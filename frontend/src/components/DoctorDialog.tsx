@@ -31,13 +31,15 @@ const btnGhost = `${btn} border border-gray-300 dark:border-gray-600 text-gray-7
 const btnPrimary = `${btn} bg-blue-600 font-medium text-white hover:bg-blue-700`;
 const small = "shrink-0 rounded-md border border-gray-300 dark:border-gray-600 px-2 py-1 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50";
 
-export default function DoctorDialog<K extends string>({ title, kinds, source, autoFixLabel, onClose, onChanged }: {
+export default function DoctorDialog<K extends string>({ title, kinds, source, autoFixLabel, onClose, onChanged, onKeep }: {
   title: string;
   kinds: DoctorKindInfo<K>[];
   source: DoctorApi<K>;
   autoFixLabel: string;
   onClose: () => void;
   onChanged: () => void;
+  /** "Keep here" on a row marked keep: remember the choice; the row goes away. */
+  onKeep?: (issue: DoctorIssue<K>) => Promise<string>;
 }) {
   const [state, setState] = useState<DoctorState<K> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -133,6 +135,19 @@ export default function DoctorDialog<K extends string>({ title, kinds, source, a
                             <p className="break-words text-gray-500 dark:text-gray-400">{i.detail}</p>
                             {i.error && <p className="text-red-600 dark:text-red-400">{i.error}</p>}
                           </div>
+                          {i.keep_here && onKeep && (
+                            <button className={small} disabled={!!busy} title="Leave it where it is and stop asking"
+                                    onClick={async () => {
+                                      setBusy(`keep-${i.id}`); setMsg(null);
+                                      try {
+                                        setMsg(await onKeep(i));
+                                        setState((st) => st && st.report ? { ...st, report: { ...st.report, issues: st.report.issues.filter((x) => x.id !== i.id), total: Math.max(0, st.report.total - 1) } } : st);
+                                        onChanged();
+                                      } catch (e) { setMsg((e as Error).message); } finally { setBusy(null); }
+                                    }}>
+                              {busy === `keep-${i.id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : "Keep here"}
+                            </button>
+                          )}
                           {link ? (
                             <Link to={link.to} className={small}>{link.label}</Link>
                           ) : i.fixable !== false && (

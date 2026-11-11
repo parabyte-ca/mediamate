@@ -163,8 +163,9 @@ def set_audience(file_id: int, body: dict = Body(...)):
             moved += dest != before
         except (organise.OrganiseError, OSError) as exc:
             errors.append(f"{f['filename']}: {exc}")
-    if moved:
-        with SessionLocal() as s:
+    with SessionLocal() as s:
+        library_doctor.forget_audience(s, key, p.kind)   # your choice answers the doctor's question
+        if moved:
             library_doctor.refresh_media_servers(s)
     where = "Mature" if aud == ratings.MATURE else "the regular folders"
     msg = (f"{p.title}: moved {moved} file{'s' if moved != 1 else ''} to {where}" if moved

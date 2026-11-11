@@ -275,7 +275,7 @@ function OrganiseSection() {
       </div>
       <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
         With Mature folders set, each show or movie goes by its age rating (from TMDB):
-        movies up to <b>PG-13</b> and shows up to <b>TV-PG</b> in the regular folders; <b>R</b>, <b>TV-14</b>, <b>TV-MA</b> and anything unrated in the Mature ones.
+        movies up to <b>PG-13</b> and shows up to <b>TV-PG</b> in the regular folders; <b>R</b>, <b>TV-14</b>, <b>TV-MA</b> and anything unrated in the Mature ones. A file that's already in one of these folders stays there, and new episodes follow their show.
         A show's <b>Who it's for</b> on the Watchlist overrides this. In Plex, share only the regular libraries
         with the kids' accounts.
       </p>

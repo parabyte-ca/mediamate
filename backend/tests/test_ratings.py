@@ -103,7 +103,7 @@ def test_doctor_flags_a_mature_title_in_the_regular_folder(db):
     index(f)
     with patch.object(ratings, "fetch", side_effect=lambda *a, **k: "R"):
         [issue] = doctor.check(s)["issues"]
-        assert issue["kind"] == "audience" and "Mature folder (rated R)" in issue["detail"]
+        assert issue["kind"] == "audience" and "rated R" in issue["detail"] and issue["keep_here"] is True
         assert doctor.fix(s, issue).startswith("Moved to")
     assert (media / "organise_movie_mature_dir" / "Heat (1995)" / "Heat (1995).mkv").exists()
 

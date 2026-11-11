@@ -660,6 +660,8 @@ export interface DoctorIssue<K extends string = DoctorKind> {
   error?: string;
   fixable?: boolean;
   bulk?: boolean;           // false: fixed one at a time, never by "Fix all"
+  keep_here?: boolean;      // offers "Keep here" (remember the current folder)
+  file_id?: number;
 }
 
 export interface DoctorState<K extends string = DoctorKind> {

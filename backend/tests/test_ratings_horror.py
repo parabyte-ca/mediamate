@@ -87,21 +87,48 @@ def test_move_a_whole_show_to_mature(db, lib, monkeypatch):  # noqa: F811
     with patch.object(ratings, "fetch", side_effect=AssertionError("no lookup: your choice wins")):
         r = client.post(f"/api/media/files/{a}/audience", json={"audience": "mature"}).json()
     assert r["moved"] == 2 and "Wednesday: moved 2 files to Mature" in r["msg"] and refreshed == [1]
+    import json as _json
+    s.merge(Setting(key="doctor_report", value=_json.dumps({"issues": [
+        {"id": "a", "kind": "audience", "path": "/x/Heat (1995)/Heat (1995).mkv"},
+        {"id": "b", "kind": "audience", "path": "/x/Other (2001)/Other (2001).mkv"}], "total": 2, "fixed": []})))
+    s.commit()
+    assert doctor.forget_audience(s, ratings._key("Heat"), "movie") == 1
     assert (media / "organise_tv_mature_dir" / "Wednesday" / "Season 01" / "Wednesday - S01E02.mkv").exists()
     assert client.post(f"/api/media/files/{a}/audience", json={"audience": "x"}).status_code == 422
     assert client.post("/api/media/files/99999/audience", json={"audience": "mature"}).status_code == 404
 
 
-def test_doctor_move_all_only_goes_towards_mature(db):
+def test_where_it_is_is_your_decision(db):
+    """Files already in a folder stay; only a clearly adult rating in a regular folder is
+    raised (with Keep here), and nothing is ever suggested from Mature to regular."""
     from app.services import doctor
     s, media, index = db
-    index(clip(media / "organise_movie_dir" / "The Ring (2002)" / "The Ring (2002).mkv"))
-    index(clip(media / "organise_movie_mature_dir" / "Paddington (2014)" / "Paddington (2014).mkv"))
+    index(clip(media / "organise_movie_dir" / "The Ring (2002)" / "The Ring (2002).mkv"))          # PG-13 horror
+    index(clip(media / "organise_movie_mature_dir" / "Paddington (2014)" / "Paddington (2014).mkv"))  # PG
+    index(clip(media / "organise_tv_dir" / "Andor" / "Season 01" / "Andor - S01E01.mkv"))           # TV-14
+    index(clip(media / "organise_tv_mature_dir" / "The Haunting Hour" / "Season 01" /
+               "The Haunting Hour - S01E01.mkv"))                                                      # TV-PG
+    index(clip(media / "organise_movie_dir" / "Heat (1995)" / "Heat (1995).mkv"))                    # R
+    certs = {"The Ring": "PG-13", "Paddington": "PG", "Andor": "TV-14", "The Haunting Hour": "TV-PG", "Heat": "R"}
+
     async def genres(key, title, year):
-        return ["Horror"] if "Ring" in title else ["Family", "Comedy"]
-    with patch.object(ratings, "fetch", side_effect=lambda key, kind, title, *x, **k: "PG-13" if "Ring" in title else "PG"), \
+        return ["Horror"] if "Ring" in title else ["Drama"]
+    with patch.object(ratings, "fetch", side_effect=lambda key, kind, title, *x, **k: certs.get(title)), \
             patch.object(movie_genres, "_fetch", side_effect=genres):
-        issues = {i["path"].rsplit("/", 1)[-1]: i for i in doctor.check(s)["issues"] if i["kind"] == "audience"}
-    ring, pad = issues["The Ring (2002).mkv"], issues["Paddington (2014).mkv"]
-    assert "rated PG-13, but horror" in ring["detail"] and ring["fix"] == "Move to Mature" and "bulk" not in ring
-    assert pad["fix"] == "Move to regular" and pad["bulk"] is False
+        issues = [i for i in doctor.check(s)["issues"] if i["kind"] == "audience"]
+        assert [i["path"].rsplit("/", 1)[-1] for i in issues] == ["Heat (1995).mkv"]
+        assert issues[0]["keep_here"] is True and "rated R" in issues[0]["detail"]
+        ratings.set_override(s, "movie", "Heat", 1995, "general")                 # Keep here
+        assert [i for i in doctor.check(s)["issues"] if i["kind"] == "audience"] == []
+
+
+def test_new_episodes_follow_their_show(db):
+    s, media, _ = db
+    (media / "organise_tv_mature_dir" / "The Haunting Hour").mkdir(parents=True)
+    (media / "organise_tv_dir" / "Andor").mkdir(parents=True)
+    with patch.object(ratings, "fetch", side_effect=AssertionError("the show's folder decides")):
+        h = organise.plan(s, "/dl/The.Haunting.Hour.S02E01.mkv")
+        a = organise.plan(s, "/dl/Andor.S02E01.mkv")
+    assert (h["audience"], h["reason"]) == ("mature", "the show is already in the Mature folder")
+    assert (a["audience"], a["reason"]) == ("general", "the show is already in the regular folder")
+    assert _plan(s, "/dl/Brand.New.Show.S01E01.mkv", "TV-14")["audience"] == "mature"     # new: by rating

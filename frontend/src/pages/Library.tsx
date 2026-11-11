@@ -697,7 +697,7 @@ const DOCTOR_KINDS: DoctorKindInfo<DoctorKind>[] = [
     confirm: (n) => `Move ${n === 1 ? "this file" : `${n} files`} out of the Plex folders, back to the protected folder?` },
   { kind: "broken", title: "Can't be played", hint: "Damaged or incomplete files." },
   { kind: "duplicate", title: "Duplicates", hint: "The best copy (resolution, then HEVC, then size) is kept." },
-  { kind: "audience", title: "Wrong folder", hint: "Rated for adults (or PG-13 / TV-14 horror) in a regular folder, or the other way round. \"Move all\" only moves things into Mature; making something visible to the kids is one at a time. Plex refreshes after.",
+  { kind: "audience", title: "Wrong folder", hint: "Rated R, TV-14 or TV-MA (or a PG-13 horror movie) in a regular folder, or the other way round. \"Move all\" only moves things into Mature; making something visible to the kids is one at a time. Plex refreshes after.",
     fixAll: "Move all to Mature", fixOne: "Move",
     confirm: (n) => `Move ${n} file${n === 1 ? "" : "s"} to the Mature folders? The kids' Plex profiles won't see ${n === 1 ? "it" : "them"} any more.` },
   { kind: "missing", title: "Missing files", hint: "Listed in the Library, but the file is gone." },

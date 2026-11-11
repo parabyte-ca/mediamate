@@ -3,10 +3,10 @@ Mature ones?
 
   1. Your choice wins: a watchlist show set to Regular or Mature.
   2. Otherwise the official rating from TMDB (US first, then Canada).
-       Regular: G, PG, PG-13, TV-Y, TV-Y7, TV-G, TV-PG, TV-14; CA G, PG, 14A, C, C8, 14+
-       Mature:  R, NC-17, TV-MA; CA 18A, R, A, 18+
-  3. Horror: a PG-13 / 14A / TV-14 movie whose TMDB genres include Horror, or a TV-14
-     show with a horror keyword, goes to Mature (setting kids_no_horror, on by default).
+       Movies regular: G, PG, PG-13; CA G, PG, 14A.   Mature: R, NC-17; CA 18A, R, A.
+       TV regular: TV-Y, TV-Y7, TV-G, TV-PG; CA C, C8, G, PG.   Mature: TV-14, TV-MA; CA 14+, 18+.
+  3. Horror: a PG-13 / 14A movie whose TMDB genres include Horror goes to Mature
+     (setting kids_no_horror, on by default). Shows are TV-14+ Mature already.
   4. No rating found (or no TMDB key): Mature, so nothing reaches the kids by mistake.
 
 A per-title choice (Library → Move to Mature / Kid-friendly, audience_overrides) comes
@@ -31,7 +31,8 @@ REGULAR = {
     "G", "PG", "PG-13", "TV-Y", "TV-Y7", "TV-Y7-FV", "TV-G", "TV-PG", "TV-14",   # US
     "14A", "C", "C8", "14+", "E",                                                 # Canada
 }
-TEEN = {"PG-13", "TV-14", "14A", "14+"}       # regular, unless it's horror
+TEEN = {"PG-13", "14A"}                      # movies: regular, unless it's horror
+TV_MATURE = {"TV-14", "TV-MA", "14+", "18+"}  # shows: TV-14 and up go to Mature TV
 HORROR_KEYWORDS = {"horror", "supernatural horror", "slasher", "body horror", "folk horror", "psychological horror"}
 ADULT = {"R", "NC-17", "TV-MA", "18A", "A", "18+", "X"}
 COUNTRIES = ("US", "CA")
@@ -218,6 +219,8 @@ def audience(db: Session, kind: str | None, title: str, year: int | None = None,
     if mine in (GENERAL, MATURE):
         return mine, "your choice (Kid-friendly)" if mine == GENERAL else "your choice (Mature)"
     cert = certification(db, k, title, year, lookup=lookup)
+    if k == "tv" and (cert or "").strip().upper() in TV_MATURE:
+        return MATURE, f"rated {cert}"
     level = classify(cert)
     if level == GENERAL and (cert or "").strip().upper() in TEEN and no_horror(db) \
             and is_horror(db, k, title, year, lookup=lookup):

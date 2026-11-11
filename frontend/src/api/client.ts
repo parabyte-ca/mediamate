@@ -567,7 +567,7 @@ export interface UpdateStatus {
 
 // ── API client ────────────────────────────────────────────────────────────────
 
-export type StepStatus = "pending" | "running" | "done" | "failed" | "cancelled" | "skipped";
+export type StepStatus = "pending" | "running" | "done" | "failed" | "cancelled" | "skipped" | "retried";
 
 export interface JourneyStep {
   kind: "found" | "download" | "encode" | "split" | "trim" | string;

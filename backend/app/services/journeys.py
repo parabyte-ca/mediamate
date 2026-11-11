@@ -164,7 +164,7 @@ def _job_steps(db: Session, journey_id: int, with_logs: bool) -> list[dict]:
 def _derive_status(steps: list[dict]) -> str:
     if any(s["status"] in ("pending", "running") for s in steps):
         return "active"
-    ran = [s for s in steps if s["status"] != "skipped"]
+    ran = [s for s in steps if s["status"] not in ("skipped", "retried")]
     if not ran:
         return "done"
     last = ran[-1]["status"]
@@ -177,7 +177,7 @@ def _current_index(steps: list[dict]) -> int:
             return i
     # Finished: point at the last step that actually ran (not a skipped tail).
     for i in range(len(steps) - 1, -1, -1):
-        if steps[i]["status"] != "skipped":
+        if steps[i]["status"] not in ("skipped", "retried"):
             return i
     return len(steps) - 1
 
@@ -189,7 +189,18 @@ def _steps(db: Session, j: Journey, with_logs: bool = False) -> list[dict]:
         if dl is not None:
             steps += _download_steps(db, dl)
     from . import pipeline  # late import: pipeline imports this module
-    return steps + _job_steps(db, j.id, with_logs) + pipeline.plan_steps(db, j.id)
+    return _mark_retried(steps + _job_steps(db, j.id, with_logs) + pipeline.plan_steps(db, j.id))
+
+
+def _mark_retried(steps: list[dict]) -> list[dict]:
+    """A failed or cancelled step followed later by another of the same kind that is
+    running, pending or done was retried: it stays as history but no longer counts."""
+    for i, s in enumerate(steps):
+        if s["status"] in ("failed", "cancelled") and any(
+                t["kind"] == s["kind"] and t["status"] in ("pending", "running", "done")
+                for t in steps[i + 1:]):
+            s["status"] = "retried"
+    return steps
 
 
 def snapshot(db: Session, j: Journey, with_logs: bool = False) -> dict:
@@ -455,3 +466,12 @@ def on_media_job_changed(bind, journey_id: int | None) -> None:
             refresh(db, journey_id)
     except Exception:
         logger.exception("Journey refresh for media job failed")
+
+
+def repair_retried(db: Session) -> int:
+    """Once: re-derive journeys cached as failed (a retry that succeeded left them red)."""
+    n = 0
+    for (jid,) in db.query(Journey.id).filter(Journey.status == "failed").all():
+        refresh(db, jid, publish=False, touch=False)
+        n += 1
+    return n

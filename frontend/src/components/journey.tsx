@@ -1,6 +1,7 @@
 import {
   Bell, CheckCircle2, Circle, Download, Film, FolderInput, Hourglass, Library, Loader2, MinusCircle, Scissors, Search,
   Timer, Workflow, XCircle,
+  RotateCcw,
 } from "lucide-react";
 import type { Journey, JourneyStep, ProgressEvent, StepStatus } from "../api/client";
 
@@ -43,6 +44,7 @@ export const STATUS_STYLE: Record<StepStatus, { ring: string; text: string; labe
   failed:    { ring: "border-red-500 bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400",   text: "text-red-600 dark:text-red-400",     label: "Failed" },
   cancelled: { ring: "border-gray-400 text-gray-400",                                   text: "text-gray-500 dark:text-gray-400",   label: "Cancelled" },
   skipped:   { ring: "border-gray-300 border-dashed text-gray-400",                     text: "text-gray-500 dark:text-gray-400",   label: "Skipped" },
+  retried:   { ring: "border-gray-300 text-gray-400",                                   text: "text-gray-500 dark:text-gray-400",   label: "Retried" },
 };
 
 export function StatusIcon({ status, className = "h-3.5 w-3.5" }: { status: StepStatus; className?: string }) {
@@ -50,6 +52,7 @@ export function StatusIcon({ status, className = "h-3.5 w-3.5" }: { status: Step
   if (status === "done") return <CheckCircle2 className={className} />;
   if (status === "failed") return <XCircle className={className} />;
   if (status === "cancelled" || status === "skipped") return <MinusCircle className={className} />;
+  if (status === "retried") return <RotateCcw className={className} />;
   return <Circle className={className} />;
 }
 

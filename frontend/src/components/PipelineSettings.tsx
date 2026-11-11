@@ -275,7 +275,7 @@ function OrganiseSection() {
       </div>
       <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
         With Mature folders set, each show or movie goes by its age rating (from TMDB):
-        up to <b>PG-13 / TV-14</b> in the regular folders; <b>R, TV-MA</b> and anything unrated in the Mature ones.
+        movies up to <b>PG-13</b> and shows up to <b>TV-PG</b> in the regular folders; <b>R</b>, <b>TV-14</b>, <b>TV-MA</b> and anything unrated in the Mature ones.
         A show's <b>Who it's for</b> on the Watchlist overrides this. In Plex, share only the regular libraries
         with the kids' accounts.
       </p>
@@ -289,7 +289,7 @@ function OrganiseSection() {
         <label className="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
           <input type="checkbox" className="mt-0.5" checked={on("kids_no_horror")}
                  onChange={(e) => toggle("kids_no_horror", e.target.checked)} />
-          <span><b>Keep horror out of the regular folders</b>: a PG-13, 14A or TV-14 title that TMDB lists as horror goes
+          <span><b>Keep horror out of the regular folders</b>: a PG-13 or 14A movie that TMDB lists as horror goes
             to the Mature folders. For a single title, use <i>Move to Mature</i> or <i>Kid-friendly</i> in the Library.</span>
         </label>
         <label className="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">

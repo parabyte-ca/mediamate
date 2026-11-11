@@ -94,13 +94,13 @@ async def lifespan(app: FastAPI):
     def _adult_check_once():
         db = SessionLocal()
         try:
-            done = {r.key for r in db.query(Setting).filter(Setting.key.in_(("adult_check_v1", "audience_rules_v2")))}
-            if done != {"adult_check_v1", "audience_rules_v2"}:
-                # adult_check_v1: adult content in Plex folders; audience_rules_v2: PG-13 horror
+            done = {r.key for r in db.query(Setting).filter(Setting.key.in_(("adult_check_v1", "audience_rules_v3")))}
+            if done != {"adult_check_v1", "audience_rules_v3"}:
+                # adult_check_v1: adult content in Plex folders; audience_rules_v3: PG-13 horror and TV-14 shows
                 # now belongs in Mature, so the Library can list what to move.
                 from .services import doctor
                 doctor.run(db, auto_fix=False)
-                for k in {"adult_check_v1", "audience_rules_v2"} - done:
+                for k in {"adult_check_v1", "audience_rules_v3"} - done:
                     db.add(Setting(key=k, value="1"))
                 db.commit()
         except Exception:

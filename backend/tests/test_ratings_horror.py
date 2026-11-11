@@ -41,13 +41,23 @@ def test_movie_horror_rule(db, cert, genres, expect):
     assert (p["audience"], p["reason"]) == expect
 
 
-def test_tv_horror_keywords_and_the_switch(db):
+@pytest.mark.parametrize("cert,expect", [
+    ("TV-14", ("mature", "rated TV-14")), ("TV-MA", ("mature", "rated TV-MA")),
+    ("TV-PG", ("general", "rated TV-PG")), ("TV-Y7", ("general", "rated TV-Y7")),
+])
+def test_tv_14_and_up_go_to_mature_tv(db, cert, expect):
+    s, media, _ = db
+    p = _plan(s, "/dl/Some.Show.S01E01.mkv", cert)
+    assert (p["audience"], p["reason"]) == expect
+    folder = "organise_tv_mature_dir" if expect[0] == "mature" else "organise_tv_dir"
+    assert p["target"].startswith(str(media / folder))
+
+
+def test_movie_switch_turns_the_horror_rule_off(db):
     s, _, _ = db
-    p = _plan(s, "/dl/Goosebumps.2023.S01E01.mkv", "TV-14", keywords=["based on novel", "supernatural horror"])
-    assert (p["audience"], p["reason"]) == ("mature", "rated TV-14, but horror")
     s.add(Setting(key="kids_no_horror", value="false"))
     s.commit()
-    assert _plan(s, "/dl/Goosebumps.2023.S01E02.mkv", "TV-14")["audience"] == "general"
+    assert _plan(s, "/dl/The.Ring.2002.mkv", "PG-13", ["Horror"])["audience"] == "general"
 
 
 def test_override_beats_rating_and_watchlist_beats_override(db):
@@ -71,7 +81,7 @@ def test_move_a_whole_show_to_mature(db, lib, monkeypatch):  # noqa: F811
     monkeypatch.setattr("app.database.SessionLocal", lib[0])
     refreshed = []
     monkeypatch.setattr(doctor, "refresh_media_servers", lambda _db: refreshed.append(1))
-    a = index(clip(media / "organise_tv_dir" / "Wednesday" / "Season 01" / "Wednesday - S01E01.mkv"))
+    a = index(clip(media / "organise_tv_dir" / "Wednesday" / "Season 01" / "Wednesday - S01E01.mkv"))  # TV-14
     index(clip(media / "organise_tv_dir" / "Wednesday" / "Season 01" / "Wednesday - S01E02.mkv"))
     client = TestClient(app)
     with patch.object(ratings, "fetch", side_effect=AssertionError("no lookup: your choice wins")):

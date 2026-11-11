@@ -219,9 +219,9 @@ function OrganiseSection() {
     setS(await api.pipeline.saveOrganise(data));
     setSaved("Saved");
   };
-  const on = (k: "organise_movie_genres" | "organise_auto") => s[k] === "true";
+  const on = (k: "organise_movie_genres" | "organise_auto" | "kids_no_horror") => (s[k] ?? (k === "kids_no_horror" ? "true" : "")) === "true";
   // Switches save straight away, so what's on screen is what the server uses.
-  const toggle = async (k: "organise_movie_genres" | "organise_auto", v: boolean) => {
+  const toggle = async (k: "organise_movie_genres" | "organise_auto" | "kids_no_horror", v: boolean) => {
     const { warnings: _w, genre_folders: _g, auto_report: _r, ...data } = { ...s, [k]: v ? "true" : "false" };
     setS({ ...s, [k]: v ? "true" : "false" });
     try { setS(await api.pipeline.saveOrganise(data)); setSaved("Saved"); } catch (e) { setSaved((e as Error).message); }
@@ -286,6 +286,12 @@ function OrganiseSection() {
         </p>
       )}
       <div className="mt-3 space-y-3 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+        <label className="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
+          <input type="checkbox" className="mt-0.5" checked={on("kids_no_horror")}
+                 onChange={(e) => toggle("kids_no_horror", e.target.checked)} />
+          <span><b>Keep horror out of the regular folders</b>: a PG-13, 14A or TV-14 title that TMDB lists as horror goes
+            to the Mature folders. For a single title, use <i>Move to Mature</i> or <i>Kid-friendly</i> in the Library.</span>
+        </label>
         <label className="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
           <input type="checkbox" className="mt-0.5" checked={on("organise_movie_genres")}
                  onChange={(e) => toggle("organise_movie_genres", e.target.checked)} />

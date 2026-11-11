@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderInput, FolderSearch, Layers, Loader2, MoreHorizontal,
-  CheckCircle2, Music, Pause, Play, Scissors, Share2, SkipForward, Square, Star, Stethoscope, Tags, Timer, Trash2, X,
+  CheckCircle2, ShieldAlert, ShieldCheck, Music, Pause, Play, Scissors, Share2, SkipForward, Square, Star, Stethoscope, Tags, Timer, Trash2, X,
 } from "lucide-react";
 import { api, type DoctorKind, type DownloadPath, type MediaFile, type MediaJobType, type MediaStats, type OrganisePlan } from "../api/client";
 import { useEvent } from "../events";
@@ -189,6 +189,8 @@ function RowMenu({ f, onAction }: { f: MediaFile; onAction: (a: string) => void 
           {item("trim", "Trim intro (3.5 s)", Timer, busy(f))}
           {item("rename", "Rename…", Edit2, busy(f))}
           {item("organise", "Rename & organise…", FolderInput, busy(f))}
+          {item("mature", "Move to Mature", ShieldAlert, busy(f))}
+          {item("kids", "Kid-friendly (regular folders)", ShieldCheck, busy(f))}
           {item("collections", "Collections…", Tags)}
           {item("anthology", f.is_anthology ? "Mark not anthology" : "Mark as anthology", Layers)}
           {f.anthology_override != null && item("anthology-auto", "Anthology: automatic", Layers)}
@@ -250,6 +252,13 @@ export default function Library() {
       .catch(() => {});
   }, []);
   useEffect(() => { loadAdult(); }, [loadAdult]);
+  // Titles the doctor says belong in Mature (e.g. PG-13 horror in the regular folders).
+  const [toMature, setToMature] = useState(0);
+  const loadAudience = useCallback(() => {
+    api.doctor.get().then((d) => setToMature(d.report?.issues.filter((i) => i.kind === "audience" && i.bulk !== false).length ?? 0))
+      .catch(() => {});
+  }, []);
+  useEffect(() => { loadAudience(); }, [loadAudience]);
   // "Not in Plex yet" only means something while Plex sync is on.
   const [plexOn, setPlexOn] = useState(false);
   useEffect(() => { api.media.plexStatus().then((s) => setPlexOn(s.enabled)).catch(() => {}); }, []);
@@ -344,6 +353,11 @@ export default function Library() {
     if (a === "share") return setDialog({ kind: "share", file: f });
     if (a === "collections") return setDialog({ kind: "collections", files: [f] });
     if (a === "organise") return setDialog({ kind: "organise", files: [f] });
+    if (a === "mature" || a === "kids") {
+      const to = a === "mature" ? "mature" : "general";
+      if (to === "general" && !window.confirm("Show this title to everyone, including the kids' Plex profiles? Every file of it moves to the regular folders.")) return;
+      return run(async () => { const r = await api.media.setAudience(f.id, to); await load(); loadAudience(); return r.msg; });
+    }
     if (a === "encode") setDialog({ kind: "encode", files: [f] });
     else if (a === "split") setDialog({ kind: "split", files: [f] });
     else if (a === "trim") queue([f], "trim");
@@ -480,6 +494,14 @@ export default function Library() {
         </div>
       )}
 
+      {toMature > 0 && (
+        <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+          <ShieldAlert className="h-4 w-4 shrink-0" />
+          <span className="flex-1">{toMature} file{toMature === 1 ? " in the regular folders belongs" : "s in the regular folders belong"} in Mature (for example PG-13 horror), so the kids' Plex profiles can see {toMature === 1 ? "it" : "them"}.</span>
+          <button className={btnPrimary} onClick={() => setDialog({ kind: "doctor" })}>Review</button>
+        </div>
+      )}
+
       {pickedFiles.length > 0 && (
         <div className="sticky top-12 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/60 px-3 py-2 md:top-2">
           <span className="text-sm font-medium text-blue-800 dark:text-blue-200">{pickedFiles.length} selected</span>
@@ -489,6 +511,17 @@ export default function Library() {
           <button className={btnGhost} onClick={() => run(async () => { const r = await api.media.bulk("skip", [...picked]); setPicked(new Set()); return `Skipped ${r.done}`; })}><SkipForward className="h-4 w-4" />Skip</button>
           <button className={btnGhost} onClick={() => setDialog({ kind: "organise", files: files.filter((x) => picked.has(x.id)) })}><FolderInput className="h-4 w-4" />Organise</button>
           <button className={btnGhost} onClick={() => setDialog({ kind: "move", files: files.filter((x) => picked.has(x.id)) })}><FolderInput className="h-4 w-4" />Move to folder</button>
+          <button className={btnGhost} onClick={() => run(async () => {
+            const done = new Set<string>(); let moved = 0;
+            for (const f of pickedFiles) {
+              const r = await api.media.setAudience(f.id, "mature");
+              if (r.title && done.has(r.title)) continue;
+              if (r.title) done.add(r.title);
+              moved += r.moved;
+            }
+            setPicked(new Set()); await load(); loadAudience();
+            return `Moved ${moved} file${moved === 1 ? "" : "s"} to Mature`;
+          })}><ShieldAlert className="h-4 w-4" />Move to Mature</button>
           <button className={btnGhost} onClick={() => setDialog({ kind: "rate", files: pickedFiles })}><Star className="h-4 w-4" />Rate</button>
           <button className={btnGhost} onClick={() => setDialog({ kind: "collections", files: pickedFiles })}><Tags className="h-4 w-4" />Collections</button>
           <button className={`${btnGhost} text-red-600 dark:text-red-400`} onClick={() => setDialog({ kind: "delete", files: pickedFiles })}><Trash2 className="h-4 w-4" />Delete</button>
@@ -664,7 +697,9 @@ const DOCTOR_KINDS: DoctorKindInfo<DoctorKind>[] = [
     confirm: (n) => `Move ${n === 1 ? "this file" : `${n} files`} out of the Plex folders, back to the protected folder?` },
   { kind: "broken", title: "Can't be played", hint: "Damaged or incomplete files." },
   { kind: "duplicate", title: "Duplicates", hint: "The best copy (resolution, then HEVC, then size) is kept." },
-  { kind: "audience", title: "Wrong folder", hint: "Rated for adults in a regular folder, or the other way round." },
+  { kind: "audience", title: "Wrong folder", hint: "Rated for adults (or PG-13 / TV-14 horror) in a regular folder, or the other way round. \"Move all\" only moves things into Mature; making something visible to the kids is one at a time. Plex refreshes after.",
+    fixAll: "Move all to Mature", fixOne: "Move",
+    confirm: (n) => `Move ${n} file${n === 1 ? "" : "s"} to the Mature folders? The kids' Plex profiles won't see ${n === 1 ? "it" : "them"} any more.` },
   { kind: "missing", title: "Missing files", hint: "Listed in the Library, but the file is gone." },
   { kind: "name", title: "Not named for Plex", hint: "Fixing moves them with Rename & organise." },
   { kind: "oversize", title: "Larger than target", hint: "Already H.265, but bigger than the folder's target. Fixing re-encodes them smaller.",

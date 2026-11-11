@@ -30,6 +30,7 @@ SETTINGS_DEFAULTS = {
     "organise_movie_genres": "false",            # Movies/<Genre>/Title (Year)/… (services/movie_genres)
     "organise_movie_genre_skip": "Holiday, _Extras, _Unsorted",
     "organise_auto": "false",                    # nightly: organise loose new files (services/auto_organise)
+    "kids_no_horror": "true",                    # PG-13 / TV-14 horror goes to Mature (services/ratings)
 }
 SIDECAR_EXTS = (".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt", ".sup")
 

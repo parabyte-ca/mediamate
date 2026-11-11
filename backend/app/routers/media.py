@@ -125,6 +125,53 @@ def organise_one(file_id: int, body: dict = Body(default={})):
     return {"ok": True, "msg": f"Moved to {dest}", "path": dest}
 
 
+@router.post("/files/{file_id}/audience")
+def set_audience(file_id: int, body: dict = Body(...)):
+    """Remember this show or movie as Kid-friendly (regular folders) or Mature, and move
+    every Library file of it (all episodes of a show) to match. Plex refreshes after."""
+    from ..database import SessionLocal
+    from ..models import Setting
+    from ..services import doctor as library_doctor, organise, ratings
+    aud = body.get("audience")
+    if aud not in (ratings.GENERAL, ratings.MATURE):
+        return _err("audience must be general or mature", 422)
+    row = db.get_file(file_id)
+    if row is None:
+        return _err("File not found", 404)
+    p = organise.parse(row["path"])
+    if p.kind not in ("episode", "movie") or not p.title:
+        return _err("Can't tell which show or movie this is from its name", 400)
+    kind = "tv" if p.kind == "episode" else "movie"
+    key = ratings._key(p.title)
+    with SessionLocal() as s:
+        ratings.set_override(s, kind, p.title, p.year if kind == "movie" else None, aud)
+        settings = {r.key: r.value for r in s.query(Setting).all()}
+    if not organise.mature_folders_set(settings):
+        return {"ok": True, "moved": 0, "msg": f"Saved for {p.title}. Set the Mature folders (Settings → Folders) "
+                                               "to have files moved."}
+    moved, errors = 0, []
+    for f in db.get_all_files():
+        q = organise.parse(f["path"])
+        if q.kind != p.kind or ratings._key(q.title or "") != key or (kind == "movie" and q.year != p.year):
+            continue
+        if db.get_active_job_for_file(f["id"]) is not None or f["status"] in ("queued", "processing"):
+            errors.append(f"{f['filename']}: being processed")
+            continue
+        try:
+            before = f["path"]
+            dest = _organise(f, aud)
+            moved += dest != before
+        except (organise.OrganiseError, OSError) as exc:
+            errors.append(f"{f['filename']}: {exc}")
+    if moved:
+        with SessionLocal() as s:
+            library_doctor.refresh_media_servers(s)
+    where = "Mature" if aud == ratings.MATURE else "the regular folders"
+    msg = (f"{p.title}: moved {moved} file{'s' if moved != 1 else ''} to {where}" if moved
+           else f"{p.title} is already in {where}") + (f"; {len(errors)} couldn't be moved" if errors else "")
+    return {"ok": not errors, "moved": moved, "errors": errors, "msg": msg, "title": p.title}
+
+
 @router.get("/files/{file_id}/thumb")
 def file_thumbnail(file_id: int, at: float | None = None):
     """A still frame from about 10% into the file, or at `at` seconds (JPEG, cached)."""

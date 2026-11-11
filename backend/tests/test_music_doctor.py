@@ -55,8 +55,7 @@ def test_finds_problems(root):
     assert [os.path.relpath(i["path"], music) for i in kinds(r, "empty")] == ["Old"]
     assert [os.path.basename(i["path"]) for i in kinds(r, "untagged")] == ["rip"]
     assert {os.path.basename(i["path"]) for i in kinds(r, "no_cover")} == {"rip", "Punisher (2020)"}
-    place = kinds(r, "placement")
-    assert len(place) == 1 and "3 of 3 tracks not named" in place[0]["detail"]   # untagged ones aren't offered
+    assert kinds(r, "placement") == []           # the doctor doesn't reorganise folders
 
 
 def test_safe_problems_fixed_automatically_into_the_music_trash(root):
@@ -124,43 +123,6 @@ def test_a_duplicate_that_holds_other_albums_is_not_trashed(root):
     with Session() as db:
         with pytest.raises(ValueError):
             md.fix(db, {**dup, "fixable": True}, [str(music)])
-
-
-def test_placement_fix_organises_and_keeps_sidecars(root):
-    client, Session, music = root
-    src = album(music / "incoming" / "pb-punisher", year="2020")
-    (src / "info.txt").write_text("setlist")
-    (src / "rip.cue").write_text("cue")
-    ml.scan()
-    issue = kinds(check(Session), "placement")[0]
-    assert "Would move to" in issue["detail"]
-    with Session() as db:
-        db.merge(Setting(key=doctor.AUTO_KEY, value="false"))
-        db.commit()
-        md.run(db)
-        res = md.fix_ids(db, [issue["id"]])
-    assert res["done"] == 1, res
-    dest = music / "Phoebe Bridgers" / "Punisher (2020)"
-    assert sorted(p.name for p in dest.iterdir()) == ["01 - Song 1.flac", "02 - Song 2.flac", "03 - Song 3.flac",
-                                                       "info.txt", "rip.cue"]
-    assert not src.exists()
-    with Session() as db:
-        assert [a.folder for a in db.query(MusicLibAlbum)] == [str(dest)]
-
-
-def test_loose_tracks_in_the_library_root_go_to_their_own_albums(root):
-    client, Session, music = root
-    clip(music / "a.flac", artist="A", album="One", title="x", tracknumber="1")
-    clip(music / "b.flac", artist="B", album="Two", title="y", tracknumber="1")
-    (music / "README.txt").write_text("mine")
-    ml.scan()
-    issue = kinds(check(Session), "placement")[0]
-    assert issue["path"] == str(music)
-    with Session() as db:
-        r = md.fix(db, issue, [str(music)])
-    assert "put in" in r
-    assert (music / "A" / "One" / "01 - x.flac").exists() and (music / "B" / "Two" / "01 - y.flac").exists()
-    assert (music / "README.txt").exists()                                       # the root is never tidied away
 
 
 def test_tag_and_artwork_fixes_run_in_the_background(root, monkeypatch):

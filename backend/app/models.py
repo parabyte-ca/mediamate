@@ -497,6 +497,20 @@ class PipelinePlan(Base):
     finished_at = Column(DateTime, nullable=True)
 
 
+class AudienceOverride(Base):
+    """Your choice for one show or movie: regular folders (kid-friendly) or Mature.
+    Beats the age rating and the horror rule; a Watchlist show's own choice beats it."""
+    __tablename__ = "audience_overrides"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    kind = Column(String, nullable=False)          # tv | movie
+    title_key = Column(String, nullable=False, index=True)
+    year = Column(Integer, nullable=False, default=0)
+    title = Column(String, nullable=True)
+    audience = Column(String, nullable=False)      # general | mature
+    set_at = Column(DateTime, server_default=func.now())
+
+
 class ContentRating(Base):
     """Cached age rating for a show or movie (from TMDB); cert "" = none found."""
     __tablename__ = "content_ratings"

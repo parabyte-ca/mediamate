@@ -227,7 +227,10 @@ def check(db: Session) -> dict:
             if wrong_audience:
                 which = "Mature" if where["audience"] == "mature" else "regular"
                 issues.append(_issue("audience", path, f"Belongs in the {which} folder ({where['reason']}): {dest}",
-                                     "Move it", file_id=row["id"], target=dest, audience=where["audience"]))
+                                     "Move to Mature" if where["audience"] == "mature" else "Move to regular",
+                                     file_id=row["id"], target=dest, audience=where["audience"],
+                                     # Making something more visible to the kids is one at a time.
+                                     **({} if where["audience"] == "mature" else {"bulk": False})))
             else:
                 issues.append(_issue("name", path, f"Would become {dest}", "Rename & organise",
                                      file_id=row["id"], target=dest, audience=where["audience"]))
@@ -466,6 +469,8 @@ def fix_ids(db: Session, ids: list[str]) -> dict:
         report["total"] = max(0, report.get("total", 0) - len(done_ids))
         report["fixed"] = (report.get("fixed") or []) + done
         _set(db, REPORT_KEY, json.dumps(report))
+        if any(i["kind"] in ("audience", "name") for i in done):
+            refresh_media_servers(db)                  # once, so Plex drops what moved
         return {"done": len(done), "errors": errors, "report": report}
 
 
@@ -478,3 +483,8 @@ def scheduled_run() -> None:
         logger.info("Library doctor: %d problem(s) left, %d fixed automatically", r["total"], len(r["fixed"]))
     except Exception:
         logger.exception("Library doctor failed")
+
+
+def refresh_media_servers(db) -> None:
+    from .auto_organise import _refresh_media_servers
+    _refresh_media_servers(db)

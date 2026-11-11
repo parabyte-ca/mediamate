@@ -108,7 +108,7 @@ export default function DoctorDialog<K extends string>({ title, kinds, source, a
             {kinds.map((info) => {
               const list = report?.issues.filter((i) => i.kind === info.kind) ?? [];
               if (!list.length) return null;
-              const fixable = list.filter((i) => i.fixable !== false);
+              const fixable = list.filter((i) => i.fixable !== false && i.bulk !== false);
               return (
                 <section key={info.kind} className="rounded-lg border border-gray-200 dark:border-gray-700">
                   <header className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 dark:border-gray-800">

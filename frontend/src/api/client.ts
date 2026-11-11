@@ -659,6 +659,7 @@ export interface DoctorIssue<K extends string = DoctorKind> {
   result?: string;
   error?: string;
   fixable?: boolean;
+  bulk?: boolean;           // false: fixed one at a time, never by "Fix all"
 }
 
 export interface DoctorState<K extends string = DoctorKind> {
@@ -671,6 +672,7 @@ export interface OrganiseSettings {
   organise_movie_dir: string;
   organise_tv_mature_dir: string;
   organise_movie_mature_dir: string;
+  kids_no_horror?: string;
   ratings_need_key?: boolean;
   organise_tv_template: string;
   organise_movie_template: string;
@@ -1110,6 +1112,10 @@ export const api = {
       req<OrganisePlan>(`/media/files/${id}/organise${audience ? `?audience=${audience}` : ""}`),
     organise: (id: number) =>
       req<{ ok: boolean; msg: string; path: string }>(`/media/files/${id}/organise`, { method: "POST" }),
+    /** Remember a show or movie as Kid-friendly or Mature and move all its files. */
+    setAudience: (id: number, audience: "general" | "mature") =>
+      req<{ ok: boolean; moved: number; errors?: string[]; msg: string; title?: string }>(`/media/files/${id}/audience`,
+        { method: "POST", body: JSON.stringify({ audience }) }),
     bulk: (action: "skip" | "delete" | "organise" | "move", fileIds: number[],
            audiences?: Record<number, "general" | "mature">, folderId?: number) =>
       req<{ ok: boolean; done: number; skipped: number; errors: string[] }>("/media/files/bulk", {

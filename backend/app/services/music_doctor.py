@@ -9,7 +9,6 @@ Checks (album-level unless noted):
   untagged       tracks without title, artist, album or number → Fix tags (MusicBrainz)
   no_cover       no cover image in the folder → Find artwork
   not_embedded   the folder has a cover but the files don't → Put the cover in the files
-  placement      not in Music library/Artist/Album (Year)/NN - Title → Organise for Plex
   duplicate      the same album more than once; the best copy is kept (lossless, then
                  bitrate, then most tracks)
   missing_tracks / low_bitrate
@@ -44,7 +43,7 @@ MAX_ISSUES = 2000
 TRASH = ".trash"
 
 LABEL = {
-    "broken": "Can't be read", "duplicate": "Duplicate album", "placement": "Not organised for Plex",
+    "broken": "Can't be read", "duplicate": "Duplicate album",
     "untagged": "Missing tags", "no_cover": "No artwork", "not_embedded": "Cover not in the files",
     "missing_tracks": "Missing tracks", "low_bitrate": "Low bitrate", "missing": "Folder is gone",
     "junk": "Leftover file", "empty": "Empty folder",
@@ -137,19 +136,6 @@ def _owns_other_albums(folder: str, album_folders: set[str]) -> bool:
     return any(f != folder and _under(f, folder) for f in album_folders)
 
 
-def _expected(lib: str, album, tracks) -> tuple[str, list[tuple[str, str]]]:
-    """Where an album belongs, and (current path, expected name) for misnamed tracks."""
-    dest = music_library.target_folder(lib, album.artist, album.title, album.year)
-    multi = len({t.disc_no or 1 for t in tracks}) > 1
-    wrong = []
-    for t in tracks:
-        name = music_library.track_name({"path": t.path, "track_no": t.track_no, "disc_no": t.disc_no,
-                                          "title": t.title}, multi)
-        if os.path.normpath(t.path) != os.path.normpath(os.path.join(dest, name)):
-            wrong.append((t.path, name))
-    return dest, wrong
-
-
 def _watch_album(db, album):
     """The Watchlist entry for a library album: (artist item or None, MusicAlbum or None)."""
     from ..models import MusicAlbum, WatchlistItem
@@ -174,7 +160,6 @@ def check(db) -> dict:
 
     roots = music_library.roots(db)
     skip = music_library.download_folders_inside(db, roots)
-    lib = music_library.music_dir(db)
     issues: list[dict] = []
 
     # Files: leftovers and empty folders.
@@ -250,14 +235,6 @@ def check(db) -> dict:
         elif ts and music_library.embedded_cover(min(ts, key=lambda t: t.path).path) is None:
             issues.append(_issue("not_embedded", a.folder, f"{name}: the files have no cover inside",
                                  "Put the cover in the files", album_id=a.id))
-        if lib and "untagged" not in flags and a.artist and a.title and ts:
-            dest, wrong = _expected(lib, a, ts)
-            if wrong:
-                where = ("Not in the music library" if not _under(a.folder, lib)
-                         else f"{len(wrong)} of {len(ts)} track{'s' if len(ts) != 1 else ''} not named the Plex way"
-                         if os.path.normpath(a.folder) == os.path.normpath(dest) else f"Would move to {dest}")
-                issues.append(_issue("placement", a.folder, f"{name}: {where}", "Organise for Plex",
-                                     album_id=a.id, target=dest))
         from . import music_follow
         for kind in ("missing_tracks", "low_bitrate"):
             if kind not in flags or music_follow.dismissed(a):
@@ -286,35 +263,6 @@ def _forget(db, album_id: int) -> None:
     a = db.get(MusicLibAlbum, album_id)
     if a is not None:
         db.delete(a)
-
-
-def _organise(db, album, lib: str) -> str:
-    """Organise an album, one group per album tag (a folder of loose tracks can hold several)."""
-    from ..models import MusicTrack
-    files = [t.path for t in db.query(MusicTrack).filter(MusicTrack.album_id == album.id) if os.path.isfile(t.path)]
-    if not files:
-        raise ValueError("No audio files left; scan again")
-    groups: dict[tuple, list[str]] = {}
-    for f in files:
-        info = music_library.read(f)
-        groups.setdefault((music_library._norm(info["album_artist"]), music_library._norm(info["album"])), []).append(f)
-    keep = music_library.in_download_folder(db, album.folder)
-    tidy = album.folder not in music_library.roots(db)      # never empty or remove a music folder itself
-    dests, msgs = [], []
-    for group in groups.values():
-        res = music_library.organise(db, group, lib, keep_source=keep, tidy=tidy)
-        if not res.get("ok"):
-            raise ValueError(res.get("msg") or "Couldn't organise it")
-        dests.append(res["folder"])
-        msgs.append(res["msg"])
-    old = album.folder
-    if os.path.isdir(old):
-        music_library.scan_folder(db, old)
-    else:
-        _forget(db, album.id)
-    for d in dests:
-        music_library.scan_folder(db, os.path.normpath(d))
-    return "; ".join(msgs)
 
 
 def fix(db, issue: dict, roots: list[str]) -> str:
@@ -353,14 +301,6 @@ def fix(db, issue: dict, roots: list[str]) -> str:
         music_library.mark_duplicates(db)
         db.commit()
         return "Moved this copy to trash"
-    if kind == "placement":
-        lib = music_library.music_dir(db)
-        if not lib or not os.path.isdir(lib):
-            raise ValueError("Choose a music library in Settings → Folders first")
-        msg = _organise(db, album, lib)
-        music_library.mark_duplicates(db)
-        db.commit()
-        return msg
     if kind in ("missing_tracks", "low_bitrate"):
         wa = db.get(MusicAlbum, issue.get("watch_album_id") or 0)
         if wa is None:
@@ -409,9 +349,15 @@ def run(db, auto_fix: bool | None = None) -> dict:
 def last_report(db) -> dict | None:
     raw = doctor._get(db, REPORT_KEY)
     try:
-        return json.loads(raw) if raw else None
+        report = json.loads(raw) if raw else None
     except ValueError:
         return None
+    if report and any(i.get("kind") == "placement" for i in report.get("issues", [])):
+        # Saved before the doctor stopped reorganising folders: drop those rows.
+        gone = [i for i in report["issues"] if i.get("kind") == "placement"]
+        report["issues"] = [i for i in report["issues"] if i.get("kind") != "placement"]
+        report["total"] = max(0, report.get("total", 0) - len(gone))
+    return report
 
 
 def fix_ids(db, ids: list[str], bind=None, person_id: int | None = None) -> dict:

@@ -70,6 +70,9 @@ def notes(db, dp, all_folders: list) -> list[str]:
                        "different folders. Keep one.")
         elif dp.scan and other.scan and mine.startswith(theirs.rstrip(os.sep) + os.sep):
             out.append(f"Inside {other.name}, which is scanned too. Turn Scan off on one of them.")
+    if dp.role in ("tv", "mature_tv", "movies", "mature_movies") and not dp.downloads:
+        out.append("Automatic downloads for this library go to the default download folder. "
+                   "Tick Downloads to send them here.")
     return out
 
 

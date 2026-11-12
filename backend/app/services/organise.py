@@ -356,6 +356,37 @@ def audience_of(settings: dict, path: str) -> str | None:
     return None
 
 
+def library_of(settings: dict, path: str) -> str | None:
+    """Which kind of library a file is in now: tv, movie, or None (neither)."""
+    p = os.path.abspath(path)
+    for key, kind in (("organise_tv_mature_dir", "tv"), ("organise_movie_mature_dir", "movie"),
+                      ("organise_tv_dir", "tv"), ("organise_movie_dir", "movie")):
+        root = (settings.get(key) or "").strip()
+        if root and p.startswith(os.path.abspath(root).rstrip("/") + "/"):
+            return kind
+    return None
+
+
+def existing_show_audience(settings: dict, title: str | None) -> str | None:
+    """Where a show already lives, by its name: mature if <Mature TV>/<Show> exists,
+    general if <TV>/<Show> does; None when neither (or no Mature TV folder is set)."""
+    if not title:
+        return None
+    name = safe(title).lower()
+    for aud in ("mature", "general"):
+        root = _root(settings, "episode", aud)
+        if not root or not os.path.isdir(root):
+            continue
+        if aud == "general" and root == _root(settings, "episode", "mature"):
+            continue
+        try:
+            if any(e.lower() == name and os.path.isdir(os.path.join(root, e)) for e in os.listdir(root)):
+                return aud
+        except OSError:
+            continue
+    return None
+
+
 def show_folder_audience(settings: dict, path: str, hint: str | None) -> str | None:
     """Where a show already lives: mature if its folder is in Mature TV Shows, general
     if it's in TV Shows, None for a show that isn't in either yet."""

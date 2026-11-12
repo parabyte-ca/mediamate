@@ -40,7 +40,7 @@ MAX_ISSUES = 1000
 
 LABEL = {
     "sample": "Sample clip", "junk": "Leftover file", "empty": "Empty folder", "broken": "Can't be played",
-    "missing": "File is gone", "duplicate": "Duplicate", "audience": "Wrong folder", "name": "Not named for Plex",
+    "missing": "File is gone", "duplicate": "Duplicate", "audience": "Wrong folder", "wrong_library": "In the wrong library", "name": "Not named for Plex",
     "oversize": "Larger than target", "lowres": "Lower than preferred",
     "adult_in_plex": "Adult content in a Plex folder",
 }
@@ -239,6 +239,15 @@ def check(db: Session) -> dict:
                 continue
             if os.path.abspath(dest) == os.path.abspath(path):
                 continue
+            lib = organise.library_of(settings, path)
+            want = {"episode": "tv", "movie": "movie"}.get(where.get("kind") or "")
+            if lib and want and lib != want:
+                what = "Episode" if want == "tv" else "Movie"
+                where_now = "a Movies library" if lib == "movie" else "a TV library"
+                issues.append(_issue("wrong_library", path, f"{what} in {where_now}: {dest}",
+                                     "Move to TV" if want == "tv" else "Move to Movies",
+                                     file_id=row["id"], target=dest, audience=where["audience"]))
+                continue
             issues.append(_issue("name", path, f"Would become {dest}", "Rename & organise",
                                  file_id=row["id"], target=dest, audience=where["audience"]))
 
@@ -386,7 +395,7 @@ def fix(db: Session, issue: dict) -> str:
         if row is not None:
             store.delete_file(row["id"])
         return "Removed from the Library"
-    if kind in ("name", "audience"):
+    if kind in ("name", "audience", "wrong_library"):
         if row is None:
             raise ValueError("No longer in the Library")
         where = organise.plan(db, path, override=issue.get("audience"))
@@ -476,7 +485,7 @@ def fix_ids(db: Session, ids: list[str]) -> dict:
         report["total"] = max(0, report.get("total", 0) - len(done_ids))
         report["fixed"] = (report.get("fixed") or []) + done
         _set(db, REPORT_KEY, json.dumps(report))
-        if any(i["kind"] in ("audience", "name") for i in done):
+        if any(i["kind"] in ("audience", "name", "wrong_library") for i in done):
             refresh_media_servers(db)                  # once, so Plex drops what moved
         return {"done": len(done), "errors": errors, "report": report}
 

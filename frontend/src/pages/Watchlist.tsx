@@ -33,6 +33,7 @@ import {
   type WatchlistItem,
 } from "../api/client";
 import EpisodeGuide from "../components/EpisodeGuide";
+import FolderReviewDialog from "../components/FolderReviewDialog";
 import { Avatar, usePeople } from "../people";
 import Poster from "../components/Poster";
 import { AddArtistDialog, ArtistCard } from "../components/MusicWatch";
@@ -205,6 +206,11 @@ function MovieCard({ item, profiles, selected, onToggleSelect, onToggle, onEdit,
             </span>
           ))}
         <span className="text-gray-400 dark:text-gray-500">{profile ? profile.name : `${item.quality} ${item.codec}`}</span>
+        {item.save_to && (
+          <span className="text-gray-400 dark:text-gray-500" title={item.save_to.reason || undefined}>
+            → {item.save_to.auto ? `Automatic (${item.save_to.folder ?? "default"})` : item.save_to.folder ?? "Default"}
+          </span>
+        )}
       </div>
 
       <div className="flex gap-2">
@@ -421,7 +427,6 @@ function FormModal({ initial, initialKind = "tv", paths, profiles, defaultProfil
   onClose: () => void;
   onSave: (data: WatchlistCreate) => void;
 }) {
-  const defaultPath = paths.find((p) => p.is_default);
   const defaultFor = (kind: "tv" | "movie") => {
     const id = kind === "movie" && profiles.some((p) => p.id === defaultMovieProfileId) ? defaultMovieProfileId : defaultProfileId;
     return profiles.some((p) => p.id === id) ? id : null;
@@ -429,7 +434,7 @@ function FormModal({ initial, initialKind = "tv", paths, profiles, defaultProfil
   const [form, setForm] = useState<WatchlistCreate>(
     initial
       ? { title: initial.title, search_query: initial.search_query, quality: initial.quality, codec: initial.codec ?? "x265", season: initial.season, episode: initial.episode, download_path_id: initial.download_path_id, enabled: initial.enabled, max_size_mb: initial.max_size_mb ?? null, preferred_groups: initial.preferred_groups ?? null, prefer_season_packs: initial.prefer_season_packs ?? false, profile_id: initial.profile_id ?? null, audience: initial.audience ?? "auto", kind: initial.kind === "movie" ? "movie" : "tv" }
-      : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: defaultPath?.id, enabled: true, max_size_mb: null, preferred_groups: null, prefer_season_packs: false, profile_id: defaultFor(initialKind), audience: "auto", kind: initialKind }
+      : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: null, enabled: true, max_size_mb: null, preferred_groups: null, prefer_season_packs: false, profile_id: defaultFor(initialKind), audience: "auto", kind: initialKind }
   );
   const profile = profiles.find((p) => p.id === form.profile_id);
   const set = (k: keyof WatchlistCreate, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
@@ -534,8 +539,8 @@ function FormModal({ initial, initialKind = "tv", paths, profiles, defaultProfil
           {paths.length > 0 && (
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Save to</label>
-              <select value={form.download_path_id ?? ""} onChange={(e) => set("download_path_id", e.target.value ? Number(e.target.value) : undefined)} className={FIELD}>
-                <option value="">Use default</option>
+              <select value={form.download_path_id ?? ""} onChange={(e) => set("download_path_id", e.target.value ? Number(e.target.value) : null)} className={FIELD}>
+                <option value="">Automatic{initial?.save_to?.auto && initial.save_to.folder ? ` → ${initial.save_to.folder}` : " (by type and who it's for)"}</option>
                 {paths.map((p) => {
                   const free = fmtFree(p.free_bytes);
                   return <option key={p.id} value={p.id}>{p.name}{free ? ` (${free})` : ""}</option>;
@@ -807,7 +812,9 @@ function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSele
           {profile && <span>Profile: <strong className="text-gray-700 dark:text-gray-300">{profile.name}</strong></span>}
           <span>Quality: <strong className="text-gray-700 dark:text-gray-300">{shown.quality}</strong></span>
           <span>Codec: <strong className="text-gray-700 dark:text-gray-300">{shown.codec ?? "x265"}</strong></span>
-          <span>Save to: <strong className="text-gray-700 dark:text-gray-300">{pathName(item.download_path_id)}</strong></span>
+          <span title={item.save_to?.reason || undefined}>Save to: <strong className="text-gray-700 dark:text-gray-300">{item.save_to
+            ? (item.save_to.auto ? `Automatic (${item.save_to.folder ?? "default"})` : item.save_to.folder ?? "Default")
+            : pathName(item.download_path_id ?? undefined)}</strong></span>
           {shown.max_size_mb && <span>Max: <strong className="text-gray-700 dark:text-gray-300">{shown.max_size_mb >= 1024 ? `${(shown.max_size_mb / 1024).toFixed(1)} GB` : `${shown.max_size_mb} MB`}</strong></span>}
           {shown.prefer_season_packs && <span className="text-blue-600 dark:text-blue-400 font-medium">Season packs</span>}
         </div>
@@ -1066,6 +1073,8 @@ export default function Watchlist() {
   const typeParam = params.get("type");
   const tab: Tab = typeParam === "movies" || typeParam === "tv" || typeParam === "music" ? typeParam : readTab();
   const [addArtist, setAddArtist] = useState(false);
+  const [toReview, setToReview] = useState(0);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const setTab = (t: Tab) => {
     try { localStorage.setItem(TAB_KEY, t); } catch { /* not remembered */ }
     setParams(t === "all" ? {} : { type: t }, { replace: true });
@@ -1084,6 +1093,7 @@ export default function Watchlist() {
         api.watchlist.list(people.length > 1 ? who : "all"), api.paths.list(), api.profiles.list(), api.settings.get(),
       ]);
       setItems(w); setPaths(p.filter((x) => x.downloads !== false)); setProfiles(pr);  // only folders downloads can go to
+      api.watchlist.folderReview().then((r) => setToReview(r.to_review)).catch(() => setToReview(0));
       setDefaultProfileId(st.default_profile_id ? Number(st.default_profile_id) : null);
       setDefaultMovieProfileId(st.default_movie_profile_id ? Number(st.default_movie_profile_id) : null);
     } finally { setLoading(false); }
@@ -1272,6 +1282,12 @@ export default function Watchlist() {
             <Search className="h-4 w-4" />
             Browse
           </Link>
+          {items.some((i) => i.kind !== "artist") && (
+            <button onClick={() => setReviewOpen(true)}
+              className="flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800">
+              Check folders
+            </button>
+          )}
           <button
             onClick={() => (tab === "music" ? setAddArtist(true) : setModal(true))}
             className="flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
@@ -1281,6 +1297,15 @@ export default function Watchlist() {
           </button>
         </div>
       </div>
+
+      {/* Shows and movies whose fixed folder doesn't match what they are */}
+      {toReview > 0 && (
+        <div role="status" className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="min-w-0 flex-1">{toReview} {toReview === 1 ? "item saves" : "items save"} to a folder that doesn't match what {toReview === 1 ? "it is" : "they are"}.</span>
+          <button onClick={() => setReviewOpen(true)} className="shrink-0 font-medium underline">Review</button>
+        </div>
+      )}
 
       {/* Mine / Everyone (when more than one person uses MediaMate) */}
       {people.length > 1 && me && (
@@ -1448,6 +1473,11 @@ export default function Watchlist() {
 
       {modal !== null && (
         <FormModal initial={modal === true ? undefined : modal} initialKind={tab === "movies" ? "movie" : "tv"} paths={paths} profiles={profiles} defaultProfileId={defaultProfileId} defaultMovieProfileId={defaultMovieProfileId} onClose={() => setModal(null)} onSave={handleSave} />
+      )}
+
+      {reviewOpen && (
+        <FolderReviewDialog onClose={() => setReviewOpen(false)}
+          onDone={(msg) => { setReviewOpen(false); showToast(msg); load(); }} />
       )}
 
       {addArtist && (

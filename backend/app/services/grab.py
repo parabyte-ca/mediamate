@@ -63,8 +63,8 @@ def grab_episode(db, item, season: int, episode: int) -> dict:
             return {"status": "duplicate",
                     "message": f"{ep_tag} looks like it was already downloaded (matches an existing entry)."}
 
-        from .folders import download_folder
-        dp = download_folder(db, item.download_path_id)
+        from .folders import route_for
+        dp, _why = route_for(db, item)
         save_path = dp.path if dp else "/downloads"
 
         info_hash = add_torrent(best["magnet"], save_path, category)

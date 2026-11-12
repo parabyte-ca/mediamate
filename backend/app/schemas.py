@@ -158,6 +158,7 @@ class WatchlistOut(BaseModel):
 
     model_config = {"from_attributes": True}
     followers: list[int] = []          # people following it (see services/people.py)
+    save_to: Optional[dict] = None     # {auto, folder, reason}: where its downloads go (services/folders.route_for)
 
 
 # ── Watchlist episode tracking ────────────────────────────────────────────────

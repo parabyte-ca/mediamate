@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -53,6 +54,8 @@ def get_watchlist(request: Request, who: str = Query("mine"), db: Session = Depe
     for item in items:
         row = WatchlistOut.model_validate(item)
         row.followers = fol.get(item.id, [])
+        if item.kind in ("tv", "movie", None):
+            row.save_to = _save_to(db, item)
         if item.kind == "movie":
             row.movie_state = movies.state(db, item)
             row.removes_at = movies.removes_on(db, item, days)
@@ -77,6 +80,52 @@ def search_movie_now(item_id: int, db: Session = Depends(get_db)):
     except Exception as exc:
         logger.error("Movie grab failed for %r: %s", item.title, exc)
         raise HTTPException(status_code=502, detail=f"Could not start the download: {exc}")
+
+
+def _save_to(db: Session, item) -> dict:
+    from ..services.folders import route_for
+    dp, why = route_for(db, item, lookup=False)
+    return {"auto": not (item.download_path_id and dp is not None and dp.id == item.download_path_id),
+            "folder": dp.name if dp else None, "folder_id": dp.id if dp else None, "reason": why}
+
+
+@router.get("/watchlist/folder-review")
+def folder_review(db: Session = Depends(get_db)):
+    """Each TV show and movie: where its downloads go now, and where Automatic would send them."""
+    from ..models import DownloadPath
+    from ..services.folders import route_for
+    out = []
+    for item in db.query(WatchlistItem).filter(or_(WatchlistItem.kind.in_(("tv", "movie")),
+                                                  WatchlistItem.kind.is_(None))).order_by(WatchlistItem.title):
+        cur, _ = route_for(db, item, lookup=False)
+        fixed = item.download_path_id
+        item.download_path_id = None                      # what Automatic would give (not saved)
+        auto, why = route_for(db, item, lookup=False)
+        item.download_path_id = fixed
+        out.append({"id": item.id, "title": item.title, "kind": item.kind or "tv",
+                    "current": cur.name if cur else None, "current_id": cur.id if cur else None,
+                    "fixed": bool(fixed), "suggested": auto.name if auto else None,
+                    "suggested_id": auto.id if auto else None, "reason": why,
+                    "differs": bool(cur and auto and cur.id != auto.id), "confirmed": bool(item.save_to_confirmed)})
+    db.rollback()
+    return {"items": out, "to_review": sum(1 for r in out if r["differs"] and not r["confirmed"])}
+
+
+@router.post("/watchlist/folder-review/apply")
+def folder_review_apply(body: dict, db: Session = Depends(get_db)):
+    """automatic: ids switched to Automatic; keep: ids that keep their fixed folder on purpose."""
+    auto_ids = [int(i) for i in body.get("automatic") or []]
+    keep_ids = [int(i) for i in body.get("keep") or []]
+    n = 0
+    for item in db.query(WatchlistItem).filter(WatchlistItem.id.in_(auto_ids + keep_ids)):
+        if item.id in auto_ids:
+            item.download_path_id, item.save_to_confirmed = None, False
+        else:
+            item.save_to_confirmed = True
+        n += 1
+    db.commit()
+    return {"ok": True, "changed": n,
+            "msg": f"{len(auto_ids)} set to Automatic" + (f", {len(keep_ids)} kept as they are" if keep_ids else "")}
 
 
 @router.post("/watchlist", response_model=WatchlistOut, status_code=201)

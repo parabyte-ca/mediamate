@@ -195,8 +195,8 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                     continue
 
                 # Resolve save path
-                from .folders import download_folder
-                dp = download_folder(db, item.download_path_id)
+                from .folders import route_for
+                dp, _why = route_for(db, item)
                 save_path = dp.path if dp else "/downloads"
 
                 # Capture S/E before incrementing so the record reflects what was downloaded.

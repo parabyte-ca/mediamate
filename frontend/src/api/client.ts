@@ -1031,7 +1031,11 @@ export const api = {
       req<TagResult>(`/music/library/albums/${id}/collections`, { method: "POST", body: JSON.stringify({ add, remove }) }),
     collectionNames: () => req<{ names: string[] }>("/music/library/collections"),
     /** URLs for <img>/<audio>; they carry the token because those can't send headers. */
-    coverUrl: (id: number, v?: string | null) => withToken(`/music/library/albums/${id}/cover`, v),
+    /** size: 96, 160, 320 or 512 for a small cached JPEG; leave out for the original. */
+    coverUrl: (id: number, v?: string | null, size?: 96 | 160 | 320 | 512) => {
+      const u = withToken(`/music/library/albums/${id}/cover`, v);
+      return size ? `${u}${u.includes("?") ? "&" : "?"}size=${size}` : u;
+    },
     trackUrl: (id: number) => withToken(`/music/library/tracks/${id}/stream`),
   },
 

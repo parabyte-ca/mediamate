@@ -192,8 +192,10 @@ def purge(db: Session) -> int:
     n = db.query(ShareLink).filter((ShareLink.revoked_at < cut) | (ShareLink.expires_at < cut)).delete(
         synchronize_session=False)
     db.commit()
+    from ..services import music_covers
     from ..services.media import teaser
     teaser.prune()
+    music_covers.prune()
     return n
 
 

@@ -127,7 +127,6 @@ def grab(db, item, settings: dict | None = None, *, force: bool = False) -> dict
     from ..models import Download, DownloadHistory, Setting
     from .apprise_notify import notify
     from .duplicate import check_duplicate
-    from .folders import download_folder
     from .qbittorrent import add_torrent
 
     if item.completed_at or _active_download(db, item) is not None:
@@ -152,7 +151,8 @@ def grab(db, item, settings: dict | None = None, *, force: bool = False) -> dict
                 break
         if best is None:
             return {"status": "duplicate", "message": f"{label} looks like it was already downloaded."}
-        dp = download_folder(db, item.download_path_id)
+        from .folders import route_for
+        dp, _why = route_for(db, item)
         save_path = dp.path if dp else "/downloads"
         info_hash = add_torrent(best["magnet"], save_path, settings.get("qbit_category", "mediamate"))
         db.add(Download(title=best["title"], torrent_hash=info_hash, magnet_link=best["magnet"],

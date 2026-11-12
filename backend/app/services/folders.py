@@ -166,6 +166,48 @@ def download_folder(db: Session, path_id: int | None) -> DownloadPath | None:
             .filter(DownloadPath.is_default.is_(True), DownloadPath.downloads.is_(True)).first())
 
 
+ROLE_FOR = {("tv", "general"): "tv", ("tv", "mature"): "mature_tv",
+            ("movie", "general"): "movies", ("movie", "mature"): "mature_movies"}
+
+
+def item_audience(db: Session, item, lookup: bool = True) -> tuple[str, str]:
+    """(general|mature, why) for a Watchlist show or movie, as organising decides it:
+    your choice → your per-title choice → where the show already lives → the rating."""
+    from . import organise, ratings
+    kind = "movie" if getattr(item, "kind", None) == "movie" else "tv"
+    if item.audience in (ratings.GENERAL, ratings.MATURE):
+        return item.audience, "set on the Watchlist"
+    mine = ratings.override(db, kind, item.title, getattr(item, "year", None))
+    if mine in (ratings.GENERAL, ratings.MATURE):
+        return mine, "your choice"
+    settings = organise.get_settings(db)
+    if not organise.mature_folders_set(settings):
+        return ratings.GENERAL, ""
+    if kind == "tv":
+        where = organise.existing_show_audience(settings, item.title)
+        if where:
+            return where, "the show is already in the " + ("Mature" if where == "mature" else "regular") + " library"
+    return ratings.audience(db, "movie" if kind == "movie" else "episode", item.title, getattr(item, "year", None),
+                            watchlist_item=item, lookup=lookup)
+
+
+def route_for(db: Session, item, lookup: bool = True) -> tuple[DownloadPath | None, str]:
+    """Where a Watchlist download goes: the folder you fixed for it, else the library
+    for its kind and audience (TV, Mature TV, Movies, Mature Movies) when that folder
+    takes downloads, else the default download folder."""
+    if item.download_path_id:
+        dp = db.query(DownloadPath).filter(DownloadPath.id == item.download_path_id).first()
+        if dp is not None and dp.downloads:
+            return dp, "chosen by you"
+    kind = "movie" if getattr(item, "kind", None) == "movie" else "tv"
+    aud, why = item_audience(db, item, lookup=lookup)
+    role = ROLE_FOR[(kind, aud)]
+    dp = db.query(DownloadPath).filter(DownloadPath.role == role, DownloadPath.downloads.is_(True)).first()
+    if dp is not None:
+        return dp, f"{'movie' if kind == 'movie' else 'TV show'}, {why or aud}"
+    return download_folder(db, None), f"no {role.replace('_', ' ')} folder takes downloads, so the default folder"
+
+
 def startup(db: Session) -> list[str]:
     merge_once(db)
     adopt_env(db)

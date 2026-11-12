@@ -184,7 +184,9 @@ export interface WatchlistItem {
   codec: string;
   season: number;
   episode: number;
-  download_path_id?: number;
+  download_path_id?: number | null;
+  /** Where downloads go: Automatic (by kind and who it's for) or a folder you fixed. */
+  save_to?: { auto: boolean; folder: string | null; folder_id: number | null; reason: string } | null;
   enabled: boolean;
   last_checked?: string;
   last_found?: string;
@@ -247,6 +249,14 @@ export interface JackettTestResult {
   error?: string;
 }
 
+export interface FolderReviewRow {
+  id: number; title: string; kind: string;
+  current: string | null; current_id: number | null; fixed: boolean;
+  suggested: string | null; suggested_id: number | null; reason: string;
+  differs: boolean; confirmed: boolean;
+}
+export interface FolderReview { items: FolderReviewRow[]; to_review: number }
+
 export interface WatchlistCreate {
   title: string;
   search_query: string;
@@ -254,7 +264,7 @@ export interface WatchlistCreate {
   codec: string;
   season: number;
   episode: number;
-  download_path_id?: number;
+  download_path_id?: number | null;
   enabled: boolean;
   max_size_mb?: number | null;
   preferred_groups?: string | null;
@@ -628,7 +638,7 @@ export interface ProgressEvent {
 export type PipelineActionType = "trim" | "encode" | "split" | "organise";
 
 export type DoctorKind = "sample" | "junk" | "empty" | "broken" | "missing" | "duplicate" | "audience" | "name"
-  | "oversize" | "lowres" | "adult_in_plex";
+  | "oversize" | "lowres" | "adult_in_plex" | "wrong_library";
 
 export interface OrganisePlan {
   ok: boolean;
@@ -1037,6 +1047,10 @@ export const api = {
       req<{ ok: boolean; unfollowed?: boolean }>(`/watchlist/${id}${everyone ? "?everyone=true" : ""}`, { method: "DELETE" }),
     scan: (id: number) => req(`/watchlist/${id}/scan`, { method: "POST" }),
     scanAll: () => req("/scan", { method: "POST" }),
+    folderReview: () => req<FolderReview>("/watchlist/folder-review"),
+    applyFolderReview: (automatic: number[], keep: number[]) =>
+      req<{ ok: boolean; changed: number; msg: string }>("/watchlist/folder-review/apply",
+        { method: "POST", body: JSON.stringify({ automatic, keep }) }),
     episodes: {
       list: (id: number) =>
         req<WatchlistEpisode[]>(`/watchlist/${id}/episodes`),

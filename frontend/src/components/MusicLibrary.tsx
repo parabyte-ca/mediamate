@@ -60,12 +60,12 @@ function fmtLen(s?: number | null) {
   return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}:${String(sec).padStart(2, "0")}`;
 }
 
-function Cover({ a, className }: { a: LibAlbum; className: string }) {
+function Cover({ a, className, size = 320 }: { a: LibAlbum; className: string; size?: 96 | 160 | 320 | 512 }) {
   const [bad, setBad] = useState(false);
   if (!a.has_cover || bad) {
     return <div className={`flex items-center justify-center bg-gray-100 text-gray-300 dark:bg-gray-800 dark:text-gray-600 ${className}`} aria-hidden><Disc3 className="h-1/3 w-1/3" /></div>;
   }
-  return <img src={api.music.coverUrl(a.id, a.scanned_at)} alt="" loading="lazy" onError={() => setBad(true)} className={`object-cover ${className}`} />;
+  return <img src={api.music.coverUrl(a.id, a.scanned_at, size)} alt="" loading="lazy" decoding="async" onError={() => setBad(true)} className={`object-cover ${className}`} />;
 }
 
 export default function MusicLibrary() {
@@ -293,7 +293,7 @@ export default function MusicLibrary() {
                     <div className="flex items-center gap-3">
                       <PlayAlbumButton albumId={a.id} label={`${a.title} by ${a.artist}`} className="h-8 w-8 shrink-0" />
                       <button type="button" onClick={() => setOpen(a.id)} aria-label={`Open ${a.title} by ${a.artist}`} className="shrink-0">
-                        <Cover a={a} className="h-10 w-10 rounded" />
+                        <Cover a={a} size={96} className="h-10 w-10 rounded" />
                       </button>
                       <div className="min-w-0 flex-1">
                         <button type="button" onClick={() => setOpen(a.id)} className="block max-w-full truncate text-left font-medium text-gray-900 hover:text-blue-600 hover:underline dark:text-gray-100 dark:hover:text-blue-400" title={a.title ?? ""}>{a.title}</button>

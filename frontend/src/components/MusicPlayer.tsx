@@ -58,7 +58,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const playAlbum = useCallback(async (albumId: number, fromTrackId?: number) => {
     setLoading(true);
     try {
-      const a = await api.music.libraryAlbum(albumId);
+      // Never spin forever: give up after 15 s (e.g. a slow connection).
+      const a = await Promise.race([
+        api.music.libraryAlbum(albumId),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error("Couldn't start the album. Check the connection and try again.")), 15000)),
+      ]);
       const q: QueueTrack[] = a.track_list.map((t) => ({
         id: t.id, title: t.title, artist: t.artist || a.artist, album: a.title, albumId: a.id,
         hasCover: a.has_cover, duration: t.duration_sec,
@@ -121,7 +125,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!("mediaSession" in navigator) || !current) return;
     const art = current.hasCover
-      ? [96, 256, 512].map((n) => ({ src: new URL(api.music.coverUrl(current.albumId), window.location.href).href, sizes: `${n}x${n}`, type: "image/jpeg" }))
+      ? [96, 256, 512].map((n) => ({ src: new URL(api.music.coverUrl(current.albumId, null, 512), window.location.href).href, sizes: `${n}x${n}`, type: "image/jpeg" }))
       : [];
     navigator.mediaSession.metadata = new MediaMetadata({
       title: current.title, artist: current.artist ?? "", album: current.album ?? "", artwork: art,
@@ -183,7 +187,7 @@ function PlayerBar({ pos, dur, onSeek }: { pos: number; dur: number; onSeek: (t:
          style={{ bottom: "var(--player-bottom)" } as React.CSSProperties}>
       <div className="flex items-center gap-2">
         {current.hasCover
-          ? <img src={api.music.coverUrl(current.albumId)} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
+          ? <img src={api.music.coverUrl(current.albumId, null, 96)} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
           : <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-gray-100 dark:bg-gray-800"><Disc3 className="h-5 w-5 text-gray-400" /></div>}
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100" data-testid="now-playing">{current.title}</p>
@@ -211,16 +215,19 @@ function PlayerBar({ pos, dur, onSeek }: { pos: number; dur: number; onSeek: (t:
 export function PlayAlbumButton({ albumId, label, className = "" }: { albumId: number; label: string; className?: string }) {
   const p = usePlayer();
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const mine = p.current?.albumId === albumId;
   return (
-    <button type="button" aria-label={mine && p.playing ? `Pause ${label}` : `Play ${label}`}
+    <button type="button" aria-label={mine && p.playing ? `Pause ${label}` : `Play ${label}`} title={failed ?? undefined}
             onClick={async (e) => {
               e.stopPropagation();
               if (mine) { p.toggle(); return; }
-              setBusy(true);
-              try { await p.playAlbum(albumId); } finally { setBusy(false); }
+              setBusy(true); setFailed(null);
+              try { await p.playAlbum(albumId); }
+              catch (err) { setFailed(err instanceof Error ? err.message : "Couldn't start the album"); }
+              finally { setBusy(false); }
             }}
-            className={`flex items-center justify-center rounded-full bg-blue-600 text-white shadow hover:bg-blue-700 ${className}`}>
+            className={`flex items-center justify-center rounded-full ${failed ? "bg-red-600" : "bg-blue-600"} text-white shadow hover:bg-blue-700 ${className}`}>
       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : mine && p.playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
     </button>
   );

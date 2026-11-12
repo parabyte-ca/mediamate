@@ -173,12 +173,22 @@ def library_album(album_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/music/library/albums/{album_id}/cover")
-def library_cover(album_id: int, db: Session = Depends(get_db)):
+def library_cover(album_id: int, size: int | None = None, v: str | None = None, db: Session = Depends(get_db)):
+    """The album's cover. With size (96/160/320/512), a small cached JPEG for lists
+    and players; without, the original file."""
+    from ..services import music_covers
+    if size is not None and size not in music_covers.SIZES:
+        raise HTTPException(status_code=422, detail=f"size must be one of {list(music_covers.SIZES)}")
     a = _lib_album(db, album_id)
     path = os.path.join(a.folder, a.cover) if a.cover else None
     if not path or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="No cover")
-    return FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
+    cache = "private, max-age=31536000, immutable" if v else "private, max-age=86400"
+    if size is not None:
+        out = music_covers.thumb(a.id, path, size)
+        if out != path:
+            return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": cache})
+    return FileResponse(path, headers={"Cache-Control": cache})
 
 
 @router.get("/music/library/tracks/{track_id}/stream")

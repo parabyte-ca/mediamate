@@ -4,6 +4,7 @@ import { AlertTriangle, Stethoscope, Disc3, FileText, LayoutGrid, List as ListIc
 import { api, type MusicDoctorKind, type AlbumTags, type CoverCandidate, type LibAlbum, type MusicBatch, type LibAlbumDetail, type MusicIssue, type TagRow } from "../api/client";
 import Stars from "./Stars";
 import { PlayAlbumButton, usePlayer } from "./MusicPlayer";
+import { InLibraryHeader, STICKY_TH } from "./LibraryHeader";
 import ShareDialog from "./ShareDialog";
 import DoctorDialog, { type DoctorKindInfo } from "./DoctorDialog";
 import { fmtSize } from "../utils";
@@ -196,6 +197,7 @@ export default function MusicLibrary() {
   return (
     <div className="relative isolate">
       <NowPlayingBackdrop />
+      <InLibraryHeader>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <button className={ghost} disabled={status?.running} onClick={async () => {
           try { await api.music.libraryScan(); } catch (e) { say((e as Error).message); }
@@ -232,14 +234,7 @@ export default function MusicLibrary() {
           </span>
         )}
       </div>
-
-      {status && !status.music_dir && (
-        <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-          Choose your <b>music library</b> in <Link to="/settings#folders" className="underline">Settings → Folders</Link> (edit a folder, <b>Library for: Music library</b>): finished albums are put there as Artist / Album (Year), ready for Plex.
-        </div>
-      )}
-
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search artists and albums…" aria-label="Search artists and albums" className={`${sel} w-full pl-8`} />
@@ -262,6 +257,32 @@ export default function MusicLibrary() {
           {(Object.keys(ISSUE) as MusicIssue[]).map((k) => <option key={k} value={k}>{ISSUE[k][0]}</option>)}
         </select>
       </div>
+      {picked.size > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900 dark:bg-blue-950/60">
+          <span className="text-sm font-medium text-blue-800 dark:text-blue-200">{picked.size} selected</span>
+          <button className={primary} disabled={batch?.running} onClick={() => runBulk("covers")} title="Use art inside the files, else look it up on MusicBrainz now"><ImageDown className="h-4 w-4" />Find artwork</button>
+          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("fix_tags")}><Wand2 className="h-4 w-4" />Fix tags</button>
+          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("embed")} title="Put each album's cover inside its tracks"><ImagePlus className="h-4 w-4" />Put covers in files</button>
+          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("follow")} title="Follow each album's artist on the Watchlist (new releases only)"><UserPlus className="h-4 w-4" />Follow artists</button>
+          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("upgrade")} title="Look for a FLAC copy of each album; the old files go to the trash once it's in"><ArrowUpCircle className="h-4 w-4" />Upgrade quality</button>
+          <span className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2 dark:border-gray-600 dark:bg-gray-900" title="Rate them all">
+            <Star className="h-3.5 w-3.5 text-gray-400" /><Stars value={0} label="the selected albums" onChange={(n) => rateMany(n)} />
+          </span>
+          <form className="flex items-center gap-1" onSubmit={(e) => { e.preventDefault(); collectMany(); }}>
+            <input value={collName} onChange={(e) => setCollName(e.target.value)} list="music-colls" placeholder="Add to collection…" aria-label="Add the selected albums to a collection" className={`${sel} w-44`} />
+            <datalist id="music-colls">{colls.map((c) => <option key={c} value={c} />)}</datalist>
+            <button type="submit" className={ghost} disabled={!collName.trim()}><Tags className="h-4 w-4" />Add</button>
+          </form>
+          <button className="ml-auto text-sm text-blue-700 hover:underline dark:text-blue-300" onClick={() => setPicked(new Set())}>Clear selection</button>
+        </div>
+      )}
+      </InLibraryHeader>
+
+      {status && !status.music_dir && (
+        <div className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          Choose your <b>music library</b> in <Link to="/settings#folders" className="underline">Settings → Folders</Link> (edit a folder, <b>Library for: Music library</b>): finished albums are put there as Artist / Album (Year), ready for Plex.
+        </div>
+      )}
 
       {batch?.running && (
         <div role="status" className="mb-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900 dark:bg-blue-950/50 dark:text-blue-200">
@@ -280,26 +301,6 @@ export default function MusicLibrary() {
         </div>
       )}
 
-      {picked.size > 0 && (
-        <div className="sticky top-12 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900 dark:bg-blue-950/60 md:top-2">
-          <span className="text-sm font-medium text-blue-800 dark:text-blue-200">{picked.size} selected</span>
-          <button className={primary} disabled={batch?.running} onClick={() => runBulk("covers")} title="Use art inside the files, else look it up on MusicBrainz now"><ImageDown className="h-4 w-4" />Find artwork</button>
-          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("fix_tags")}><Wand2 className="h-4 w-4" />Fix tags</button>
-          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("embed")} title="Put each album's cover inside its tracks"><ImagePlus className="h-4 w-4" />Put covers in files</button>
-          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("follow")} title="Follow each album's artist on the Watchlist (new releases only)"><UserPlus className="h-4 w-4" />Follow artists</button>
-          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("upgrade")} title="Look for a FLAC copy of each album; the old files go to the trash once it's in"><ArrowUpCircle className="h-4 w-4" />Upgrade quality</button>
-          <span className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2 dark:border-gray-600 dark:bg-gray-900" title="Rate them all">
-            <Star className="h-3.5 w-3.5 text-gray-400" /><Stars value={0} label="the selected albums" onChange={(n) => rateMany(n)} />
-          </span>
-          <form className="flex items-center gap-1" onSubmit={(e) => { e.preventDefault(); collectMany(); }}>
-            <input value={collName} onChange={(e) => setCollName(e.target.value)} list="music-colls" placeholder="Add to collection…" aria-label="Add the selected albums to a collection" className={`${sel} w-44`} />
-            <datalist id="music-colls">{colls.map((c) => <option key={c} value={c} />)}</datalist>
-            <button type="submit" className={ghost} disabled={!collName.trim()}><Tags className="h-4 w-4" />Add</button>
-          </form>
-          <button className="ml-auto text-sm text-blue-700 hover:underline dark:text-blue-300" onClick={() => setPicked(new Set())}>Clear selection</button>
-        </div>
-      )}
-
       {albums === null ? (
         <div className="flex justify-center p-10"><Loader2 className="h-5 w-5 animate-spin text-blue-600" /></div>
       ) : albums.length === 0 ? (
@@ -311,17 +312,17 @@ export default function MusicLibrary() {
       ) : shown.length === 0 ? (
         <p className="p-10 text-center text-sm text-gray-500">No albums match these filters.</p>
       ) : view === "list" ? (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
+        <div className="overflow-clip rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900">
           <table className="w-full text-sm">
             <thead className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">
               <tr>
-                <th className="w-10 px-3 py-2"><input type="checkbox" aria-label="Select all albums shown" checked={allShown} onChange={pickShown} /></th>
-                <th className="w-full px-2 py-2">Album</th>
-                <th className="hidden px-2 py-2 md:table-cell">Year</th>
-                <th className="hidden px-2 py-2 sm:table-cell">Format</th>
-                <th className="hidden px-2 py-2 lg:table-cell">Tracks</th>
-                <th className="hidden px-2 py-2 lg:table-cell">Size</th>
-                <th className="px-2 py-2">Rating</th>
+                <th className={`${STICKY_TH} w-10 px-3 py-2`}><input type="checkbox" aria-label="Select all albums shown" checked={allShown} onChange={pickShown} /></th>
+                <th className={`${STICKY_TH} w-full px-2 py-2`}>Album</th>
+                <th className={`${STICKY_TH} hidden px-2 py-2 md:table-cell`}>Year</th>
+                <th className={`${STICKY_TH} hidden px-2 py-2 sm:table-cell`}>Format</th>
+                <th className={`${STICKY_TH} hidden px-2 py-2 lg:table-cell`}>Tracks</th>
+                <th className={`${STICKY_TH} hidden px-2 py-2 lg:table-cell`}>Size</th>
+                <th className={`${STICKY_TH} px-2 py-2`}>Rating</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">

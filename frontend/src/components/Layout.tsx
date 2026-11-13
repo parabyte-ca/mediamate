@@ -352,7 +352,7 @@ export default function Layout() {
       {/* main-scroll: on mobile adds padding to clear the bottom tab bar     */}
       {/* + iOS safe area; on md+ resets to zero (see index.css)              */}
       <main className="flex-1 overflow-y-auto overflow-x-hidden main-scroll">
-        <div className="sticky top-0 z-30 flex items-center justify-center gap-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/90 px-4 py-2 backdrop-blur md:hidden">
+        <div data-mobile-bar className="sticky top-0 z-30 flex items-center justify-center gap-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/90 px-4 py-2 backdrop-blur md:hidden">
           <PersonSwitcher compact />
           <span data-tour="status"><StatusPill /></span>
           <button aria-label="Search or jump to…" data-tour="jump" onClick={() => window.dispatchEvent(new Event("mediamate:palette"))}

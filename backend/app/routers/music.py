@@ -264,26 +264,6 @@ def library_get_cover(album_id: int, db: Session = Depends(get_db)):
     return {"ok": bool(a.cover), "source": res.get("source"), "msg": msg}
 
 
-@router.post("/music/library/albums/{album_id}/organise")
-def library_organise(album_id: int, db: Session = Depends(get_db)):
-    a = _lib_album(db, album_id)
-    root = music_library.music_dir(db)
-    if not root or not os.path.isdir(root):
-        raise HTTPException(status_code=400, detail="Choose a music library first: Settings → Folders, edit a folder, Library for: Music library")
-    files = _album_files(db, a)
-    res = music_library.organise(db, files, root, keep_source=music_library.in_download_folder(db, a.folder),
-                                 tidy=a.folder not in music_library.roots(db))
-    if not res.get("ok"):
-        raise HTTPException(status_code=400, detail=res.get("msg"))
-    old = a.folder
-    if res["folder"] != old:
-        music_library.scan_folder(db, old)
-    music_library.scan_folder(db, os.path.normpath(res["folder"]))
-    music_library.mark_duplicates(db)
-    db.commit()
-    return res
-
-
 @router.post("/music/library/albums/{album_id}/rating")
 def library_rate(album_id: int, body: dict = Body(default={})):
     from ..services import plex_sync
@@ -443,7 +423,7 @@ def embed_current_cover(album_id: int, db: Session = Depends(get_db)):
 
 
 class AlbumBulk(BaseModel):
-    action: str                     # covers | fix_tags | organise | embed | rate | collect
+    action: str                     # covers | fix_tags | embed | rate | collect | upgrade | complete | follow
     album_ids: list[int]
     stars: int | None = None
     add: list[str] = []
@@ -452,7 +432,7 @@ class AlbumBulk(BaseModel):
 
 @router.post("/music/library/bulk")
 def library_bulk(body: AlbumBulk, request: Request, db: Session = Depends(get_db)):
-    """Rate or collect many albums now; covers, tags, organising and embedding run in
+    """Rate or collect many albums now; covers, tags and embedding run in
     the background (see /music/library/bulk/status)."""
     from ..services import music_batch, plex_sync
     if body.action in ("rate", "collect"):

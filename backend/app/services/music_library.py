@@ -1,4 +1,4 @@
-"""The music library: scanning, tags, organising for Plex, and checks.
+"""The music library: scanning, tags, placing finished downloads, and checks.
 
 The video Library's mechanics, applied to music:
 * **Roots:** folders whose target is "music" (Settings → Folders), plus the music

@@ -1018,13 +1018,12 @@ export const api = {
     betterCopy: (id: number, mode: "upgrade" | "complete") =>
       req<BetterCopyResult>(`/music/library/albums/${id}/better-copy`, { method: "POST", body: JSON.stringify({ mode }) }),
     notNow: (id: number) => req<{ ok: boolean; msg: string }>(`/music/library/albums/${id}/not-now`, { method: "POST" }),
-    bulk: (body: { action: "covers" | "fix_tags" | "organise" | "embed" | "rate" | "collect" | "upgrade" | "complete" | "follow"; album_ids: number[];
+    bulk: (body: { action: "covers" | "fix_tags" | "embed" | "rate" | "collect" | "upgrade" | "complete" | "follow"; album_ids: number[];
                    stars?: number; add?: string[]; remove?: string[] }) =>
       req<MusicBatch & { done: number; sent?: number; errors?: string[]; ok?: boolean }>("/music/library/bulk", {
         method: "POST", body: JSON.stringify(body) }),
     bulkStatus: () => req<MusicBatch>("/music/library/bulk/status"),
     getCover: (id: number) => req<{ ok: boolean; source: string | null; msg: string }>(`/music/library/albums/${id}/cover`, { method: "POST" }),
-    organise: (id: number) => req<{ ok: boolean; folder: string; msg: string }>(`/music/library/albums/${id}/organise`, { method: "POST" }),
     rateAlbum: (id: number, stars: number) =>
       req<TagResult>(`/music/library/albums/${id}/rating`, { method: "POST", body: JSON.stringify({ stars }) }),
     albumCollections: (id: number, add: string[], remove: string[]) =>

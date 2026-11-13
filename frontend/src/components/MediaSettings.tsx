@@ -124,6 +124,9 @@ export default function MediaSettings() {
         )}
       </div>
 
+      {/* Thumbnails */}
+      <ThumbnailTools />
+
       {/* Encoder */}
       <div>
         <h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">Encoder</h3>
@@ -259,6 +262,30 @@ export default function MediaSettings() {
             <Trash2 className="h-4 w-4" />Empty trash
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+/** Thumbnails are made in the background after scans and nightly; these force it now. */
+function ThumbnailTools() {
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const go = async (retry: boolean) => {
+    setBusy(true);
+    try { setMsg((await api.media.thumbs.missing(retry)).msg); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <div>
+      <h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">Thumbnails</h3>
+      <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+        Made in the background after each scan and every night, one at a time, pausing while something is encoding or playing.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button className={btnGhost} disabled={busy} onClick={() => go(false)}>Make missing thumbnails</button>
+        <button className={btnGhost} disabled={busy} onClick={() => go(true)} title="Also try files that couldn't be read before">Retry failed thumbnails</button>
+        {msg && <span className="text-xs text-gray-500 dark:text-gray-400" role="status">{msg}</span>}
       </div>
     </div>
   );

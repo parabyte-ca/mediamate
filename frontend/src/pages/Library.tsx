@@ -3,9 +3,9 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderInput, FolderSearch, Layers, Loader2, MoreHorizontal,
-  CheckCircle2, ShieldAlert, ShieldCheck, Music, Pause, Play, Scissors, Share2, SkipForward, SlidersHorizontal, Square, Star, Stethoscope, Tags, Timer, Trash2, X,
+  CheckCircle2, ShieldAlert, ShieldCheck, Music, Pause, Play, Scissors, Image as ImageIcon, Share2, SkipForward, SlidersHorizontal, Square, Star, Stethoscope, Tags, Timer, Trash2, X,
 } from "lucide-react";
-import { api, type DoctorKind, type DownloadPath, type MediaFile, type MediaJobType, type MediaStats, type OrganisePlan } from "../api/client";
+import { api, type DoctorKind, type DownloadPath, type MediaFile, type MediaJobType, type MediaStats, type OrganisePlan, type ThumbStatus } from "../api/client";
 import { useEvent } from "../events";
 import Stars from "../components/Stars";
 import VideoPlayer from "../components/VideoPlayer";
@@ -205,15 +205,25 @@ function RowMenu({ f, onAction }: { f: MediaFile; onAction: (a: string) => void 
 
 /** A still frame from the file; falls back to an icon when there is none. */
 function Thumb({ f, onOpen }: { f: MediaFile; onOpen: () => void }) {
+  // A thumbnail not made yet answers "try again soon" (it's made in the background),
+  // so look again a few times before settling on the icon.
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => { setFailed(false); setAttempt(0); }, [f.id, f.updated_at]);
+  const retry = () => {
+    if (attempt >= 6) { setFailed(true); return; }
+    window.setTimeout(() => setAttempt((a) => a + 1), 5000);
+    setFailed(true);
+  };
+  useEffect(() => { if (attempt > 0) setFailed(false); }, [attempt]);
   return (
     <button type="button" onClick={onOpen} aria-label={`Preview ${f.filename}`}
             className="group relative h-9 w-16 shrink-0 overflow-hidden rounded bg-gray-100 dark:bg-gray-800">
       {failed ? (
         <Film className="absolute inset-0 m-auto h-4 w-4 text-gray-400" />
       ) : (
-        <img src={api.media.thumbUrl(f.id, f.updated_at)} alt="" loading="lazy" decoding="async"
-             onError={() => setFailed(true)} className="h-full w-full object-cover" />
+        <img src={`${api.media.thumbUrl(f.id, f.updated_at)}${attempt ? `${api.media.thumbUrl(f.id, f.updated_at).includes("?") ? "&" : "?"}r=${attempt}` : ""}`}
+             alt="" loading="lazy" decoding="async" onError={retry} className="h-full w-full object-cover" />
       )}
       <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
         <Play className="h-4 w-4 fill-white text-white" />
@@ -240,6 +250,22 @@ export default function Library() {
   const page = Math.max(1, Number(params.get("page") || 1));
   const [files, setFiles] = useState<MediaFile[]>([]);
   const [stats, setStats] = useState<MediaStats | null>(null);
+  // Thumbnails are made in the background; show how far along that is while it runs.
+  const [thumbs, setThumbs] = useState<ThumbStatus | null>(null);
+  useEffect(() => {
+    let stop = false;
+    let id: number | undefined;
+    const tick = async () => {
+      try { const t = await api.media.thumbs.status(); if (!stop) setThumbs(t); id = window.setTimeout(tick, t.running ? 4000 : 30000); }
+      catch { id = window.setTimeout(tick, 30000); }
+    };
+    tick();
+    return () => { stop = true; window.clearTimeout(id); };
+  }, []);
+  const makeThumbs = async (retryFailed = false) => {
+    try { const r = await api.media.thumbs.missing(retryFailed); setThumbs(await api.media.thumbs.status()); return r.msg; }
+    catch (e) { return (e as Error).message; }
+  };
   const [loading, setLoading] = useState(true);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [dialog, setDialog] = useState<Dialog | null>(null);
@@ -457,6 +483,11 @@ export default function Library() {
         )}
         {anyFilter && <button className="text-sm text-blue-600 hover:underline" onClick={clearFilters}>Clear filters</button>}
         </div>
+        {thumbs?.running && (
+          <p className="mb-2 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400" role="status">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />Making thumbnails: {thumbs.done} of {thumbs.total}
+          </p>
+        )}
       {pickedFiles.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/60 px-3 py-2">
           <span className="text-sm font-medium text-blue-800 dark:text-blue-200">{pickedFiles.length} selected</span>
@@ -477,6 +508,7 @@ export default function Library() {
             setPicked(new Set()); await load(); loadAudience();
             return `Moved ${moved} file${moved === 1 ? "" : "s"} to Mature`;
           })}><ShieldAlert className="h-4 w-4" />Move to Mature</button>
+          <button className={btnGhost} title="Make these thumbnails again" onClick={() => run(async () => { const r = await api.media.thumbs.files([...picked]); setThumbs(await api.media.thumbs.status()); return r.msg; })}><ImageIcon className="h-4 w-4" />Thumbnails</button>
           <button className={btnGhost} onClick={() => setDialog({ kind: "rate", files: pickedFiles })}><Star className="h-4 w-4" />Rate</button>
           <button className={btnGhost} onClick={() => setDialog({ kind: "collections", files: pickedFiles })}><Tags className="h-4 w-4" />Collections</button>
           <button className={`${btnGhost} text-red-600 dark:text-red-400`} onClick={() => setDialog({ kind: "delete", files: pickedFiles })}><Trash2 className="h-4 w-4" />Delete</button>
@@ -497,6 +529,10 @@ export default function Library() {
         <button className={btnGhost} onClick={() => queueAll("split")}><Scissors className="h-4 w-4" />Split all anthologies</button>
         <button className={btnGhost} onClick={() => setDialog({ kind: "doctor" })} title="Find and fix problems in your library">
           <Stethoscope className="h-4 w-4" />Library doctor
+        </button>
+        <button className={btnGhost} title="Make a thumbnail for every file that doesn't have one (in the background)"
+                onClick={() => run(() => makeThumbs())}>
+          <ImageIcon className="h-4 w-4" />Make thumbnails
         </button>
         <button className={btnGhost} title="Remove records for files that no longer exist on disk"
                 onClick={() => run(async () => `Removed ${(await api.media.purge()).removed} missing file record(s)`)}>

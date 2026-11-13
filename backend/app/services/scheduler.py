@@ -788,6 +788,15 @@ def run_plex_sync() -> None:
         logger.exception("Plex sync failed")
 
 
+def _nightly_thumbnails() -> None:
+    """Make any thumbnails still missing (in the background, one at a time)."""
+    try:
+        from .media import thumbs
+        thumbs.queue_missing()
+    except Exception as exc:
+        logger.warning("Nightly thumbnails failed to queue: %s", exc)
+
+
 def start_scheduler() -> None:
     from .download_events import process_download_events
     from .updater import daily_update_check
@@ -797,6 +806,12 @@ def start_scheduler() -> None:
         scan_watchlist,
         trigger=IntervalTrigger(minutes=interval),
         id="watchlist_scan",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        _nightly_thumbnails,
+        trigger=CronTrigger(hour=4, minute=23, timezone="UTC"),
+        id="nightly_thumbnails",
         replace_existing=True,
     )
     _scheduler.add_job(

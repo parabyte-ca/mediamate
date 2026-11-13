@@ -19,6 +19,12 @@ export default function VideoPlayer({ original, converted, duration, extra, butt
   buttonClass: string;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  // On close, stop the download straight away so a converting preview frees its slot
+  // on the server (only two can convert at once).
+  useEffect(() => () => {
+    const v = videoRef.current;
+    if (v) { v.pause(); v.removeAttribute("src"); v.load(); }
+  }, []);
   const [mode, setMode] = useState<"original" | "converted">("original");
   const [offset, setOffset] = useState(0);        // where the conversion started (s)
   const [pos, setPos] = useState(0);              // current position in the file (s)

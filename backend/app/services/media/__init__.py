@@ -20,6 +20,8 @@ def startup() -> None:
     store.recover_interrupted()
     encoder.start_probe()
     worker.start()
+    from . import thumbs
+    thumbs.start()
     _started = True
     logger.info("Media engine started (%d worker(s), backend=%s)",
                 config.MAX_WORKERS, config.ENCODER_BACKEND)

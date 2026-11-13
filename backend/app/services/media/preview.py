@@ -7,8 +7,10 @@ ffmpeg can't read leaves a ``.fail`` marker, so it isn't retried on every view.
 """
 import logging
 import os
+import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 from . import encoder
@@ -41,40 +43,105 @@ def thumb_time(duration_sec: float | None) -> float:
 
 
 def thumb_cmd(src: str, dest: str, at: float) -> list[str]:
-    return ["ffmpeg", "-y", "-loglevel", "error", "-ss", str(at), "-i", src,
-            "-frames:v", "1", "-vf", f"scale={THUMB_WIDTH}:-2", "-q:v", "5", dest]
+    """One frame, decoding keyframes only (much faster on large 4K / HEVC files)."""
+    nice = ["nice", "-n", "10"] if shutil.which("nice") else []
+    return nice + ["ffmpeg", "-y", "-loglevel", "error", "-skip_frame", "nokey", "-ss", str(at), "-i", src,
+                   "-frames:v", "1", "-an", "-sn", "-dn", "-threads", "1",
+                   "-vf", f"scale={THUMB_WIDTH}:-2", "-q:v", "5", dest]
 
 
-def thumbnail(file_id: int, path: str, duration_sec: float | None) -> Path | None:
-    """The cached thumbnail for this file, making it if needed; None if ffmpeg can't."""
+FAIL_DAYS = 7                 # a file ffmpeg couldn't read is tried again after this
+BACKGROUND_TIMEOUT_S = 60
+
+
+def _paths(file_id: int, path: str) -> tuple[Path, Path, Path]:
     st = os.stat(path)
     folder = cache_dir()
     stem = f"{file_id}-{st.st_size}-{int(st.st_mtime)}"
-    jpg, fail = folder / f"{stem}.jpg", folder / f"{stem}.fail"
-    if jpg.is_file():
-        return jpg
-    if fail.exists():
+    return folder, folder / f"{stem}.jpg", folder / f"{stem}.fail"
+
+
+def cached_thumbnail(file_id: int, path: str) -> Path | None:
+    """The thumbnail if it has been made; never runs ffmpeg."""
+    try:
+        _f, jpg, _x = _paths(file_id, path)
+    except OSError:
         return None
+    return jpg if jpg.is_file() else None
+
+
+def failed_recently(file_id: int, path: str) -> bool:
+    """ffmpeg couldn't read this file within the last FAIL_DAYS days."""
+    try:
+        _f, _j, fail = _paths(file_id, path)
+        return fail.exists() and (time.time() - fail.stat().st_mtime) < FAIL_DAYS * 86400
+    except OSError:
+        return False
+
+
+def make_thumbnail(file_id: int, path: str, duration_sec: float | None,
+                   timeout: float = BACKGROUND_TIMEOUT_S) -> str:
+    """Make the thumbnail now: "ok", "error" (ffmpeg can't read the file; marked so it
+    isn't tried again for a while) or "retry" (it ran out of time; try again later)."""
+    try:
+        folder, jpg, fail = _paths(file_id, path)
+    except OSError:
+        return "error"
+    if jpg.is_file():
+        return "ok"
     folder.mkdir(parents=True, exist_ok=True)
-    with _thumb_slots:
-        if jpg.is_file():          # made by another request while this one waited
-            return jpg
-        tmp = folder / f"{stem}.tmp.jpg"
-        try:
+    tmp = folder / f"{jpg.stem}.tmp.jpg"
+    try:
+        with _thumb_slots:
             # Short files: the 10% point can land past the last keyframe; fall back to 0.
             for at in dict.fromkeys((thumb_time(duration_sec), 0.0)):
-                subprocess.run(thumb_cmd(path, str(tmp), at), capture_output=True,
-                               timeout=THUMB_TIMEOUT_S, check=False)
+                try:
+                    subprocess.run(thumb_cmd(path, str(tmp), at), capture_output=True,
+                                   timeout=timeout, check=False)
+                except subprocess.TimeoutExpired:
+                    logger.info("Thumbnail took too long for %s; will try again later", path)
+                    return "retry"
                 if tmp.is_file() and tmp.stat().st_size > 0:
                     os.replace(tmp, jpg)
                     _drop_old(folder, file_id, keep=jpg.name)
-                    return jpg
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            logger.info("Thumbnail failed for %s: %s", path, exc)
-        finally:
-            tmp.unlink(missing_ok=True)
-        fail.touch()
+                    return "ok"
+    except OSError as exc:
+        logger.info("Thumbnail failed for %s: %s", path, exc)
+        return "retry"
+    finally:
+        tmp.unlink(missing_ok=True)
+    fail.touch()
+    return "error"
+
+
+def thumbnail(file_id: int, path: str, duration_sec: float | None) -> Path | None:
+    """The thumbnail, making it now if needed (scripts and tests); None if it can't be made."""
+    if failed_recently(file_id, path):
         return None
+    make_thumbnail(file_id, path, duration_sec, timeout=THUMB_TIMEOUT_S)
+    return cached_thumbnail(file_id, path)
+
+
+def clear_failures() -> int:
+    """Forget every "couldn't read" marker, so those files are tried again."""
+    n = 0
+    for f in cache_dir().glob("*.fail") if cache_dir().is_dir() else []:
+        f.unlink(missing_ok=True)
+        n += 1
+    return n
+
+
+def forget_thumbnail(file_id: int) -> None:
+    """Drop this file's thumbnail and failure mark, so it's made again."""
+    folder = cache_dir()
+    if folder.is_dir():
+        for old in folder.glob(f"{file_id}-*"):
+            old.unlink(missing_ok=True)
+
+
+def players_busy() -> bool:
+    """A conversion is streaming right now."""
+    return _player_slots._value < MAX_PLAYERS  # noqa: SLF001 (BoundedSemaphore has no public count)
 
 
 def frame(file_id: int, path: str, at: float) -> Path | None:

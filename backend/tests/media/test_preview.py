@@ -55,27 +55,92 @@ def test_play_uses_the_gpu_when_there_is_one():
 # ── Thumbnails ────────────────────────────────────────────────────────────────
 
 @needs_ffmpeg
-def test_thumbnail_is_a_jpeg_and_is_cached(api, clip, thumbs, monkeypatch):
+def test_thumbnail_is_made_in_the_background_then_cached(api, clip, thumbs, monkeypatch):
+    from app.services.media import thumbs as worker
+    worker.reset()
     fid, _ = clip
+
+    real_run = preview.subprocess.run
+    monkeypatch.setattr(preview.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ffmpeg in the request")))
+    r = api.get(f"/api/media/files/{fid}/thumb")
+    assert r.status_code == 202 and r.headers["retry-after"] == "5"   # never waits for ffmpeg
+    assert worker.status()["queued"] == 1
+
+    monkeypatch.setattr(preview.subprocess, "run", real_run)
+    assert worker.run_once() == 1
     r = api.get(f"/api/media/files/{fid}/thumb")
     assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
     assert r.content[:3] == b"\xff\xd8\xff"
     assert len(list(thumbs.glob("*.jpg"))) == 1
 
-    def no_ffmpeg(*a, **k):
-        raise AssertionError("ffmpeg ran again")
-    monkeypatch.setattr(preview.subprocess, "run", no_ffmpeg)
-    assert api.get(f"/api/media/files/{fid}/thumb").status_code == 200
-
 
 @needs_ffmpeg
-def test_an_unreadable_file_gets_no_thumbnail_and_is_not_retried(api, tmp_media_roots, media_db, thumbs):
+def test_an_unreadable_file_is_marked_and_not_retried_for_a_while(api, tmp_media_roots, media_db, thumbs):
+    import os
+    import time
+    from app.services.media import thumbs as worker
+    worker.reset()
     bad = Path(tmp_media_roots[0]) / "broken.mkv"
     bad.write_bytes(b"not a video")
     fid = store.upsert_file(str(bad), bad.name, 11, 60.0, "h264", False)
+    assert api.get(f"/api/media/files/{fid}/thumb").status_code == 202
+    worker.run_once()
+    [fail] = list(thumbs.glob("*.fail"))
     assert api.get(f"/api/media/files/{fid}/thumb").status_code == 404
-    assert len(list(thumbs.glob("*.fail"))) == 1
-    assert api.get(f"/api/media/files/{fid}/thumb").status_code == 404
+    assert worker.missing_ids() == []                        # not queued again yet
+    old = time.time() - (preview.FAIL_DAYS + 1) * 86400
+    os.utime(fail, (old, old))
+    assert worker.missing_ids() == [fid]                     # after a week, tried again
+
+
+def test_a_timeout_is_retried_not_marked(tmp_media_roots, media_db, thumbs, monkeypatch):
+    import subprocess as sp
+    from app.services.media import thumbs as worker
+    worker.reset()
+    f = Path(tmp_media_roots[0]) / "big.mkv"
+    f.write_bytes(b"x")
+    fid = store.upsert_file(str(f), f.name, 1, 60.0, "hevc", False)
+    calls = []
+
+    def slow(cmd, **k):
+        calls.append(cmd)
+        raise sp.TimeoutExpired(cmd, k.get("timeout"))
+    monkeypatch.setattr(preview.subprocess, "run", slow)
+    worker.add([fid])
+    assert worker.run_once() == worker.MAX_TRIES             # tried a few times, then left for later
+    assert not list(thumbs.glob("*.fail")) and worker.status()["queued"] == 0
+    assert "-skip_frame" in calls[0] and "nokey" in calls[0]
+
+
+def test_force_endpoints(api, tmp_media_roots, media_db, thumbs, monkeypatch):
+    from app.services.media import thumbs as worker
+    worker.reset()
+    ids = []
+    for n in range(3):
+        f = Path(tmp_media_roots[0]) / f"v{n}.mkv"
+        f.write_bytes(b"x")
+        ids.append(store.upsert_file(str(f), f.name, 1, 60.0, "h264", False))
+    thumbs.mkdir(parents=True, exist_ok=True)
+    st = (Path(tmp_media_roots[0]) / "v0.mkv").stat()
+    (thumbs / f"{ids[0]}-{st.st_size}-{int(st.st_mtime)}.fail").touch()
+    assert api.post("/api/media/thumbs/missing").json()["queued"] == 2           # the failed one waits
+    assert api.post("/api/media/thumbs/missing?retry_failed=true").json()["queued"] == 1
+    assert not list(thumbs.glob("*.fail"))
+    s = api.get("/api/media/thumbs/status").json()
+    assert s["queued"] == 3 and s["running"]
+    worker.reset()
+    assert api.post("/api/media/thumbs/files", json={"ids": ids[:2]}).json()["queued"] == 2
+
+
+def test_the_worker_steps_aside_for_encodes_and_previews(monkeypatch):
+    from app.services.media import thumbs as worker
+    monkeypatch.setattr(preview, "players_busy", lambda: True)
+    assert worker._busy()
+    monkeypatch.setattr(preview, "players_busy", lambda: False)
+    monkeypatch.setattr(worker.store, "get_active_jobs", lambda: [{"status": "running"}])
+    assert worker._busy()
+    monkeypatch.setattr(worker.store, "get_active_jobs", lambda: [{"status": "queued"}])
+    assert not worker._busy()
 
 
 def test_files_outside_the_media_folders_are_not_served(api, tmp_path, media_db, thumbs):

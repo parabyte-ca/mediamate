@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ChevronLeft, ChevronRight, Download, Edit2, Eye, Film, FolderInput, FolderSearch, Layers, Loader2, MoreHorizontal,
-  CheckCircle2, ShieldAlert, ShieldCheck, Music, Pause, Play, Scissors, Share2, SkipForward, Square, Star, Stethoscope, Tags, Timer, Trash2, X,
+  CheckCircle2, ShieldAlert, ShieldCheck, Music, Pause, Play, Scissors, Share2, SkipForward, SlidersHorizontal, Square, Star, Stethoscope, Tags, Timer, Trash2, X,
 } from "lucide-react";
 import { api, type DoctorKind, type DownloadPath, type MediaFile, type MediaJobType, type MediaStats, type OrganisePlan } from "../api/client";
 import { useEvent } from "../events";
@@ -11,6 +11,7 @@ import Stars from "../components/Stars";
 import VideoPlayer from "../components/VideoPlayer";
 import ShareDialog from "../components/ShareDialog";
 import MusicLibrary from "../components/MusicLibrary";
+import { InLibraryHeader, LibraryHeader, STICKY_TH } from "../components/LibraryHeader";
 import DoctorDialog, { type DoctorKindInfo } from "../components/DoctorDialog";
 import { fmtSize } from "../utils";
 
@@ -309,6 +310,8 @@ export default function Library() {
   const pickedFiles = files.filter((f) => picked.has(f.id));
   const allOnPage = rows.length > 0 && rows.every((f) => picked.has(f.id));
   const anyFilter = FILTER_KEYS.some((k) => filters[k]);
+  const activeFilters = FILTER_KEYS.filter((k) => k !== "q" && filters[k]).length;
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const togglePick = (id: number) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const togglePage = () => setPicked((s) => {
@@ -397,58 +400,27 @@ export default function Library() {
   );
   if (libKind === "music") {
     return (
-      <div className="mx-auto max-w-6xl p-4 md:p-6">
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Library</h1>
-          {libTabs}
-        </div>
-        <MusicLibrary />
+      <div className="mx-auto max-w-6xl px-4 pb-4 md:px-6 md:pb-6">
+        <LibraryHeader title={<><h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Library</h1>{libTabs}</>}>
+          <MusicLibrary />
+        </LibraryHeader>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-6xl p-4 md:p-6">
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Library</h1>
-        <div className="mr-auto">{libTabs}</div>
-        <button className={btnGhost} onClick={() => run(async () => { await api.media.scan(); return "Scan started"; })} disabled={stats?.scan_running}>
-          {stats?.scan_running ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderSearch className="h-4 w-4" />}
-          {stats?.scan_running ? "Scanning…" : "Scan now"}
-        </button>
-        <button className={btnGhost} onClick={() => run(async () => { if (stats?.paused) await api.media.resume(); else await api.media.pause(); })}>
-          {stats?.paused ? <><Play className="h-4 w-4" />Resume queue</> : <><Pause className="h-4 w-4" />Pause queue</>}
-        </button>
-        <button className={btnGhost} onClick={() => queueAll("encode")}><Film className="h-4 w-4" />Encode all pending</button>
-        <button className={btnGhost} onClick={() => queueAll("split")}><Scissors className="h-4 w-4" />Split all anthologies</button>
-        <button className={btnGhost} onClick={() => setDialog({ kind: "doctor" })} title="Find and fix problems in your library">
-          <Stethoscope className="h-4 w-4" />Library doctor
-        </button>
-        <button className={btnGhost} title="Remove records for files that no longer exist on disk"
-                onClick={() => run(async () => `Removed ${(await api.media.purge()).removed} missing file record(s)`)}>
-          <Trash2 className="h-4 w-4" />Purge missing
-        </button>
-      </div>
-
-      {stats && (
-        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
-          {tiles.map(([label, value, status]) => (
-            <button key={label} onClick={() => setFilter("status", status === filters.status ? "" : status)}
-                    className={`rounded-xl border p-3 text-left transition-colors ${filters.status === status && status ? "border-blue-400 bg-blue-50 dark:bg-blue-950/40" : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-gray-300"}`}>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
-              <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{value}</div>
-            </button>
-          ))}
-          <div className="rounded-xl border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30 p-3">
-            <div className="text-xs text-green-700 dark:text-green-400">Space saved</div>
-            <div className="text-lg font-semibold text-green-800 dark:text-green-300">{fmtSize(stats.total_saved_bytes) === "—" ? "0 B" : fmtSize(stats.total_saved_bytes)}</div>
-          </div>
-        </div>
-      )}
-
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+    <div className="mx-auto max-w-6xl px-4 pb-4 md:px-6 md:pb-6">
+      <LibraryHeader title={<><h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Library</h1>{libTabs}</>}>
+      <InLibraryHeader>
+        <div className="mb-2 flex items-center gap-2">
         <input value={filters.q} onChange={(e) => setFilter("q", e.target.value)} placeholder="Search file names…"
-               aria-label="Search file names" className={`${sel} min-w-[200px] flex-1`} />
+               aria-label="Search file names" className={`${sel} min-w-0 flex-1`} />
+          <button type="button" className={`${btnGhost} md:hidden`} aria-expanded={filtersOpen} aria-controls="video-filters"
+                  onClick={() => setFiltersOpen((v) => !v)}>
+            <SlidersHorizontal className="h-4 w-4" />Filters{activeFilters > 0 ? ` (${activeFilters})` : ""}
+          </button>
+        </div>
+        <div id="video-filters" className={`mb-2 flex-wrap items-center gap-2 ${filtersOpen ? "flex" : "hidden"} md:flex`}>
         <select aria-label="Category" className={sel} value={filters.category} onChange={(e) => setFilter("category", e.target.value)}>
           <option value="">All folders</option>{categories.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
@@ -484,26 +456,9 @@ export default function Library() {
           </select>
         )}
         {anyFilter && <button className="text-sm text-blue-600 hover:underline" onClick={clearFilters}>Clear filters</button>}
-      </div>
-
-      {adultCount > 0 && (
-        <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-800 dark:text-red-200">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span className="flex-1">{adultCount} adult file{adultCount === 1 ? " is" : "s are"} in a Plex folder (TV or Movies). Move {adultCount === 1 ? "it" : "them"} back to the protected folder.</span>
-          <button className={btnPrimary} onClick={() => setDialog({ kind: "doctor" })}>Review</button>
         </div>
-      )}
-
-      {toMature > 0 && (
-        <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
-          <ShieldAlert className="h-4 w-4 shrink-0" />
-          <span className="flex-1">{toMature} file{toMature === 1 ? " in the regular folders belongs" : "s in the regular folders belong"} in Mature (for example PG-13 horror), so the kids' Plex profiles can see {toMature === 1 ? "it" : "them"}.</span>
-          <button className={btnPrimary} onClick={() => setDialog({ kind: "doctor" })}>Review</button>
-        </div>
-      )}
-
       {pickedFiles.length > 0 && (
-        <div className="sticky top-12 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/60 px-3 py-2 md:top-2">
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/60 px-3 py-2">
           <span className="text-sm font-medium text-blue-800 dark:text-blue-200">{pickedFiles.length} selected</span>
           <button className={btnPrimary} onClick={() => setDialog({ kind: "encode", files: pickedFiles })}><Film className="h-4 w-4" />Encode</button>
           <button className={btnGhost} onClick={() => setDialog({ kind: "split", files: pickedFiles })}><Scissors className="h-4 w-4" />Split</button>
@@ -528,8 +483,61 @@ export default function Library() {
           <button className="ml-auto text-sm text-blue-700 dark:text-blue-300 hover:underline" onClick={() => setPicked(new Set())}>Clear selection</button>
         </div>
       )}
+      </InLibraryHeader>
 
-      <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <button className={btnGhost} onClick={() => run(async () => { await api.media.scan(); return "Scan started"; })} disabled={stats?.scan_running}>
+          {stats?.scan_running ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderSearch className="h-4 w-4" />}
+          {stats?.scan_running ? "Scanning…" : "Scan now"}
+        </button>
+        <button className={btnGhost} onClick={() => run(async () => { if (stats?.paused) await api.media.resume(); else await api.media.pause(); })}>
+          {stats?.paused ? <><Play className="h-4 w-4" />Resume queue</> : <><Pause className="h-4 w-4" />Pause queue</>}
+        </button>
+        <button className={btnGhost} onClick={() => queueAll("encode")}><Film className="h-4 w-4" />Encode all pending</button>
+        <button className={btnGhost} onClick={() => queueAll("split")}><Scissors className="h-4 w-4" />Split all anthologies</button>
+        <button className={btnGhost} onClick={() => setDialog({ kind: "doctor" })} title="Find and fix problems in your library">
+          <Stethoscope className="h-4 w-4" />Library doctor
+        </button>
+        <button className={btnGhost} title="Remove records for files that no longer exist on disk"
+                onClick={() => run(async () => `Removed ${(await api.media.purge()).removed} missing file record(s)`)}>
+          <Trash2 className="h-4 w-4" />Purge missing
+        </button>
+      </div>
+
+      {stats && (
+        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
+          {tiles.map(([label, value, status]) => (
+            <button key={label} onClick={() => setFilter("status", status === filters.status ? "" : status)}
+                    className={`rounded-xl border p-3 text-left transition-colors ${filters.status === status && status ? "border-blue-400 bg-blue-50 dark:bg-blue-950/40" : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-gray-300"}`}>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
+              <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{value}</div>
+            </button>
+          ))}
+          <div className="rounded-xl border border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/30 p-3">
+            <div className="text-xs text-green-700 dark:text-green-400">Space saved</div>
+            <div className="text-lg font-semibold text-green-800 dark:text-green-300">{fmtSize(stats.total_saved_bytes) === "—" ? "0 B" : fmtSize(stats.total_saved_bytes)}</div>
+          </div>
+        </div>
+      )}
+
+
+      {adultCount > 0 && (
+        <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-3 py-2 text-sm text-red-800 dark:text-red-200">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="flex-1">{adultCount} adult file{adultCount === 1 ? " is" : "s are"} in a Plex folder (TV or Movies). Move {adultCount === 1 ? "it" : "them"} back to the protected folder.</span>
+          <button className={btnPrimary} onClick={() => setDialog({ kind: "doctor" })}>Review</button>
+        </div>
+      )}
+
+      {toMature > 0 && (
+        <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
+          <ShieldAlert className="h-4 w-4 shrink-0" />
+          <span className="flex-1">{toMature} file{toMature === 1 ? " in the regular folders belongs" : "s in the regular folders belong"} in Mature (for example PG-13 horror), so the kids' Plex profiles can see {toMature === 1 ? "it" : "them"}.</span>
+          <button className={btnPrimary} onClick={() => setDialog({ kind: "doctor" })}>Review</button>
+        </div>
+      )}
+
+      <div className="overflow-clip rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm">
         {loading ? (
           <div className="flex justify-center p-10"><Loader2 className="h-5 w-5 animate-spin text-blue-600" /></div>
         ) : files.length === 0 ? (
@@ -543,14 +551,14 @@ export default function Library() {
           <table className="w-full text-sm">
             <thead className="border-b border-gray-200 dark:border-gray-700 text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
               <tr>
-                <th className="w-10 px-3 py-2"><input type="checkbox" aria-label="Select page" checked={allOnPage} onChange={togglePage} /></th>
-                <th className="w-full px-2 py-2">Name</th>
-                <th className="hidden whitespace-nowrap px-2 py-2 md:table-cell">Codec</th>
-                <th className="hidden whitespace-nowrap px-2 py-2 md:table-cell">Res</th>
-                <th className="hidden whitespace-nowrap px-2 py-2 lg:table-cell">Length</th>
-                <th className="hidden whitespace-nowrap px-2 py-2 sm:table-cell">Size</th>
-                <th className="px-2 py-2">Status</th>
-                <th className="w-px px-2 py-2"><span className="sr-only">Actions</span></th>
+                <th className={`${STICKY_TH} w-10 px-3 py-2`}><input type="checkbox" aria-label="Select page" checked={allOnPage} onChange={togglePage} /></th>
+                <th className={`${STICKY_TH} w-full px-2 py-2`}>Name</th>
+                <th className={`${STICKY_TH} hidden whitespace-nowrap px-2 py-2 md:table-cell`}>Codec</th>
+                <th className={`${STICKY_TH} hidden whitespace-nowrap px-2 py-2 md:table-cell`}>Res</th>
+                <th className={`${STICKY_TH} hidden whitespace-nowrap px-2 py-2 lg:table-cell`}>Length</th>
+                <th className={`${STICKY_TH} hidden whitespace-nowrap px-2 py-2 sm:table-cell`}>Size</th>
+                <th className={`${STICKY_TH} px-2 py-2`}>Status</th>
+                <th className={`${STICKY_TH} w-px px-2 py-2`}><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -689,6 +697,7 @@ export default function Library() {
       )}
       {dialog?.kind === "organise" && <OrganiseDialog files={dialog.files} onClose={() => setDialog(null)}
                                                       onDone={(m) => { setPicked(new Set()); say(m); load(); }} />}
+      </LibraryHeader>
     </div>
   );
 }

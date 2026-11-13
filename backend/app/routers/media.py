@@ -8,6 +8,7 @@ import os
 import threading
 
 from fastapi import APIRouter, Body
+from pydantic import BaseModel
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
 
@@ -182,11 +183,49 @@ def file_thumbnail(file_id: int, at: float | None = None):
     if at is not None and at >= 0:
         jpg = preview.frame(file_id, row["path"], at)
     else:
-        jpg = preview.thumbnail(file_id, row["path"], row["duration_sec"])
+        # Never make it here (that tied up the server while scrolling): serve it if it's
+        # ready, otherwise put it first in the background queue and say "try again soon".
+        jpg = preview.cached_thumbnail(file_id, row["path"])
+        if jpg is None:
+            if preview.failed_recently(file_id, row["path"]):
+                return _err("No thumbnail for this file", 404)
+            from ..services.media import thumbs
+            thumbs.ask(file_id)
+            return JSONResponse({"detail": "Making the thumbnail"}, status_code=202, headers={"Retry-After": "5"})
     if jpg is None:
         return _err("No thumbnail for this file", 404)
     return FileResponse(jpg, media_type="image/jpeg",
                         headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/thumbs/status")
+def thumbs_status():
+    from ..services.media import thumbs
+    return thumbs.status()
+
+
+@router.post("/thumbs/missing")
+def thumbs_missing(retry_failed: bool = False):
+    """Queue every file without a thumbnail (retry_failed: also those ffmpeg couldn't read)."""
+    from ..services.media import thumbs
+    n = thumbs.queue_missing(retry_failed=retry_failed)
+    return {"ok": True, "queued": n, "msg": f"Making {n} thumbnail{'' if n == 1 else 's'}" if n else "Every file has a thumbnail"}
+
+
+class ThumbFiles(BaseModel):
+    ids: list[int]
+
+
+@router.post("/thumbs/files")
+def thumbs_files(body: ThumbFiles):
+    """Make thumbnails for these files again (clears their old ones and failure marks)."""
+    from ..services.media import thumbs
+    for fid in body.ids:
+        row = db.get_file(fid)
+        if row is not None:
+            preview.forget_thumbnail(fid)
+    n = thumbs.add(body.ids)
+    return {"ok": True, "queued": n, "msg": f"Making {n} thumbnail{'' if n == 1 else 's'}"}
 
 
 @router.get("/files/{file_id}/play")
@@ -543,6 +582,8 @@ def start_scan():
             if result and result.get("new_ids"):
                 from ..services import pipeline
                 pipeline.on_scanned(db._engine(), result["new_ids"])
+            from ..services.media import thumbs
+            thumbs.queue_missing()
         finally:
             _scan_status["running"] = False
 

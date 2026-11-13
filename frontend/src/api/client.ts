@@ -637,6 +637,8 @@ export interface ProgressEvent {
 
 export type PipelineActionType = "trim" | "encode" | "split" | "organise";
 
+export interface ThumbStatus { running: boolean; queued: number; done: number; total: number; failed: number; current: number | null }
+
 export type DoctorKind = "sample" | "junk" | "empty" | "broken" | "missing" | "duplicate" | "audience" | "name"
   | "oversize" | "lowres" | "adult_in_plex" | "wrong_library";
 
@@ -1159,6 +1161,13 @@ export const api = {
     setAnthology: (id: number, value: boolean | null) =>
       req<MediaResult>(`/media/files/${id}/anthology`, { method: "POST", body: JSON.stringify({ value }) }),
     purge: () => req<{ ok: boolean; removed: number }>("/media/files/purge", { method: "POST" }),
+    thumbs: {
+      status: () => req<ThumbStatus>("/media/thumbs/status"),
+      missing: (retryFailed = false) =>
+        req<{ ok: boolean; queued: number; msg: string }>(`/media/thumbs/missing${retryFailed ? "?retry_failed=true" : ""}`, { method: "POST" }),
+      files: (ids: number[]) =>
+        req<{ ok: boolean; queued: number; msg: string }>("/media/thumbs/files", { method: "POST", body: JSON.stringify({ ids }) }),
+    },
     pause: () => req<{ ok: boolean; paused: boolean }>("/media/queue/pause", { method: "POST" }),
     resume: () => req<{ ok: boolean; paused: boolean }>("/media/queue/resume", { method: "POST" }),
     /** URL for <video src> / download links; carries the token because media elements can't send headers. */

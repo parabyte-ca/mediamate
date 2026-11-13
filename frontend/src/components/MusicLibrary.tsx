@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Stethoscope, Disc3, FileText, LayoutGrid, List as ListIcon, Star, FolderInput, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Share2, Tags, Upload, Wand2, X, UserPlus, UserCheck, ArrowUpCircle } from "lucide-react";
+import { AlertTriangle, Stethoscope, Disc3, FileText, LayoutGrid, List as ListIcon, Star, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Share2, Tags, Upload, Wand2, X, UserPlus, UserCheck, ArrowUpCircle } from "lucide-react";
 import { api, type MusicDoctorKind, type AlbumTags, type CoverCandidate, type LibAlbum, type MusicBatch, type LibAlbumDetail, type MusicIssue, type TagRow } from "../api/client";
 import Stars from "./Stars";
 import { PlayAlbumButton, usePlayer } from "./MusicPlayer";
@@ -100,7 +100,7 @@ export default function MusicLibrary() {
     return () => window.clearInterval(id);
   }, [status?.running, load]);
 
-  // A background bulk action (covers, tags, organise, embed): poll until it finishes.
+  // A background bulk action (covers, tags, embed): poll until it finishes.
   useEffect(() => { api.music.bulkStatus().then((b) => b.running && setBatch(b)).catch(() => {}); }, []);
   useEffect(() => {
     if (!batch?.running) return;
@@ -115,7 +115,7 @@ export default function MusicLibrary() {
   }, [batch?.running, load]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const togglePick = (id: number) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const runBulk = async (action: "covers" | "fix_tags" | "organise" | "embed" | "upgrade" | "complete" | "follow") => {
+  const runBulk = async (action: "covers" | "fix_tags" | "embed" | "upgrade" | "complete" | "follow") => {
     try { setBatch(await api.music.bulk({ action, album_ids: [...picked] })); setPicked(new Set()); }
     catch (e) { say((e as Error).message); }
   };
@@ -245,7 +245,6 @@ export default function MusicLibrary() {
           <span className="text-sm font-medium text-blue-800 dark:text-blue-200">{picked.size} selected</span>
           <button className={primary} disabled={batch?.running} onClick={() => runBulk("covers")} title="Use art inside the files, else look it up on MusicBrainz now"><ImageDown className="h-4 w-4" />Find artwork</button>
           <button className={ghost} disabled={batch?.running} onClick={() => runBulk("fix_tags")}><Wand2 className="h-4 w-4" />Fix tags</button>
-          <button className={ghost} disabled={batch?.running} onClick={() => runBulk("organise")}><FolderInput className="h-4 w-4" />Organise for Plex</button>
           <button className={ghost} disabled={batch?.running} onClick={() => runBulk("embed")} title="Put each album's cover inside its tracks"><ImagePlus className="h-4 w-4" />Put covers in files</button>
           <button className={ghost} disabled={batch?.running} onClick={() => runBulk("follow")} title="Follow each album's artist on the Watchlist (new releases only)"><UserPlus className="h-4 w-4" />Follow artists</button>
           <button className={ghost} disabled={batch?.running} onClick={() => runBulk("upgrade")} title="Look for a FLAC copy of each album; the old files go to the trash once it's in"><ArrowUpCircle className="h-4 w-4" />Upgrade quality</button>
@@ -475,10 +474,6 @@ function AlbumDialog({ id, onClose, onChanged }: { id: number; onClose: () => vo
                   {busy === "cover" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageDown className="h-4 w-4" />}Get cover
                 </button>
               )}
-              <button className={ghost} disabled={busy !== null} onClick={() => act("org", async () => (await api.music.organise(id)).msg)}
-                      title="Move into the music library as Artist / Album (Year) / 01 - Title">
-                {busy === "org" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderInput className="h-4 w-4" />}Organise for Plex
-              </button>
               <button className={ghost} disabled={busy !== null} onClick={() => (names ? setNames(null) : api.music.collectionNames().then((r) => setNames(r.names)).catch(() => setNames([])))}>
                 <Tags className="h-4 w-4" />Collections
               </button>
@@ -701,7 +696,7 @@ function TagEditor({ id, onClose, onSaved }: { id: number; onClose: () => void; 
             {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
           </div>
           <div className="flex items-center justify-end gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
-            <span className="mr-auto hidden text-xs text-gray-500 sm:inline dark:text-gray-400">Saved into the files. Run Organise for Plex afterwards to rename them.</span>
+            <span className="mr-auto hidden text-xs text-gray-500 sm:inline dark:text-gray-400">Saved into the files.</span>
             <button className={ghost} onClick={onClose}>Cancel</button>
             <button className={primary} disabled={busy} onClick={save}>{busy && <Loader2 className="h-4 w-4 animate-spin" />}Save tags</button>
           </div>

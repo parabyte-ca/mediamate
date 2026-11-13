@@ -13,8 +13,8 @@ from . import music_library, musicbrainz
 
 logger = logging.getLogger(__name__)
 
-ACTIONS = ("covers", "fix_tags", "organise", "embed", "upgrade", "complete", "follow")
-LABELS = {"covers": "Finding artwork", "fix_tags": "Fixing tags", "organise": "Organising for Plex",
+ACTIONS = ("covers", "fix_tags", "embed", "upgrade", "complete", "follow")
+LABELS = {"covers": "Finding artwork", "fix_tags": "Fixing tags", 
           "embed": "Putting covers in files", "upgrade": "Looking for better copies",
           "complete": "Looking for complete copies", "follow": "Following artists"}
 SYNC = False                         # tests run batches inline
@@ -66,20 +66,6 @@ def _one(db, action: str, album) -> bool:
         if not res.get("tagged"):
             raise ValueError(res.get("msg") or "not found on MusicBrainz")
         return True
-    if action == "organise":
-        root = music_library.music_dir(db)
-        if not root or not os.path.isdir(root):
-            raise ValueError("choose a music library in Settings → Folders first")
-        res = music_library.organise(db, files, root, keep_source=music_library.in_download_folder(db, album.folder),
-                                     tidy=album.folder not in music_library.roots(db))
-        if not res.get("ok"):
-            raise ValueError(res.get("msg"))
-        old = album.folder
-        if os.path.normpath(res["folder"]) != os.path.normpath(old):
-            music_library.scan_folder(db, old)
-            music_library.scan_folder(db, os.path.normpath(res["folder"]))
-            return True
-        return bool(res.get("moved"))
     if action == "embed":
         if not album.cover:
             raise ValueError("no cover to put in the files")
@@ -114,7 +100,7 @@ def _run(bind, action: str, ids: list[int]) -> None:
         _state["failed"].append("Stopped by an unexpected error; see the log")
     finally:
         n, ok = _state["total"], _state["changed"]
-        verb = {"covers": "got artwork", "fix_tags": "tagged", "organise": "organised",
+        verb = {"covers": "got artwork", "fix_tags": "tagged", 
                 "embed": "had covers put in their files", "upgrade": "started downloading a better copy",
                 "complete": "started downloading a complete copy", "follow": "newly followed"}[action]
         _state["msg"] = f"{ok} of {n} album{'s' if n != 1 else ''} {verb}" + (

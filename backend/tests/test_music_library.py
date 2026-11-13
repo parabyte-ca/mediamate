@@ -229,10 +229,7 @@ def test_routes(root, mbz, monkeypatch):
     a = client.get("/api/music/library/albums").json()[0]
     assert a["issues"] == [] and a["title"] == "Punisher"
 
-    r = client.post(f"/api/music/library/albums/{a['id']}/organise").json()
-    assert r["ok"] and r["folder"] == str(music / "Phoebe Bridgers" / "Punisher (2020)")
-    a = client.get("/api/music/library/albums").json()[0]
-    assert a["folder"] == r["folder"] and not src.exists()
+    assert client.post(f"/api/music/library/albums/{a['id']}/organise").status_code in (404, 405)  # removed
 
     r = client.post(f"/api/music/library/albums/{a['id']}/rating", json={"stars": 4}).json()
     assert r["plex"] == "off" and r["rating"] == 4
@@ -241,17 +238,6 @@ def test_routes(root, mbz, monkeypatch):
     assert client.get("/api/music/library/collections").json()["names"] == ["Sad Girl Indie"]
     assert client.post("/api/music/library/albums/999/rating", json={"stars": 1}).status_code == 404
     assert client.get("/api/music/library/tracks/999/stream").status_code == 404
-
-
-def test_organise_needs_a_music_folder(lib):
-    client, Session, media = lib
-    with Session() as db:
-        a = MusicLibAlbum(folder="/nowhere", artist="X", title="Y")
-        db.add(a)
-        db.commit()
-        aid = a.id
-    r = client.post(f"/api/music/library/albums/{aid}/organise")
-    assert r.status_code == 400 and "music library" in r.json()["detail"]
 
 
 def test_tracks_table_cleared_with_album(root):
@@ -531,17 +517,9 @@ def test_bulk_embed_rate_collect_and_errors(shelf):
     assert client.post("/api/music/library/bulk", json={"action": "covers", "album_ids": []}).status_code == 422
 
 
-def test_bulk_organise(shelf):
+def test_bulk_organise_is_gone(shelf):
     client, Session, music, ids = shelf
-    loose = music / "incoming" / "rip"
-    album(loose, artist="C", title="Three", year="2003", n=2)
-    ml.scan()
-    with Session() as db:
-        cid = db.query(MusicLibAlbum).filter(MusicLibAlbum.title == "Three").one().id
-    client.post("/api/music/library/bulk", json={"action": "organise", "album_ids": [cid]})
-    st = client.get("/api/music/library/bulk/status").json()
-    assert st["changed"] == 1, st
-    assert (music / "C" / "Three (2003)" / "01 - Song 1.flac").exists() and not loose.exists()
+    assert client.post("/api/music/library/bulk", json={"action": "organise", "album_ids": list(ids.values())[:1]}).status_code == 422
 
 
 # ── bootleg discs, download folders, folder test ────────────────────────────

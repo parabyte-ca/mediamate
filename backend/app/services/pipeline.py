@@ -316,6 +316,7 @@ def cancel_plan(bind, plan_id: int) -> None:
             db.commit()
             if plan.journey_id:
                 journeys.refresh(db, plan.journey_id)
+    finish_deferred(bind)
 
 
 def retry_plan(bind, plan_id: int) -> str:
@@ -466,41 +467,87 @@ def advance(bind, plan_id: int) -> None:
             threading.Thread(target=_finalize, args=(bind, finalize_id), daemon=True).start()
 
 
+DEFERRED = "deferred"          # tail waits for the download's other files
+
+
+def _download_open(db: Session, plan: PipelinePlan) -> bool:
+    """Another file of the same download still has work waiting or running."""
+    if not plan.download_id:
+        return False
+    return db.query(PipelinePlan).filter(PipelinePlan.download_id == plan.download_id,
+                                         PipelinePlan.id != plan.id,
+                                         PipelinePlan.status.in_(["waiting", "running"])).first() is not None
+
+
 def _finalize(bind, plan_id: int) -> None:
-    """After the last step: refresh the media server(s) and send a notification."""
+    """After the last step: refresh the media server(s) and send a notification, once
+    per download (a season pack waits for its last episode, then sends one summary)."""
     try:
         with Session(bind=bind) as db:
             plan = db.get(PipelinePlan, plan_id)
             if plan is None:
                 return
+            if _download_open(db, plan):
+                plan.library_status = plan.notify_status = DEFERRED
+                db.commit()
+                if plan.journey_id:
+                    journeys.refresh(db, plan.journey_id)
+                return
+            group = ([p for p in db.query(PipelinePlan).filter(PipelinePlan.download_id == plan.download_id,
+                                                                PipelinePlan.file_id.isnot(None))]
+                     if plan.download_id else [plan])
             settings = {s.key: s.value for s in db.query(Setting).all()}
             has_server = any(settings.get(f"{s}_enabled", "false").lower() == "true"
                              for s in ("plex", "jellyfin"))
             if has_server:
                 from .media_servers import trigger_media_refresh
                 asyncio.run(trigger_media_refresh(settings))
-            plan.library_status = "done" if has_server else "skipped"
+            library = "done" if has_server else "skipped"
 
             url = settings.get("apprise_url", "")
             from .webpush import has_subscribers
+            notified = "skipped"
             if url or has_subscribers():
+                ids = [p.file_id for p in group]
                 saved = db.execute(text(
-                    "SELECT COALESCE(SUM(saved_bytes),0) FROM media_jobs WHERE file_id=:f AND journey_id=:j"
-                ), {"f": plan.file_id, "j": plan.journey_id}).scalar() or 0
+                    "SELECT COALESCE(SUM(saved_bytes),0) FROM media_jobs WHERE journey_id=:j AND file_id IN ("
+                    + ",".join(str(int(i)) for i in ids) + ")"), {"j": plan.journey_id}).scalar() or 0
                 steps = ", ".join(ACTION_LABEL[a["type"]].lower() for a in json.loads(plan.actions))
-                row = store.get_file(plan.file_id)
-                name = row["filename"] if row else "file"
-                body = f"🎬 {name}: {steps} done" + (f", saved {saved / 1e9:.2f} GB" if saved else "")
+                done = sum(1 for p in group if p.status == "done")
+                bad = len(group) - done
+                if len(group) > 1:
+                    title = db.execute(text("SELECT title FROM journeys WHERE id=:j"), {"j": plan.journey_id}).scalar() \
+                        or "Download"
+                    body = (f"🎬 {title}: {done} of {len(group)} files — {steps} done"
+                            + (f", {bad} stopped or failed" if bad else "")
+                            + (f", saved {saved / 1e9:.2f} GB" if saved else ""))
+                else:
+                    row = store.get_file(plan.file_id)
+                    name = row["filename"] if row else "file"
+                    body = f"🎬 {name}: {steps} done" + (f", saved {saved / 1e9:.2f} GB" if saved else "")
                 from .apprise_notify import notify
                 notify(url, "MediaMate — Processing complete", body, url=f"/activity?open={plan.journey_id}")
-                plan.notify_status = "done"
-            else:
-                plan.notify_status = "skipped"
+                notified = "done"
+            for p in group:
+                p.library_status, p.notify_status = library, notified
             db.commit()
             if plan.journey_id:
                 journeys.refresh(db, plan.journey_id)
     except Exception:
         logger.exception("Pipeline finalize failed for plan %s", plan_id)
+
+
+def finish_deferred(bind) -> None:
+    """A season pack whose last files were cancelled or failed: send its one refresh
+    and notification now (run by tick and after cancelling)."""
+    with Session(bind=bind) as db:
+        waiting = [p for p in db.query(PipelinePlan).filter(PipelinePlan.library_status == DEFERRED)]
+        ready = {}
+        for p in waiting:
+            if p.download_id not in ready and not _download_open(db, p):
+                ready[p.download_id] = p.id
+    for plan_id in ready.values():
+        _finalize(bind, plan_id)
 
 
 def tick(bind=None) -> None:
@@ -515,6 +562,10 @@ def tick(bind=None) -> None:
             advance(bind, plan_id)
         except Exception:
             logger.exception("Pipeline tick failed for plan %s", plan_id)
+    try:
+        finish_deferred(bind)
+    except Exception:
+        logger.exception("Pipeline tick: finishing season packs failed")
 
 
 # ── Journey steps for plans ───────────────────────────────────────────────────
@@ -522,9 +573,13 @@ def tick(bind=None) -> None:
 def plan_steps(db: Session, journey_id: int) -> list[dict]:
     """Steps that a plan adds to its journey beyond the jobs it already created."""
     steps = []
-    for plan in (db.query(PipelinePlan).filter(PipelinePlan.journey_id == journey_id)
-                 .order_by(PipelinePlan.id).all()):
+    plans = (db.query(PipelinePlan).filter(PipelinePlan.journey_id == journey_id)
+             .order_by(PipelinePlan.id).all())
+    multi = len({p.file_id for p in plans if p.file_id}) > 1
+    tails: list[tuple[str, str, dict]] = []
+    for plan in plans:
         ref = {"type": "plan", "id": plan.id}
+        subject = journeys.subject_for(plan.file_id) if multi else None
         if plan.file_id is None:
             steps.append({"kind": "pipeline", "label": "Find files", "status": "failed",
                           "detail": plan.detail, "ref": ref})
@@ -544,15 +599,26 @@ def plan_steps(db: Session, journey_id: int) -> list[dict]:
             steps.append({"kind": "organise", "label": ACTION_LABEL["organise"], "status": "skipped",
                           "detail": plan.detail, "ref": ref})
         for action in actions[plan.next_index:]:
-            steps.append({"kind": action["type"], "label": ACTION_LABEL[action["type"]],
-                          "status": "skipped" if stopped else "pending",
+            label = ACTION_LABEL[action["type"]]
+            steps.append({"kind": action["type"], "label": f"{label} · {subject}" if subject else label,
+                          "subject": subject, "status": "skipped" if stopped else "pending",
                           "detail": f"Rule: {plan.rule_name}" if plan.rule_name else None,
                           "ref": ref})
         tail = "skipped" if stopped else "pending"
-        steps.append({"kind": "library", "label": "Library refresh",
-                      "status": plan.library_status or tail, "ref": ref})
-        steps.append({"kind": "notify", "label": "Notify",
-                      "status": plan.notify_status or tail, "ref": ref})
+        tails.append((plan.library_status or tail, plan.notify_status or tail, ref))
+    if tails:
+        # One refresh and one notification per journey, after its last file.
+        def merged(vals):
+            vals = ["pending" if v == DEFERRED else v for v in vals]
+            for state in ("running", "pending", "failed", "done"):
+                if state in vals:
+                    return state
+            return vals[-1]
+        ref = tails[-1][2]
+        steps.append({"kind": "library", "label": "Library refresh", "status": merged([t[0] for t in tails]),
+                      "detail": "After the last file" if multi and any(t[0] in ("pending", DEFERRED) for t in tails) else None,
+                      "ref": ref})
+        steps.append({"kind": "notify", "label": "Notify", "status": merged([t[1] for t in tails]), "ref": ref})
     return steps
 
 

@@ -60,6 +60,45 @@ function fmtLen(s?: number | null) {
   return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}:${String(sec).padStart(2, "0")}`;
 }
 
+/** The playing album's artwork, blurred and faint, behind the music library. Fades
+ *  between albums; nothing shows when nothing is playing or the album has no cover. */
+function NowPlayingBackdrop() {
+  const { current } = usePlayer();
+  const src = current?.hasCover ? api.music.coverUrl(current.albumId, null, 512) : null;
+  const [layers, setLayers] = useState<{ src: string; shown: boolean }[]>([]);
+  useEffect(() => {
+    setLayers((ls) => {
+      if (ls.length && ls[ls.length - 1].src === src) return ls;
+      const faded = ls.map((l) => ({ ...l, shown: false }));
+      return src ? [...faded.slice(-1), { src, shown: false }] : faded.slice(-1);
+    });
+  }, [src]);
+  // Cover only the page area (not the sidebar or header): match the <main> scroll box.
+  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  useEffect(() => {
+    const main = document.querySelector("main");
+    if (!main) return;
+    const measure = () => { const r = main.getBoundingClientRect(); setBox({ left: r.left, top: r.top, width: r.width, height: r.height }); };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(main);
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, []);
+  return (
+    <div aria-hidden className="pointer-events-none fixed -z-10 overflow-hidden" data-testid="now-playing-backdrop"
+         style={box ?? { inset: 0 }}>
+      {layers.map((l) => (
+        <img key={l.src} src={l.src} alt=""
+             onLoad={() => setLayers((ls) => ls.map((x) => (x.src === l.src ? { ...x, shown: true } : x)))}
+             onTransitionEnd={() => setLayers((ls) => ls.filter((x) => x.shown || x.src === src))}
+             className={`absolute inset-0 h-full w-full scale-125 object-cover blur-3xl saturate-150 transition-opacity duration-700 motion-reduce:transition-none ${l.shown && l.src === src ? "opacity-30 dark:opacity-40" : "opacity-0"}`} />
+      ))}
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-white/40 to-white/70 dark:via-gray-950/40 dark:to-gray-950/70" />
+    </div>
+  );
+}
+
 function Cover({ a, className, size = 320 }: { a: LibAlbum; className: string; size?: 96 | 160 | 320 | 512 }) {
   const [bad, setBad] = useState(false);
   if (!a.has_cover || bad) {
@@ -155,7 +194,8 @@ export default function MusicLibrary() {
   const noCover = shown.filter((a) => !a.has_cover);
 
   return (
-    <>
+    <div className="relative isolate">
+      <NowPlayingBackdrop />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <button className={ghost} disabled={status?.running} onClick={async () => {
           try { await api.music.libraryScan(); } catch (e) { say((e as Error).message); }
@@ -365,7 +405,7 @@ export default function MusicLibrary() {
       {toast && (
         <div role="status" className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-lg md:bottom-6 dark:bg-gray-100 dark:text-gray-900">{toast}</div>
       )}
-    </>
+    </div>
   );
 }
 

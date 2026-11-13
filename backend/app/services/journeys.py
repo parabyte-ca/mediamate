@@ -11,6 +11,8 @@ Two hooks keep journeys current without touching any existing call site:
   * services/media/store.py calls on_media_job_* as jobs are created and change.
 """
 import logging
+import os
+import re
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -141,14 +143,36 @@ def _download_steps(db: Session, dl: Download) -> list[dict]:
     return [found, download]
 
 
+def subject_for(file_id: int | None) -> str | None:
+    """A short name for one file of a multi-file journey: "S01E03" from the file name,
+    else the name itself (shortened)."""
+    if not file_id:
+        return None
+    from .media import store
+    row = store.get_file(file_id)
+    if row is None:
+        return None
+    m = re.search(r"\b[Ss](\d{1,2})[ ._-]?[Ee](\d{1,3})\b", row["filename"] or "")
+    if m:
+        return f"S{int(m.group(1)):02d}E{int(m.group(2)):02d}"
+    name = os.path.splitext(row["filename"] or "")[0]
+    return name if len(name) <= 28 else name[:26] + "…"
+
+
 def _job_steps(db: Session, journey_id: int, with_logs: bool) -> list[dict]:
     jobs = (db.query(MediaJob).filter(MediaJob.journey_id == journey_id)
             .order_by(MediaJob.id).all())
+    from ..models import PipelinePlan
+    files = {j.file_id for j in jobs} | {p.file_id for p in db.query(PipelinePlan.file_id)
+                                         .filter(PipelinePlan.journey_id == journey_id) if p.file_id}
+    multi = len(files) > 1
     steps = []
     for job in jobs:
         status = _JOB_STATUS.get(job.status or "", "pending")
+        label = _JOB_LABEL.get(job.job_type, job.job_type.title())
+        subject = subject_for(job.file_id) if multi else None
         step = {
-            "kind": job.job_type, "label": _JOB_LABEL.get(job.job_type, job.job_type.title()),
+            "kind": job.job_type, "label": f"{label} · {subject}" if subject else label, "subject": subject,
             "status": status, "progress": round(job.progress_pct or 0, 1),
             "detail": job.log_tail if status != "running" else None,
             "saved_bytes": job.saved_bytes or 0, "reason": job.reason,

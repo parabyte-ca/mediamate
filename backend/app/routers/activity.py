@@ -108,6 +108,35 @@ def cancel(journey_id: int, db: Session = Depends(get_db)):
     return {"ok": True, "msg": "Download cancelled"}
 
 
+@router.post("/{journey_id}/cancel-all")
+def cancel_all(journey_id: int, db: Session = Depends(get_db)):
+    """Stop everything still to do in this journey: running and waiting jobs, and the
+    remaining steps of its files' plans (a season pack's other episodes)."""
+    from ..models import PipelinePlan
+    from ..services import pipeline
+    from .media import _cancel_job_by_id
+    j = _get(db, journey_id)
+    jobs = db.query(MediaJob).filter(MediaJob.journey_id == j.id, MediaJob.status.in_(["queued", "running"])).all()
+    running = sum(1 for x in jobs if x.status == "running")
+    waiting = len(jobs) - running
+    plans = [p.id for p in db.query(PipelinePlan).filter(PipelinePlan.journey_id == j.id,
+                                                         PipelinePlan.status.in_(["waiting", "running"]))]
+    for plan_id in plans:                      # first, so finished jobs don't queue the next step
+        pipeline.cancel_plan(db.get_bind(), plan_id)
+    for x in jobs:
+        _cancel_job_by_id(x.id)
+    if not jobs and not plans:
+        raise HTTPException(status_code=409, detail="Nothing left to cancel")
+    parts = []
+    if running:
+        parts.append(f"{running} running")
+    if waiting:
+        parts.append(f"{waiting} waiting")
+    msg = f"Stopped {' and '.join(parts)} job{'' if running + waiting == 1 else 's'}" if parts else "Stopped the remaining steps"
+    journeys.refresh(db, j.id)
+    return {"ok": True, "msg": msg, "running": running, "waiting": waiting, "plans": len(plans)}
+
+
 @router.post("/{journey_id}/retry")
 def retry(journey_id: int, db: Session = Depends(get_db)):
     j = _get(db, journey_id)

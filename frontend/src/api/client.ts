@@ -582,6 +582,8 @@ export type StepStatus = "pending" | "running" | "done" | "failed" | "cancelled"
 export interface JourneyStep {
   kind: "found" | "download" | "encode" | "split" | "trim" | string;
   label: string;
+  /** Which file of a multi-file journey (season pack), e.g. "S01E03". */
+  subject?: string | null;
   status: StepStatus;
   progress?: number;
   speed?: number | null;
@@ -1109,6 +1111,7 @@ export const api = {
     get: (id: number) => req<Journey>(`/activity/${id}`),
     stats: () => req<ActivityStats>("/activity/stats"),
     cancel: (id: number) => req<{ ok: boolean; msg: string }>(`/activity/${id}/cancel`, { method: "POST" }),
+    cancelAll: (id: number) => req<{ ok: boolean; msg: string }>(`/activity/${id}/cancel-all`, { method: "POST" }),
     retry: (id: number) => req<{ ok: boolean; msg: string }>(`/activity/${id}/retry`, { method: "POST" }),
     remove: (id: number) => req<{ ok: boolean }>(`/activity/${id}`, { method: "DELETE" }),
     clearFinished: () => req<{ ok: boolean; cleared: number }>("/activity/clear-finished", { method: "POST" }),

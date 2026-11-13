@@ -171,8 +171,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   return (
     <Ctx.Provider value={value}>
       {children}
-      {current && !expanded && <PlayerBar pos={pos} dur={dur || current.duration || 0} onSeek={seek} onOpen={() => setExpanded(true)} />}
-      {current && expanded && <NowPlaying pos={pos} dur={dur || current.duration || 0} onSeek={seek} onClose={() => setExpanded(false)} />}
+      {current && <PlayerBar pos={pos} dur={dur || current.duration || 0} onSeek={seek} onOpen={() => setExpanded(true)} />}
+      {current && <NowPlaying open={expanded} pos={pos} dur={dur || current.duration || 0} onSeek={seek} onClose={() => setExpanded(false)} />}
     </Ctx.Provider>
   );
 }
@@ -224,61 +224,83 @@ function Art({ t, size, className }: { t: QueueTrack; size: 96 | 512; className:
     : <div className={`flex shrink-0 items-center justify-center bg-gray-100 dark:bg-gray-800 ${className}`}><Disc3 className="h-1/3 w-1/3 text-gray-400" /></div>;
 }
 
-/** The full player: large artwork, big controls and the album's tracks. Opens from the bar. */
-function NowPlaying({ pos, dur, onSeek, onClose }: { pos: number; dur: number; onSeek: (t: number) => void; onClose: () => void }) {
+/** The full player: large artwork, big controls and the album's tracks. Slides up from the
+ *  bar and back down; the artwork and controls stay put while the track list scrolls. */
+function NowPlaying({ open, pos, dur, onSeek, onClose }: { open: boolean; pos: number; dur: number; onSeek: (t: number) => void; onClose: () => void }) {
   const { current, playing, toggle, next, prev, jump, stop, queue, index } = usePlayer();
   const closeRef = useRef<HTMLButtonElement>(null);
-  const touch = useRef<number | null>(null);
+  const listRef = useRef<HTMLOListElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  // Closed: off-screen and out of the tab order (React 18's types don't know "inert").
+  useEffect(() => { sheetRef.current?.toggleAttribute("inert", !open); }, [open]);
+  const start = useRef<number | null>(null);
+  const [drag, setDrag] = useState(0);
+  // Keep the latest handlers without re-running the open effect on every playback tick.
+  const handlers = useRef({ onClose, toggle });
+  handlers.current = { onClose, toggle };
   useEffect(() => {
-    closeRef.current?.focus();
+    if (!open) return;
+    closeRef.current?.focus({ preventScroll: true });
+    listRef.current?.querySelector<HTMLElement>('[aria-current="true"]')?.scrollIntoView({ block: "nearest" });
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      else if (e.key === " " && (e.target as HTMLElement)?.tagName !== "INPUT") { e.preventDefault(); toggle(); }
+      if (e.key === "Escape") handlers.current.onClose();
+      else if (e.key === " " && (e.target as HTMLElement)?.tagName !== "INPUT") { e.preventDefault(); handlers.current.toggle(); }
     };
     window.addEventListener("keydown", onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prevOverflow; };
-  }, [onClose, toggle]);
+  }, [open]);
   if (!current) return null;
   const round = "flex items-center justify-center rounded-full text-gray-800 hover:bg-gray-100 disabled:opacity-30 dark:text-gray-100 dark:hover:bg-white/10";
+  // Drag down on the top part (not the track list) to close; the sheet follows the finger.
+  const grab = {
+    onTouchStart: (e: React.TouchEvent) => { start.current = e.touches[0].clientY; },
+    onTouchMove: (e: React.TouchEvent) => { if (start.current !== null) setDrag(Math.max(0, e.touches[0].clientY - start.current)); },
+    onTouchEnd: () => { if (drag > 100) onClose(); start.current = null; setDrag(0); },
+  };
   return (
-    <div role="dialog" aria-modal="true" aria-label="Now playing"
-         className="fixed inset-0 z-[70] flex flex-col bg-white dark:bg-gray-950"
-         onTouchStart={(e) => { touch.current = e.touches[0].clientY; }}
-         onTouchEnd={(e) => { if (touch.current !== null && e.changedTouches[0].clientY - touch.current > 120) onClose(); touch.current = null; }}>
-      <div className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),0.75rem)]">
-        <button ref={closeRef} className={`${round} h-11 w-11`} onClick={onClose} aria-label="Close the player"><ChevronDown className="h-7 w-7" /></button>
-        <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Now playing</span>
-        <button className={`${round} h-11 w-11`} onClick={stop} aria-label="Stop and close"><X className="h-6 w-6" /></button>
-      </div>
-      <div className="mx-auto flex w-full min-h-0 max-w-md flex-1 flex-col overflow-y-auto px-6 pb-[max(env(safe-area-inset-bottom),1rem)]">
-        <Art t={current} size={512} className="mx-auto mt-4 aspect-square w-full max-w-[22rem] rounded-2xl shadow-xl" />
-        <div className="mt-6 min-w-0 text-center">
-          <p className="truncate text-xl font-semibold text-gray-900 dark:text-gray-50" data-testid="now-playing-large">{current.title}</p>
-          <p className="truncate text-sm text-gray-500 dark:text-gray-400">{[current.artist, current.album].filter(Boolean).join(" · ")}</p>
+    <div role="dialog" aria-modal="true" aria-label="Now playing" aria-hidden={!open} ref={sheetRef}
+         data-open={open ? "true" : "false"}
+         className={`fixed inset-0 z-[70] flex flex-col bg-white will-change-transform dark:bg-gray-950 ${drag ? "" : "transition-transform duration-200 ease-out motion-reduce:transition-none"} ${open ? "" : "pointer-events-none"}`}
+         style={{ transform: open ? `translateY(${drag}px)` : "translateY(100%)" }}>
+      <div className="shrink-0" {...grab}>
+        <div className="flex items-center justify-between px-4 pt-[max(env(safe-area-inset-top),0.75rem)]">
+          <button ref={closeRef} className={`${round} h-11 w-11`} onClick={onClose} aria-label="Close the player"><ChevronDown className="h-7 w-7" /></button>
+          <span className="text-xs font-medium uppercase tracking-wide text-gray-500">Now playing</span>
+          <button className={`${round} h-11 w-11`} onClick={stop} aria-label="Stop and close"><X className="h-6 w-6" /></button>
         </div>
-        <div className="mt-5">
-          <input type="range" min={0} max={Math.max(1, Math.floor(dur))} value={Math.min(Math.floor(pos), Math.floor(dur) || 0)}
-                 onChange={(e) => onSeek(Number(e.target.value))} aria-label="Position" className="h-2 w-full accent-blue-600" />
-          <div className="mt-1 flex justify-between text-xs tabular-nums text-gray-500">
-            <span>{fmtClock(pos)}</span><span>{index + 1} of {queue.length}</span><span>{fmtClock(dur)}</span>
+        <div className="mx-auto w-full max-w-md px-6">
+          <Art t={current} size={512} className="mx-auto mt-3 aspect-square w-full max-w-[min(22rem,36vh)] rounded-2xl shadow-xl" />
+          <div className="mt-4 min-w-0 text-center">
+            <p className="truncate text-xl font-semibold text-gray-900 dark:text-gray-50" data-testid="now-playing-large">{current.title}</p>
+            <p className="truncate text-sm text-gray-500 dark:text-gray-400">{[current.artist, current.album].filter(Boolean).join(" · ")}</p>
+          </div>
+          <div className="mt-4">
+            <input type="range" min={0} max={Math.max(1, Math.floor(dur))} value={Math.min(Math.floor(pos), Math.floor(dur) || 0)}
+                   onChange={(e) => onSeek(Number(e.target.value))} onTouchStart={(e) => e.stopPropagation()}
+                   aria-label="Position" className="h-2 w-full accent-blue-600" />
+            <div className="mt-1 flex justify-between text-xs tabular-nums text-gray-500">
+              <span>{fmtClock(pos)}</span><span>{index + 1} of {queue.length}</span><span>{fmtClock(dur)}</span>
+            </div>
+          </div>
+          <div className="mt-3 flex items-center justify-center gap-6 pb-3">
+            <button className={`${round} h-16 w-16`} onClick={prev} aria-label="Previous track"><SkipBack className="h-8 w-8" /></button>
+            <button className="flex h-20 w-20 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700"
+                    onClick={toggle} aria-label={playing ? "Pause" : "Play"}>
+              {playing ? <Pause className="h-9 w-9" /> : <Play className="ml-1 h-9 w-9" />}
+            </button>
+            <button className={`${round} h-16 w-16`} onClick={next} disabled={index + 1 >= queue.length} aria-label="Next track"><SkipForward className="h-8 w-8" /></button>
           </div>
         </div>
-        <div className="mt-4 flex items-center justify-center gap-6">
-          <button className={`${round} h-16 w-16`} onClick={prev} aria-label="Previous track"><SkipBack className="h-8 w-8" /></button>
-          <button className="flex h-20 w-20 items-center justify-center rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700"
-                  onClick={toggle} aria-label={playing ? "Pause" : "Play"}>
-            {playing ? <Pause className="h-9 w-9" /> : <Play className="ml-1 h-9 w-9" />}
-          </button>
-          <button className={`${round} h-16 w-16`} onClick={next} disabled={index + 1 >= queue.length} aria-label="Next track"><SkipForward className="h-8 w-8" /></button>
-        </div>
-        {queue.length > 1 && (
-          <ol className="mt-6 divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-800 dark:border-gray-800" aria-label="Tracks">
+      </div>
+      {queue.length > 1 && (
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-gray-200 dark:border-gray-800" data-testid="track-list">
+          <ol ref={listRef} className="mx-auto w-full max-w-md divide-y divide-gray-100 px-4 pb-[max(env(safe-area-inset-bottom),1rem)] dark:divide-gray-800" aria-label="Tracks">
             {queue.map((t, i) => (
               <li key={t.id}>
                 <button onClick={() => jump(i)} aria-current={i === index ? "true" : undefined}
-                        className={`flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm ${i === index ? "font-semibold text-blue-600 dark:text-blue-400" : "text-gray-800 dark:text-gray-200"}`}>
+                        className={`flex w-full items-center gap-3 px-2 py-3 text-left text-sm ${i === index ? "font-semibold text-blue-600 dark:text-blue-400" : "text-gray-800 dark:text-gray-200"}`}>
                   <span className="w-5 shrink-0 text-right tabular-nums text-xs text-gray-400">{i + 1}</span>
                   <span className="min-w-0 flex-1 truncate">{t.title}</span>
                   {t.duration ? <span className="shrink-0 tabular-nums text-xs text-gray-400">{fmtClock(t.duration)}</span> : null}
@@ -286,8 +308,8 @@ function NowPlaying({ pos, dur, onSeek, onClose }: { pos: number; dur: number; o
               </li>
             ))}
           </ol>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,19 +1,24 @@
 import { useState, useRef, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowDownUp,
+  Clapperboard,
   Clock,
+  Compass,
   Download,
   ExternalLink,
   Loader2,
   Plus,
   Search as SearchIcon,
+  Music,
   Shield,
   Users,
   X,
 } from "lucide-react";
-import { api, type DownloadPath, type DuplicateCheckResult, type TorrentResult, type WatchlistCreate } from "../api/client";
+import { api, type BrowseMovie, type BrowseShow, type DownloadPath, type DuplicateCheckResult, type TorrentResult, type WatchlistCreate } from "../api/client";
+import MusicSearch from "../components/MusicSearch";
+import { AddShowDialog, MovieCard, ShowCard, useAddMovie } from "../components/TitleCards";
 
 // ── Search history ────────────────────────────────────────────────────────────
 
@@ -279,7 +284,53 @@ function WatchlistModal({
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+const TYPE_KEY = "mm-search-type";
+
+/** Search finds something by name ("I know what I want"); Browse is for discovering.
+ *  Two tabs: Shows & movies (matching titles to add, then downloads) and Music. */
 export default function Search() {
+  const [params, setParams] = useSearchParams();
+  const type = params.get("type") === "music" ? "music" : "video";
+  // Remember the tab; a link with a query (e.g. "Find now" on a movie) decides for itself.
+  useEffect(() => {
+    if (params.get("type") || params.get("q")) return;
+    let saved: string | null = null;
+    try { saved = localStorage.getItem(TYPE_KEY); } catch { /* private mode */ }
+    if (saved === "music") setParams({ type: "music" }, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!params.get("type") && !params.get("q") && type === "video") return;   // bare /search: keep the saved tab
+    try { localStorage.setItem(TYPE_KEY, type); } catch { /* private mode */ }
+  }, [type]); // eslint-disable-line react-hooks/exhaustive-deps
+  const setType = (t: "video" | "music") => {
+    try { localStorage.setItem(TYPE_KEY, t); } catch { /* private mode */ }
+    setParams(t === "music" ? { type: "music" } : {}, { replace: true });
+  };
+  return (
+    <div className="px-4 py-6 sm:px-6">
+      <div className="mb-5 flex flex-wrap items-end gap-3">
+        <div className="mr-auto">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Search</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {type === "music" ? "Find an artist or album: play what you have, follow artists and add albums."
+              : "Find a show or movie by name: add it to your watchlist, or grab a download now."}
+          </p>
+        </div>
+        <div className="inline-flex rounded-lg border border-gray-200 p-0.5 dark:border-gray-700" role="tablist" aria-label="Search">
+          {([["video", "Shows & movies", Clapperboard], ["music", "Music", Music]] as const).map(([id, label, Icon]) => (
+            <button key={id} role="tab" aria-selected={type === id} onClick={() => setType(id)}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm ${type === id ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"}`}>
+              <Icon className="h-4 w-4" />{label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {type === "music" ? <MusicSearch /> : <TorrentSearch />}
+    </div>
+  );
+}
+
+function TorrentSearch() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQ = searchParams.get("q") ?? "";
 
@@ -303,6 +354,26 @@ export default function Search() {
   const [searchHistory, setSearchHistory] = useState<string[]>(loadHistory);
   const [showHistory,   setShowHistory]   = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [titles,        setTitles]        = useState<{ q: string; shows: BrowseShow[]; movies: BrowseMovie[] } | null>(null);
+  const [showTarget,    setShowTarget]    = useState<BrowseShow | null>(null);
+  const titleReq = useRef(0);
+  const movieAdd = useAddMovie((tmdbId, wid) => setTitles((t) => t && {
+    ...t, movies: t.movies.map((m) => m.tmdb_id === tmdbId ? { ...m, on_watchlist: true, watchlist_id: wid } : m) }));
+
+  /** Matching shows (TVMaze) and movies (TMDB, when there's a key), shown above the downloads. */
+  const loadTitles = (q: string) => {
+    const id = ++titleReq.current;
+    const bare = q.replace(/\bS\d{1,2}(E\d{1,3})?\b.*$/i, "").trim() || q;   // "Show S02E03" → "Show"
+    if (bare.length < 2) { setTitles(null); return; }
+    Promise.allSettled([api.browse.get(bare), api.browse.movies("popular", bare)]).then(([s, m]) => {
+      if (id !== titleReq.current) return;
+      setTitles({
+        q: bare,
+        shows: s.status === "fulfilled" ? s.value.shows.slice(0, 4) : [],
+        movies: m.status === "fulfilled" && !m.value.need_key ? m.value.movies.slice(0, 4) : [],
+      });
+    });
+  };
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -312,6 +383,7 @@ export default function Search() {
     setLoading(true);
     setError(null);
     setShowHistory(false);
+    loadTitles(q);
     try {
       const [res, p] = await Promise.all([
         api.search(q, indexer, quality, codec, filterAdult),
@@ -389,12 +461,10 @@ export default function Search() {
       return b.seeds - a.seeds;
     });
 
+  const hasTitles = !!titles && (titles.shows.length > 0 || titles.movies.length > 0);
+
   return (
-    <div className="px-4 py-6 sm:px-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Search Torrents</h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Find torrents and send them straight to qBittorrent.</p>
-      </div>
+    <div>
 
       {/* Search bar */}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row">
@@ -519,7 +589,24 @@ export default function Search() {
         </div>
       )}
 
+      {/* Titles: add to the watchlist */}
+      {hasTitles && (
+        <section className="mb-6" aria-label="Titles">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Titles</h2>
+          {movieAdd.error && <p role="alert" className="mb-2 text-sm text-red-600 dark:text-red-400">{movieAdd.error}</p>}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {titles!.shows.map((s) => <ShowCard key={`s${s.tvmaze_id}`} show={s} onAdd={setShowTarget} />)}
+            {titles!.movies.map((m) => (
+              <MovieCard key={`m${m.tmdb_id}`} movie={m} adding={movieAdd.adding === m.tmdb_id} onAdd={movieAdd.add} />
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Results */}
+      {hasTitles && results.length > 0 && (
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Downloads</h2>
+      )}
       {results.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm">
           <div className="border-b border-gray-100 dark:border-gray-800 px-4 py-3 text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
@@ -590,13 +677,16 @@ export default function Search() {
       {!loading && results.length === 0 && query && !error && (
         <div className="py-16 text-center text-gray-400 dark:text-gray-600">
           <SearchIcon className="mx-auto mb-3 h-10 w-10 opacity-30" />
-          <p>No results found. Try a different query or indexer.</p>
+          <p>No downloads found. Try a different query or source.</p>
         </div>
       )}
       {!query && (
         <div className="py-16 text-center text-gray-400 dark:text-gray-600">
           <SearchIcon className="mx-auto mb-3 h-10 w-10 opacity-30" />
-          <p className="text-sm">Type something above and press Search.</p>
+          <p className="text-sm">Type a show or movie and press Search.</p>
+          <Link to="/browse" className="mt-3 inline-flex items-center gap-1.5 text-sm text-blue-600 hover:underline dark:text-blue-400">
+            <Compass className="h-4 w-4" />Not sure what you want? Browse what's airing
+          </Link>
         </div>
       )}
 
@@ -614,6 +704,15 @@ export default function Search() {
             setDupWarning(null);
           }}
         />
+      )}
+      {showTarget && (
+        <AddShowDialog show={showTarget} onClose={() => setShowTarget(null)}
+          onAdded={() => {
+            const name = showTarget.name;
+            setShowTarget(null);
+            setTitles((t) => t && { ...t, shows: t.shows.map((s) => s.tvmaze_id === showTarget.tvmaze_id ? { ...s, on_watchlist: true } : s) });
+            showToast(`Added ${name}`);
+          }} />
       )}
       {wlTarget && (
         <WatchlistModal result={wlTarget} paths={paths} defaultCodec={codec} onClose={() => setWlTarget(null)} onConfirm={handleWatchlist} />

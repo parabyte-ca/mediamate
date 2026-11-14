@@ -130,8 +130,12 @@ export default function CommandPalette() {
     const list: Command[] = [];
     const query = q.trim();
     if (query) {
-      list.push({ id: "search", group: "Search", label: `Search torrents for “${query}”`, icon: Search,
+      list.push({ id: "search", group: "Search", label: `Search shows & movies for “${query}”`, icon: Search,
                   run: go(`/search?q=${encodeURIComponent(query)}`) });
+      if (query.length >= 2) {
+        list.push({ id: "search-music", group: "Search", label: `Search music for “${query}”`, icon: Search,
+                    run: go(`/search?type=music&q=${encodeURIComponent(query)}`) });
+      }
     }
     for (const [key, p] of Object.entries(GO_KEYS)) {
       list.push({ id: `go-${p.to}`, group: "Go to", label: p.label, hint: `g ${key}`, icon: p.icon, run: go(p.to) });

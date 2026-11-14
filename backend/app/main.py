@@ -5,7 +5,7 @@ import pathlib
 import secrets
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -149,6 +149,23 @@ app.add_middleware(
 app.add_middleware(AuthMiddleware)
 # Outermost: no JSON response leaves with a secret in it (security audit 2)
 app.add_middleware(ScrubMiddleware)
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, exc: Exception):
+    """Anything a route didn't handle: say what went wrong instead of a bare
+    "HTTP 500", with any secret or credential in the message masked."""
+    from fastapi.responses import JSONResponse
+    from sqlalchemy.exc import OperationalError
+    from .middleware import scrub
+    from .services.secret_settings import scrub_urls
+    logging.getLogger("app.errors").exception("Unhandled error on %s %s", request.method, request.url.path)
+    if isinstance(exc, OperationalError) and "locked" in str(exc).lower():
+        return JSONResponse(status_code=503, content={
+            "detail": "MediaMate is busy saving something else (a scan or download). Try again in a moment."})
+    text = str(exc).strip().splitlines()[0][:300] if str(exc).strip() else ""
+    msg = scrub.clean(scrub_urls(f"{type(exc).__name__}: {text}" if text else type(exc).__name__))
+    return JSONResponse(status_code=500, content={"detail": f"Something went wrong ({msg}). Details are in the MediaMate log."})
 
 app.include_router(health.router)  # no auth, must be registered first
 app.include_router(auth.router, prefix="/api")

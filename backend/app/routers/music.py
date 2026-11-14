@@ -85,7 +85,11 @@ def list_albums(item_id: int, db: Session = Depends(get_db)):
 @router.post("/watchlist/{item_id}/albums/refresh")
 def refresh_albums(item_id: int, db: Session = Depends(get_db)):
     item = _artist(db, item_id)
-    return {"new": music.refresh_albums(db, item, force=True), "albums": music.summary(db, item)}
+    try:
+        new = music.refresh_albums(db, item, force=True)
+    except musicbrainz.MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz is unavailable right now ({exc}). Try again in a moment.")
+    return {"new": new, "albums": music.summary(db, item)}
 
 
 @router.patch("/music/albums/{album_id}")

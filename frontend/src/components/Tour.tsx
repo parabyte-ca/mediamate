@@ -35,7 +35,7 @@ const ALL_STEPS: Step[] = [
   {
     targets: ["nav-search"],
     title: "Search",
-    body: "Look up a show or movie, then pick a result to download it.",
+    body: "Look up a show, movie or music by name. Add it to your watchlist, play what you have, or grab a download.",
   },
   {
     targets: ["nav-watchlist"],

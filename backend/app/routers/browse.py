@@ -122,3 +122,57 @@ def browse_music_add(body: dict, request: Request, db: Session = Depends(get_db)
         raise HTTPException(status_code=409, detail="Already following")
     except musicbrainz.MusicBrainzUnavailable as exc:
         raise HTTPException(status_code=503, detail=f"MusicBrainz is unavailable right now ({exc})")
+
+
+# ── music search (Search → Music) ───────────────────────────────────────────
+
+_music_search_cache: dict[str, tuple[float, dict]] = {}
+MUSIC_SEARCH_CACHE_S = 600
+
+
+def _mb_music(q: str) -> dict:
+    """MusicBrainz artists and albums for a query, cached for 10 minutes."""
+    import time
+    from ..services import musicbrainz
+    key = q.lower()
+    hit = _music_search_cache.get(key)
+    if hit and time.monotonic() - hit[0] < MUSIC_SEARCH_CACHE_S:
+        return hit[1]
+    artists = musicbrainz.search_artists(q, limit=6)
+    albums = [a for a in musicbrainz.search_release_groups(None, None, text=q, limit=18)
+              if a.get("artist_mbids")]
+    out = {"artists": artists, "albums": albums}
+    _music_search_cache[key] = (time.monotonic(), out)
+    if len(_music_search_cache) > 200:
+        _music_search_cache.pop(next(iter(_music_search_cache)))
+    return out
+
+
+@router.get("/search/music")
+def search_music(q: str = "", db: Session = Depends(get_db)):
+    """Artists and albums (MusicBrainz) plus matches in your music library, each with
+    your status: following, wanted / downloading / in your library."""
+    from sqlalchemy import or_
+    from ..models import MusicLibAlbum
+    from ..services import music_discover, musicbrainz
+    query = q.strip()
+    if len(query) < 2:
+        raise HTTPException(status_code=400, detail="Type at least 2 letters")
+    like = f"%{query}%"
+    lib = (db.query(MusicLibAlbum)
+           .filter(or_(MusicLibAlbum.artist.ilike(like), MusicLibAlbum.title.ilike(like)))
+           .order_by(MusicLibAlbum.artist, MusicLibAlbum.year, MusicLibAlbum.title).limit(12).all())
+    library = [{"id": a.id, "artist": a.artist, "title": a.title, "year": a.year, "format": a.format,
+                "tracks": a.tracks, "has_cover": bool(a.cover),
+                "scanned_at": a.scanned_at.isoformat() if a.scanned_at else None} for a in lib]
+    out = {"q": query, "library": library, "artists": [], "albums": [], "mb_error": None}
+    try:
+        mb = _mb_music(query)
+    except musicbrainz.MusicBrainzUnavailable as exc:
+        out["mb_error"] = f"MusicBrainz is unavailable right now ({exc})"
+        return out
+    followed = {w.mbid: w.id for w in db.query(WatchlistItem).filter(WatchlistItem.kind == "artist") if w.mbid}
+    out["artists"] = [{**a, "following": a["mbid"] in followed, "watchlist_id": followed.get(a["mbid"])}
+                      for a in mb["artists"]]
+    out["albums"] = music_discover.flags(db, mb["albums"])
+    return out

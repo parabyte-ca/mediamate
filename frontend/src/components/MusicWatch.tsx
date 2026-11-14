@@ -169,12 +169,14 @@ const START: { id: "new" | "latest" | "all"; label: string; hint: string }[] = [
   { id: "all", label: "Everything", hint: "The whole back catalogue (can be a lot)." },
 ];
 
-export function AddArtistDialog({ paths, onClose, onAdded }: {
-  paths: DownloadPath[]; onClose: () => void; onAdded: (name: string) => void;
+/** Follow an artist. With `preset` (picked in Search → Music) the artist is already
+ *  chosen, so only the download options are left. */
+export function AddArtistDialog({ paths, onClose, onAdded, preset }: {
+  paths: DownloadPath[]; onClose: () => void; onAdded: (name: string) => void; preset?: MusicArtist;
 }) {
-  const [q, setQ] = useState("");
-  const [results, setResults] = useState<MusicArtist[] | null>(null);
-  const [pick, setPick] = useState<MusicArtist | null>(null);
+  const [q, setQ] = useState(preset?.name ?? "");
+  const [results, setResults] = useState<MusicArtist[] | null>(preset ? [preset] : null);
+  const [pick, setPick] = useState<MusicArtist | null>(preset ?? null);
   const [start, setStart] = useState<"new" | "latest" | "all">("new");
   const [eps, setEps] = useState(false);
   const [folder, setFolder] = useState<number | "">("");
@@ -213,7 +215,7 @@ export function AddArtistDialog({ paths, onClose, onAdded }: {
         </div>
         <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">New albums download in FLAC once they're out (MP3 320 if no FLAC turns up within two days).</p>
         <form onSubmit={search} className="flex gap-2">
-          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Artist name" aria-label="Artist name"
+          <input autoFocus={!preset} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Artist name" aria-label="Artist name"
                  className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100" />
           <button type="submit" disabled={busy || !q.trim()}
                   className="flex items-center gap-1 rounded-lg border border-gray-300 px-3 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800">

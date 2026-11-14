@@ -342,28 +342,42 @@ def taste(db) -> dict[str, float]:
     return {t: w / s for t, w in top.items()}
 
 
-def rank(db, rows: list[dict], for_you: bool) -> dict:
-    """Releases with your status on each, ranked for you (or as they came)."""
+def flags(db, rows: list[dict]) -> list[dict]:
+    """Copies of the releases with your status on each: following (the artist),
+    status (the album on your Watchlist), in_library and watchlist_id. No lookups."""
     from ..models import MusicAlbum, MusicLibAlbum, WatchlistItem
     from . import music
-    profile = taste(db)
-    counts, _names, followed = _yours(db)
-    owned = {}
-    for a in db.query(MusicLibAlbum).filter(MusicLibAlbum.artist.isnot(None)):
-        owned.setdefault((_name_key(a.artist), music._key(a.title)), a.format)
-    artists = {w.mbid: w for w in db.query(WatchlistItem).filter(WatchlistItem.kind == "artist") if w.mbid}
-    albums = {a.mbid: a for a in db.query(MusicAlbum)}
-    rated = ratings(db, [r["mbid"] for r in rows])
+    owned = set()
+    for a in db.query(MusicLibAlbum.artist, MusicLibAlbum.title).filter(MusicLibAlbum.artist.isnot(None)):
+        owned.add((_name_key(a.artist), music._key(a.title)))
+    artists = {w.mbid: w.id for w in db.query(WatchlistItem).filter(WatchlistItem.kind == "artist") if w.mbid}
+    mbids = [r["mbid"] for r in rows]
+    albums = {a.mbid: a for a in db.query(MusicAlbum).filter(MusicAlbum.mbid.in_(mbids))} if mbids else {}
     out = []
     for r in rows:
         r = dict(r)
+        r.setdefault("artist_mbids", [])
+        r.setdefault("tags", [])
+        hit = next((artists[m] for m in r["artist_mbids"] if m in artists), None)
+        r["following"] = hit is not None
+        r["watchlist_id"] = hit
+        al = albums.get(r["mbid"])
+        r["status"] = al.status if al is not None and r["following"] else None
+        r["in_library"] = (_name_key(r["artist"]), music._key(r["title"])) in owned
+        out.append(r)
+    return out
+
+
+def rank(db, rows: list[dict], for_you: bool) -> dict:
+    """Releases with your status on each, ranked for you (or as they came)."""
+    profile = taste(db)
+    counts, _names, _followed = _yours(db)
+    rated = ratings(db, [r["mbid"] for r in rows])
+    out = []
+    for r in flags(db, rows):
         r["rating"], r["rating_votes"] = rated.get(r["mbid"], (None, 0))
         key = _name_key(r["artist"])
         mbid = (r["artist_mbids"] or [None])[0]
-        r["following"] = bool(set(r["artist_mbids"]) & followed)
-        al = albums.get(r["mbid"])
-        r["status"] = al.status if al is not None and r["following"] else None
-        r["in_library"] = (key, music._key(r["title"])) in owned
         various = not_an_artist(r["artist"], r["artist_mbids"])
         have = 0 if various else int(counts.get(key, 0))
         score, why = 0.0, None

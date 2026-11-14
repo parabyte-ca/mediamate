@@ -137,6 +137,16 @@ export interface BrowseRelease {
   rating: number | null; rating_votes: number;
 }
 
+/** Search → Music: your library, artists and albums (MusicBrainz) with your status. */
+export interface MusicSearchResult {
+  q: string;
+  library: { id: number; artist: string | null; title: string | null; year: number | null; format: string | null;
+             tracks: number; has_cover: boolean; scanned_at: string | null }[];
+  artists: (MusicArtist & { following: boolean; watchlist_id: number | null })[];
+  albums: (BrowseRelease & { watchlist_id: number | null })[];
+  mb_error: string | null;
+}
+
 export interface BrowseMusic {
   list: "new" | "popular"; for_you: boolean; releases: BrowseRelease[];
   taste: string[]; taste_ready: boolean; learning: number; building: boolean; ratings_pending: number;
@@ -967,6 +977,8 @@ export interface Insights {
 }
 
 export const api = {
+  searchMusic: (q: string) => req<MusicSearchResult>(`/search/music?q=${encodeURIComponent(q)}`),
+
   search(q: string, indexer = "all", quality?: string, codec = "x265", filterAdult = true) {
     const p = new URLSearchParams({ q, indexer, codec, filter_adult: String(filterAdult) });
     if (quality && quality !== "Any") p.set("quality", quality);

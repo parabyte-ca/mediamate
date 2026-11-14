@@ -186,8 +186,9 @@ info "Processing upgrade request id=$REQ_ID version=$REQ_VERSION by=$REQ_BY"
 
 # Write "running" status.
 STATUS_TMP="$STATUS_FILE.tmp.$$"
+STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 printf '{"state":"running","started_at":"%s","id":"%s","version":"%s"}\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$REQ_ID" "$REQ_VERSION" > "$STATUS_TMP"
+    "$STARTED_AT" "$REQ_ID" "$REQ_VERSION" > "$STATUS_TMP"
 mv -f "$STATUS_TMP" "$STATUS_FILE"
 
 # Create a fresh log file.
@@ -224,12 +225,12 @@ FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 if [[ $UPDATE_EXIT -eq 0 ]]; then
     info "Upgrade to $REQ_VERSION succeeded."
-    printf '{"state":"succeeded","finished_at":"%s","id":"%s","version":"%s"}\n' \
-        "$FINISHED_AT" "$REQ_ID" "$REQ_VERSION" > "$STATUS_TMP"
+    printf '{"state":"succeeded","started_at":"%s","finished_at":"%s","id":"%s","version":"%s"}\n' \
+        "$STARTED_AT" "$FINISHED_AT" "$REQ_ID" "$REQ_VERSION" > "$STATUS_TMP"
 else
     info "Upgrade to $REQ_VERSION FAILED (exit $UPDATE_EXIT)."
-    printf '{"state":"failed","message":"update.sh exited %d","finished_at":"%s","id":"%s","version":"%s"}\n' \
-        "$UPDATE_EXIT" "$FINISHED_AT" "$REQ_ID" "$REQ_VERSION" > "$STATUS_TMP"
+    printf '{"state":"failed","message":"update.sh exited %d","started_at":"%s","finished_at":"%s","id":"%s","version":"%s"}\n' \
+        "$UPDATE_EXIT" "$STARTED_AT" "$FINISHED_AT" "$REQ_ID" "$REQ_VERSION" > "$STATUS_TMP"
 fi
 
 mv -f "$STATUS_TMP" "$STATUS_FILE"

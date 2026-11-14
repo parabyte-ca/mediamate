@@ -563,6 +563,14 @@ export interface HelperInfo {
 
 export type UpgradePhase = "requested" | "started" | "downloading" | "restarting" | "done" | "failed";
 
+/** One step of an upgrade: reached, and when (from the upgrade log). */
+export interface UpgradeStage { key: string; label: string; at: string | null; reached: boolean }
+
+export interface UpgradeProgressInfo {
+  stages: UpgradeStage[]; stage: string; failed_at: string | null; last_line: string | null;
+  started_at: string | null; finished_at: string | null; version: string | null; action: "update" | "rollback";
+}
+
 export interface UpdateStatus {
   current_version: string;
   latest_release: LatestRelease | null;
@@ -574,6 +582,7 @@ export interface UpdateStatus {
   upgrade_message: string | null;
   /** How far a running upgrade has got (from the helper's log). */
   upgrade_phase: UpgradePhase | null;
+  upgrade_progress?: UpgradeProgressInfo | null;
   can_upgrade: boolean;
   previous_version: string | null;
   can_rollback: boolean;

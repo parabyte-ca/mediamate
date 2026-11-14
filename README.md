@@ -109,7 +109,7 @@ docker compose up -d
 
 Rolling back keeps your data; if you have used features added since, take a backup first (Settings → Data management). Delete the `SCREENMATE_VERSION` line from `.env` to follow `latest` again.
 
-You can also update from inside the app: the **Updates** page shows when a new release is available and can install it for you (see `scripts/upgrade-agent.sh`).
+You can also update from inside the app: the **Updates** page shows when a new release is available and can install it for you (see `scripts/upgrade-agent.sh`). While it runs, the page shows each step (requested, helper started, get the release, test the database, download, restart, health check, done), with how long each took. It also shows a bar that moves on your usual upgrade time, a timer and the latest log line. When the upgrade finishes it shows success or the step it failed at. A slim bar across the top of every page, and the percentage in the browser tab, follow the upgrade from anywhere in the app, even while MediaMate restarts.
 
 Your data is stored in `./data/` and is not affected by updates.
 

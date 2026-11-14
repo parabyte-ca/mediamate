@@ -853,3 +853,57 @@ class TestUpgradeTimings:
             self._finish(db_session, "2.7.0", m)
         s = _status(db_session, upgrade_dir, "2.7.0")
         assert s["upgrade_estimate_seconds"] == 420 and s["upgrade_history_count"] == 2
+
+
+# ── stage-by-stage progress (the Netwatch-style tracker) ─────────────────────
+
+def _progress_folder(tmp_path, status=None, request=None, log=""):
+    import json as _json
+    if status is not None:
+        (tmp_path / "status.json").write_text(_json.dumps(status))
+    if request is not None:
+        (tmp_path / "request.json").write_text(_json.dumps(request))
+    (tmp_path / "upgrade.log").write_text(log)
+    return str(tmp_path)
+
+
+RUN_LOG = """2026-11-14T13:00:05Z ==> Pulling latest code (branch: main) ...
+2026-11-14T13:00:09Z ==> Checking out tag/version: v0.43.1 ...
+2026-11-14T13:00:10Z ==> Running pre-flight migration test ...
+2026-11-14T13:00:30Z ==> Pulling Docker image (0.43.1) ...
+Some docker output without a timestamp
+2026-11-14T13:01:40Z ==> Restarting container ...
+2026-11-14T13:01:45Z ==> Waiting for health check ...
+"""
+
+
+def test_progress_marks_each_stage_from_the_log(tmp_path):
+    from app.services import updater
+    folder = _progress_folder(tmp_path, {"state": "running", "started_at": "2026-11-14T13:00:00Z", "version": "0.43.1"},
+                              log=RUN_LOG)
+    p = updater.upgrade_progress(folder, "running", RUN_LOG)
+    by = {s["key"]: s for s in p["stages"]}
+    assert p["stage"] == "health" and p["failed_at"] is None
+    assert by["download"]["at"].startswith("2026-11-14T13:00:30") and by["restart"]["reached"]
+    assert not by["done"]["reached"] and p["last_line"] == "Waiting for health check ..."
+    assert p["started_at"].startswith("2026-11-14T13:00:00") and p["version"] == "0.43.1"
+
+
+def test_progress_success_and_failure(tmp_path):
+    from app.services import updater
+    ok = {"state": "succeeded", "started_at": "2026-11-14T13:00:00Z", "finished_at": "2026-11-14T13:02:10Z"}
+    p = updater.upgrade_progress(_progress_folder(tmp_path, ok, log=RUN_LOG), "succeeded", RUN_LOG)
+    assert p["stage"] == "done" and all(s["reached"] for s in p["stages"]) and p["finished_at"]
+    short = RUN_LOG.split("Pulling Docker")[0]
+    bad = {"state": "failed", "message": "update.sh exited 1", "finished_at": "2026-11-14T13:00:40Z"}
+    p = updater.upgrade_progress(_progress_folder(tmp_path, bad, log=short), "failed", short)
+    assert p["failed_at"] == "test"
+    assert p["started_at"].startswith("2026-11-14T13:00:05")      # older helper: first log line
+
+
+def test_progress_while_waiting_for_the_helper(tmp_path):
+    from app.services import updater
+    req = {"version": "0.43.1", "requested_at": "2026-11-14T12:59:00Z", "action": "rollback"}
+    p = updater.upgrade_progress(_progress_folder(tmp_path, request=req), "requested", "")
+    assert p["stage"] == "requested" and p["action"] == "rollback" and p["stages"][0]["at"]
+    assert updater.upgrade_progress(str(tmp_path), None, "") is None

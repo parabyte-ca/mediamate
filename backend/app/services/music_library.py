@@ -384,7 +384,9 @@ def scan(bind=None) -> dict:
                 for folder in _album_folders(r, skip):
                     if scan_folder(db, folder) is not None:
                         seen.add(folder)
-                db.commit()
+                    # Save each album as it's read: one save per folder of 1,000+ albums held
+                    # the database for minutes, and Want / Download presses failed meanwhile.
+                    db.commit()
             removed = 0
             for a in db.query(MusicLibAlbum).all():
                 # Not found by this scan: gone, outside the roots, a disc now read with its

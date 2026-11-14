@@ -50,7 +50,10 @@ def _get(path: str, **params) -> dict:
         raise MusicBrainzUnavailable("MusicBrainz is busy; try again in a moment")
     if not r.is_success:
         raise MusicBrainzUnavailable(f"HTTP {r.status_code}")
-    return r.json()
+    try:
+        return r.json()
+    except ValueError as exc:                     # an error page instead of data
+        raise MusicBrainzUnavailable("MusicBrainz sent an unreadable reply") from exc
 
 
 def rating(release_group_mbid: str) -> tuple[float | None, int]:

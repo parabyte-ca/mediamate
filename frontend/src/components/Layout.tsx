@@ -1,4 +1,5 @@
 import { PlayerProvider, PlayerSpacer } from "./MusicPlayer";
+import { UpdateBar } from "./UpdateBar";
 import { useState, useEffect } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -351,6 +352,7 @@ export default function Layout() {
       {/* ── Main content ────────────────────────────────────────────────────── */}
       {/* main-scroll: on mobile adds padding to clear the bottom tab bar     */}
       {/* + iOS safe area; on md+ resets to zero (see index.css)              */}
+      <UpdateBar />
       <main className="flex-1 overflow-y-auto overflow-x-hidden main-scroll">
         <div data-mobile-bar className="sticky top-0 z-30 flex items-center justify-center gap-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-950/90 px-4 py-2 backdrop-blur md:hidden">
           <PersonSwitcher compact />

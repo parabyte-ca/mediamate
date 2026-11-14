@@ -334,6 +334,71 @@ def derive_upgrade_phase(state: Optional[str], log: str) -> Optional[str]:
     return "started"
 
 
+# Stages of an upgrade, in order, with the update.sh log lines ("<UTC time> ==> …") that
+# show each was reached. "requested", "started" and "done" come from request.json and
+# status.json instead.
+UPGRADE_STAGES = (
+    ("requested", "Requested", None),
+    ("started", "Helper started", None),
+    ("code", "Get the release", re.compile(
+        r"^(Pulling latest code|Checking out tag/version|Deploying the published image|Rolling back to)")),
+    ("test", "Test the database", re.compile(r"^Running pre-flight migration test")),
+    ("download", "Download", re.compile(r"^(Pulling Docker image|Pulling latest Docker image|Building Docker image)")),
+    ("restart", "Restart", re.compile(r"^Restarting container")),
+    ("health", "Health check", re.compile(r"^Waiting for health check")),
+    ("done", "Done", None),
+)
+_LOG_LINE = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) (?:==> )?(.*)$")
+LAST_LINE_MAX = 160
+
+
+def _iso(dt: Optional[datetime]) -> Optional[str]:
+    return dt.isoformat() if dt else None
+
+
+def upgrade_progress(folder: str, state: Optional[str], log: str) -> Optional[dict]:
+    """Where an upgrade has got to: each stage with when it was reached (from the log),
+    the stage it failed at, the latest log line, and when it started and finished."""
+    if state is None:
+        return None
+    status = _read_json_file(os.path.join(folder, "status.json")) or {}
+    request = _read_json_file(os.path.join(folder, "request.json")) or {}
+    if state == "requested":
+        status = {}
+    reached: dict[str, Optional[datetime]] = {"requested": _parse_ts(request.get("requested_at"))}
+    lines = []
+    for raw in log.splitlines():
+        m = _LOG_LINE.match(raw.strip())
+        if m:
+            lines.append((_parse_ts(m[1]), m[2].strip()))
+    started = _parse_ts(status.get("started_at")) or (lines[0][0] if lines and status else None)
+    last_line = None
+    if status:
+        reached["started"] = started
+        for ts, text in lines:
+            if not text:
+                continue
+            last_line = text
+            for key, _label, pattern in UPGRADE_STAGES:
+                if pattern is not None and key not in reached and pattern.match(text):
+                    reached[key] = ts
+        if state == "succeeded":
+            reached["done"] = _parse_ts(status.get("finished_at"))
+    keys = [k for k, _, _ in UPGRADE_STAGES]
+    furthest = max((keys.index(k) for k in reached if k in keys), default=0)
+    return {
+        "stages": [{"key": k, "label": label, "at": _iso(reached.get(k)), "reached": i <= furthest}
+                   for i, (k, label, _) in enumerate(UPGRADE_STAGES)],
+        "stage": keys[furthest],
+        "failed_at": keys[furthest] if state == "failed" else None,
+        "last_line": (last_line or "")[:LAST_LINE_MAX] or None,
+        "started_at": _iso(started),
+        "finished_at": _iso(_parse_ts(status.get("finished_at"))) if state in ("succeeded", "failed") else None,
+        "version": _cap(status.get("version") or request.get("version"), 20) or None,
+        "action": "rollback" if request.get("action") == "rollback" or status.get("action") == "rollback" else "update",
+    }
+
+
 # ── Rate limit for "check now" ────────────────────────────────────────────────
 
 _last_manual_check: Optional[datetime] = None
@@ -452,8 +517,9 @@ def get_status(db, *, include_log: bool = False) -> dict:
         "upgrade_history_count": len(upgrade_durations(db)[-ESTIMATE_FROM:]),
     }
 
-    log = _read_log_tail(folder) if upgrade_state == "running" or include_log else ""
+    log = _read_log_tail(folder) if upgrade_state is not None or include_log else ""
     result["upgrade_phase"] = derive_upgrade_phase(upgrade_state, log)
+    result["upgrade_progress"] = upgrade_progress(folder, upgrade_state, log)
     if include_log:
         result["upgrade_log"] = log
 
@@ -593,6 +659,7 @@ def request_upgrade(db, version: str, requested_by: str, rollback: bool = False)
         "version": version,
         "requested_by": requested_by[:200],
         "requested_at": datetime.now(timezone.utc).isoformat(),
+        "action": "rollback" if rollback else "update",
     }
 
     os.makedirs(folder, exist_ok=True)

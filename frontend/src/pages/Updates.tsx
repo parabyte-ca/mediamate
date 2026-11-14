@@ -1,162 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Clock, Download, RefreshCw, Undo2, Terminal, Wifi, WifiOff } from "lucide-react";
-import { api, type UpdateStatus, type UpgradePhase } from "../api/client";
+import { api, type UpdateStatus } from "../api/client";
+import { UpdateProgress } from "../components/UpdateProgress";
+import { RECENT_MS, isActive, parseTs, readPending, writePending, type PendingUpgrade } from "../lib/updateProgress";
 import { marked } from "marked";
 
 marked.setOptions({ async: false });
-
-/** An upgrade started from this browser. MediaMate restarts during it, so the
- *  page keeps reconnecting until the new version answers (survives a refresh). */
-type Pending = { from: string; to: string; at: number; phase?: UpgradePhase };
-const PENDING_KEY = "sm-upgrade-pending";
-const PENDING_MAX_MS = 30 * 60 * 1000;
-
-function readPending(): Pending | null {
-  try {
-    const p = JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null") as Pending | null;
-    return p && Date.now() - p.at < PENDING_MAX_MS ? p : null;
-  } catch {
-    return null;
-  }
-}
-
-function writePending(p: Pending | null) {
-  try {
-    if (p) sessionStorage.setItem(PENDING_KEY, JSON.stringify(p));
-    else sessionStorage.removeItem(PENDING_KEY);
-  } catch { /* private mode: the page still works, it just forgets on refresh */ }
-}
-
-const vtag = (v: string) => (v.startsWith("v") ? v : `v${v}`);
-
-/** Past this, the page suggests looking at the upgrade log on the host. */
-const SLOW_MS = 15 * 60 * 1000;
-
-function elapsedText(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
-/** The steps an upgrade goes through, in order. */
-const STEPS: { phase: UpgradePhase; label: string }[] = [
-  { phase: "requested",   label: "Requested" },
-  { phase: "started",     label: "Helper started" },
-  { phase: "downloading", label: "Downloading" },
-  { phase: "restarting",  label: "Restarting" },
-  { phase: "done",        label: "Done" },
-];
-const stepIndex = (p?: UpgradePhase | null) => Math.max(0, STEPS.findIndex((s) => s.phase === p));
-/** The further of two phases, so the steps never go backwards. */
-const furthest = (a?: UpgradePhase | null, b?: UpgradePhase | null): UpgradePhase =>
-  (stepIndex(a) >= stepIndex(b) ? a : b) || "requested";
-
-/** How long the last upgrade on this device took, to estimate the next one. */
-const LAST_KEY = "sm-upgrade-last-ms";
-function readLastMs(): number | null {
-  try {
-    const v = Number(localStorage.getItem(LAST_KEY));
-    return v > 0 ? v : null;
-  } catch {
-    return null;
-  }
-}
-function writeLastMs(ms: number) {
-  try { localStorage.setItem(LAST_KEY, String(Math.round(ms))); } catch { /* not remembered */ }
-}
-/** The server's typical upgrade time, kept here too: while MediaMate restarts the
- *  page can't ask for it, and that's when the bar needs it most. */
-const TYPICAL_KEY = "sm-upgrade-typical";
-function readTypical(): { sec: number; n: number } | null {
-  try {
-    const v = JSON.parse(localStorage.getItem(TYPICAL_KEY) || "null");
-    return v && v.sec > 0 ? v : null;
-  } catch {
-    return null;
-  }
-}
-function writeTypical(sec?: number | null, n?: number) {
-  try {
-    if (sec && sec > 0) localStorage.setItem(TYPICAL_KEY, JSON.stringify({ sec, n: n ?? 1 }));
-  } catch { /* not remembered */ }
-}
-
-/** What an upgrade started here is doing: steps, an estimated bar and a timer. */
-function UpgradeProgress({ pending, everyMinutes, now, typicalSec, basedOn }: {
-  pending: Pending; everyMinutes: number; now: number; typicalSec?: number | null; basedOn?: number;
-}) {
-  const elapsed = now - pending.at;
-  const current = stepIndex(pending.phase);
-  if (!typicalSec) {
-    const kept = readTypical();
-    if (kept) { typicalSec = kept.sec; basedOn = kept.n; }
-  }
-  // Best: the typical (median) time of recent upgrades, kept by the server. Then the
-  // last one timed on this device. Without either: on average the helper waits half
-  // its interval, then ~3 min of work.
-  const last = typicalSec ? null : readLastMs();
-  const estimate = typicalSec ? typicalSec * 1000 : last ?? (everyMinutes / 2 + 3) * 60_000;
-  const basis = typicalSec
-    ? (basedOn ?? 0) > 1
-      ? `upgrades usually take ${elapsedText(estimate)} (last ${basedOn})`
-      : `last upgrade took ${elapsedText(estimate)}`
-    : last ? `last upgrade took ${elapsedText(last)}` : "first-time estimate";
-  const pct = Math.min(elapsed / estimate, 0.95);
-  const leftMin = Math.ceil((estimate - elapsed) / 60_000);
-  return (
-    <div className="space-y-4 w-full min-w-0">
-      <div className="flex items-baseline justify-between gap-3">
-        <p className="font-medium">Upgrading to {vtag(pending.to)}</p>
-        <p className="font-mono tabular-nums" aria-label="Time elapsed">{elapsedText(elapsed)}</p>
-      </div>
-
-      <ol className="grid grid-cols-5 gap-1" aria-label="Upgrade steps">
-        {STEPS.map((step, i) => {
-          const done = i < current;
-          const active = i === current;
-          return (
-            <li key={step.phase} className="flex flex-col items-center gap-1.5 text-center min-w-0"
-                aria-current={active ? "step" : undefined}>
-              <div className="flex items-center w-full">
-                <span className={`h-0.5 flex-1 ${i === 0 ? "invisible" : done || active ? "bg-blue-600 dark:bg-blue-400" : "bg-gray-300 dark:bg-gray-700"}`} />
-                <span className={`h-3 w-3 rounded-full shrink-0 ${
-                  done ? "bg-blue-600 dark:bg-blue-400"
-                  : active ? "bg-blue-600 dark:bg-blue-400 ring-4 ring-blue-600/20 dark:ring-blue-400/25 animate-pulse"
-                  : "bg-gray-300 dark:bg-gray-700"}`} />
-                <span className={`h-0.5 flex-1 ${i === STEPS.length - 1 ? "invisible" : done ? "bg-blue-600 dark:bg-blue-400" : "bg-gray-300 dark:bg-gray-700"}`} />
-              </div>
-              <span className={`text-[11px] leading-tight ${active ? "font-semibold" : "opacity-75"}`}>{step.label}</span>
-            </li>
-          );
-        })}
-      </ol>
-
-      <div className="space-y-1.5">
-        <div className="h-2 rounded-full bg-blue-100 dark:bg-blue-950 overflow-hidden" role="progressbar"
-             aria-label="Estimated progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct * 100)}>
-          <div className="h-full rounded-full bg-blue-600 dark:bg-blue-400 transition-[width] duration-1000 ease-linear"
-               style={{ width: `${pct * 100}%` }} />
-        </div>
-        <p className="text-xs opacity-80">
-          {elapsed < estimate
-            ? `About ${leftMin} min left`
-            : "Taking a little longer than usual…"}
-          {" · "}
-          {basis}
-        </p>
-      </div>
-
-      <p className="text-xs opacity-80">
-        MediaMate stops answering for a minute or two while it restarts. This page reconnects by itself.
-      </p>
-      {elapsed > SLOW_MS && (
-        <p className="text-xs opacity-90">
-          This is taking longer than usual. On the host, check{" "}
-          <code className="font-mono">tail -20 upgrade/upgrade.log</code>.
-        </p>
-      )}
-    </div>
-  );
-}
 
 function renderMarkdown(md: string): string {
   const result = marked.parse(md) as string;
@@ -191,50 +40,23 @@ export default function Updates() {
   const [showLog, setShowLog] = useState(false);
   const logRef = useRef<HTMLPreElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [pending, setPending] = useState<Pending | null>(readPending);
-  const [upgraded, setUpgraded] = useState<{ to: string; took: number } | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-
-  // Tick the upgrade timer once a second while an upgrade started here is under way.
-  useEffect(() => {
-    if (!pending) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [pending]);
+  const [pending, setPending] = useState<PendingUpgrade | null>(() => readPending());
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
       const s = await api.updates.status();
       setStatus(s);
-      writeTypical(s.upgrade_estimate_seconds, s.upgrade_history_count);
       setError(null);
       const p = readPending();
-      if (p) {
-        const done = s.current_version.replace(/^v/, "") === p.to.replace(/^v/, "");
-        if (done) {
-          const took = Date.now() - p.at;
-          writeLastMs(took);
-          setUpgraded({ to: p.to, took });
-        }
-        if (done || s.upgrade_state === "failed") {
-          writePending(null);
-          setPending(null);
-        } else {
-          const next = { ...p, phase: furthest(p.phase, s.upgrade_phase) };
-          writePending(next);
-          setPending(next);
-        }
+      // Finished (either way): the progress card shows the result from the server's view.
+      if (p && (s.upgrade_state === "succeeded" || s.upgrade_state === "failed")
+          && (s.upgrade_state === "failed" || s.current_version.replace(/^v/, "") === p.to.replace(/^v/, ""))) {
+        writePending(null);
+        setPending(null);
       }
     } catch (e) {
       setError((e as Error).message);
-      // Once the helper has started, losing MediaMate means it is restarting.
-      const p = readPending();
-      if (p && stepIndex(p.phase) >= stepIndex("started")) {
-        const next = { ...p, phase: furthest(p.phase, "restarting") };
-        writePending(next);
-        setPending(next);
-      }
     } finally {
       if (!quiet) setLoading(false);
     }
@@ -285,8 +107,8 @@ export default function Updates() {
     setConfirm(null);
     setUpgrading(true);
     setShowLog(true);
-    setUpgraded(null);
-    const p: Pending = { from: status?.current_version ?? "", to: version, at: Date.now(), phase: "requested" };
+    const p: PendingUpgrade = { from: status?.current_version ?? "", to: version, at: Date.now(),
+                                action: rollback ? "rollback" : "update" };
     writePending(p);
     setPending(p);
     try {
@@ -316,18 +138,24 @@ export default function Updates() {
   const inProgress = status?.upgrade_state === "requested" || status?.upgrade_state === "running";
   // While an upgrade started here is under way, losing the connection is expected.
   const reconnecting = !!pending && !!error;
-  const everyMinutes = status?.helper?.every_minutes || 5;
+  // The progress card: while an upgrade runs (or one started here is pending), and for a while after it finishes.
+  const finishedAt = parseTs(status?.upgrade_progress?.finished_at);
+  const showProgress = !!pending || isActive(status?.upgrade_state)
+    || (!!finishedAt && Date.now() - finishedAt < RECENT_MS);
+  const progressCard = (
+    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+      <UpdateProgress state={status?.upgrade_state} progress={status?.upgrade_progress}
+        estimateS={status?.upgrade_estimate_seconds} current={status?.current_version ?? ""}
+        offline={reconnecting || (!status && !!error)} message={status?.upgrade_message} />
+    </div>
+  );
 
   if (!status) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Updates</h1>
         <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 space-y-2">
-          {pending ? (
-            <div className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300">
-              <UpgradeProgress pending={pending} everyMinutes={everyMinutes} now={now} />
-            </div>
-          ) : (
+          {pending ? progressCard : (
             <>
               <div className="flex items-center gap-2 font-medium text-gray-900 dark:text-gray-100">
                 <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />
@@ -356,19 +184,7 @@ export default function Updates() {
         </button>
       </div>
 
-      {upgraded && (
-        <div className="flex items-start gap-3 rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 p-4 text-sm text-green-700 dark:text-green-400">
-          <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
-          Upgraded to {vtag(upgraded.to)} in {elapsedText(upgraded.took)}.
-        </div>
-      )}
-
-      {pending && (
-        <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 p-4 text-sm text-blue-700 dark:text-blue-300">
-          <UpgradeProgress pending={pending} everyMinutes={everyMinutes} now={now}
-                           typicalSec={status?.upgrade_estimate_seconds} basedOn={status?.upgrade_history_count} />
-        </div>
-      )}
+      {showProgress && progressCard}
 
       {error && !reconnecting && (
         <div className="flex items-start gap-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4 text-sm text-red-700 dark:text-red-400">

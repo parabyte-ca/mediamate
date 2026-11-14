@@ -158,7 +158,7 @@ export interface LibAlbum {
   id: number; folder: string; artist: string | null; title: string | null; year: number | null;
   format: string | null; tracks: number; size_bytes: number; duration_sec: number; has_cover: boolean;
   mb_release_group_id: string | null; issues: MusicIssue[]; rating: number | null; collections: string[];
-  plex_dirty: number; scanned_at: string | null;
+  plex_dirty: number; scanned_at: string | null; added_at: string | null;
 }
 
 export interface LibTrack {

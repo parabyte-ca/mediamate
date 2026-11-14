@@ -51,11 +51,22 @@ def move_to_trash(path: str) -> str:
     return dest
 
 
-def trash_stats() -> dict:
-    """Sum size and count of everything currently sitting in every media root's .trash."""
+def _roots(extra=()) -> list[str]:
+    """Media roots plus any extra folders (the music folders), each once."""
+    out, seen = [], set()
+    for r in [*config.MEDIA_PATHS, *extra]:
+        n = os.path.normpath(r)
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
+
+
+def trash_stats(extra_roots=()) -> dict:
+    """Sum size and count of everything in every media root's .trash (and extra_roots')."""
     size_bytes = 0
     file_count = 0
-    for root in config.MEDIA_PATHS:
+    for root in _roots(extra_roots):
         trash_dir = os.path.join(root.rstrip("/"), TRASH_DIRNAME)
         if not os.path.isdir(trash_dir):
             continue
@@ -69,13 +80,13 @@ def trash_stats() -> dict:
     return {"size_bytes": size_bytes, "file_count": file_count}
 
 
-def empty_trash() -> dict:
+def empty_trash(extra_roots=()) -> dict:
     """
-    Permanently delete everything in every media root's .trash, regardless of age.
-    Returns the size/count that was freed (computed before deletion).
+    Permanently delete everything in every media root's .trash (and extra_roots'),
+    regardless of age. Returns the size/count that was freed (computed before deletion).
     """
-    stats = trash_stats()
-    for root in config.MEDIA_PATHS:
+    stats = trash_stats(extra_roots)
+    for root in _roots(extra_roots):
         trash_dir = os.path.join(root.rstrip("/"), TRASH_DIRNAME)
         if not os.path.isdir(trash_dir):
             continue

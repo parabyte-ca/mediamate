@@ -172,6 +172,31 @@ def cover_in(folder: str) -> str | None:
     return imgs[0] if imgs else None
 
 
+def files_added(files: list[str]) -> datetime | None:
+    """When these files arrived: the newest modification time among them."""
+    times = []
+    for f in files:
+        try:
+            times.append(os.stat(f).st_mtime)
+        except OSError:
+            pass
+    return datetime.fromtimestamp(max(times), timezone.utc) if times else None
+
+
+def backfill_added(db) -> int:
+    """Albums scanned before "Recently added" existed get the time their files arrived."""
+    from ..models import MusicLibAlbum, MusicTrack
+    n = 0
+    for a in db.query(MusicLibAlbum).filter(MusicLibAlbum.added_at.is_(None)).all():
+        paths = [t.path for t in db.query(MusicTrack.path).filter(MusicTrack.album_id == a.id)]
+        a.added_at = files_added(paths) or a.scanned_at
+        n += 1
+        if n % 200 == 0:
+            db.commit()
+    db.commit()
+    return n
+
+
 def roots(db) -> list[str]:
     from ..models import DownloadPath, Setting
     from . import folders
@@ -256,6 +281,8 @@ def scan_folder(db, folder: str, tracks_info: list[dict] | None = None):
     issues = [i for i in json.loads(album.issues or "[]") if i == "duplicate"]
     album.issues = json.dumps(_issues(infos) + issues) if (_issues(infos) or issues) else None
     album.scanned_at = datetime.now(timezone.utc)
+    if album.added_at is None:
+        album.added_at = files_added(files)
     have = {t.path: t for t in db.query(MusicTrack).filter(MusicTrack.album_id == album.id)}
     for info in infos:
         row = have.pop(info["path"], None) or db.query(MusicTrack).filter(MusicTrack.path == info["path"]).first()

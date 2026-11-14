@@ -141,6 +141,7 @@ def _lib_album_out(a: MusicLibAlbum) -> dict:
             "issues": json.loads(a.issues or "[]"), "rating": a.rating,
             "collections": json.loads(a.collections or "[]"), "plex_dirty": a.plex_dirty,
             "scanned_at": a.scanned_at.isoformat() if a.scanned_at else None,
+            "added_at": (a.added_at or a.scanned_at).isoformat() if (a.added_at or a.scanned_at) else None,
             "upgrade_dismissed": a.upgrade_dismissed_at is not None}
 
 

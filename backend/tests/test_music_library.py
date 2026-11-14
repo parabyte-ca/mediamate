@@ -250,6 +250,30 @@ def test_tracks_table_cleared_with_album(root):
         assert db.query(MusicLibAlbum).count() == 0 and db.query(MusicTrack).count() == 0
 
 
+def test_added_date_is_when_the_files_arrived(root):
+    """'Recently added' sorts by when an album's files arrived, set once and kept on rescans."""
+    client, Session, music = root
+    old = album(music / "Old" / "Early (1990)", artist="Old", title="Early", n=2)
+    new = album(music / "New" / "Late (2020)", artist="New", title="Late", n=2)
+    for f in old.iterdir():
+        os.utime(f, (1_600_000_000, 1_600_000_000))           # 2020-09
+    for f in new.iterdir():
+        os.utime(f, (1_700_000_000, 1_700_000_000))           # 2023-11
+    ml.scan()
+    rows = {a["title"]: a for a in client.get("/api/music/library/albums").json()}
+    assert rows["Early"]["added_at"].startswith("2020-09") and rows["Late"]["added_at"].startswith("2023-11")
+    for f in old.iterdir():
+        os.utime(f, (1_750_000_000, 1_750_000_000))           # retagging later doesn't make it "new"
+    ml.scan()
+    rows = {a["title"]: a for a in client.get("/api/music/library/albums").json()}
+    assert rows["Early"]["added_at"].startswith("2020-09")
+    with Session() as db:                                       # albums from before: filled in once
+        db.query(MusicLibAlbum).update({MusicLibAlbum.added_at: None})
+        db.commit()
+        assert ml.backfill_added(db) == 2
+        assert all(a.added_at is not None for a in db.query(MusicLibAlbum))
+
+
 # ── covers ──────────────────────────────────────────────────────────────────
 
 JPEG = b"\xff\xd8\xff\xe0embedded"

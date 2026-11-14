@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { AlertTriangle, Stethoscope, Disc3, FileText, LayoutGrid, List as ListIcon, Star, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Share2, Tags, Upload, Wand2, X, UserPlus, UserCheck, ArrowUpCircle } from "lucide-react";
 import { api, type MusicDoctorKind, type AlbumTags, type CoverCandidate, type LibAlbum, type MusicBatch, type LibAlbumDetail, type MusicIssue, type TagRow } from "../api/client";
@@ -54,6 +55,40 @@ const ghost = `${btn} border border-gray-300 dark:border-gray-600 text-gray-700 
 const primary = `${btn} bg-blue-600 font-medium text-white hover:bg-blue-700`;
 
 const VIEW_KEY = "mm-music-view";
+const SORT_KEY = "mm-music-sort";
+
+/** Ways to order the music library (remembered on each device). */
+const SORTS = {
+  artist: "Artist A–Z",
+  title: "Album A–Z",
+  newest: "Release date, newest",
+  oldest: "Release date, oldest",
+  added: "Recently added",
+  rating: "Highest rated",
+  size: "Largest",
+} as const;
+type SortKey = keyof typeof SORTS;
+
+const byText = (x: string | null, y: string | null) =>
+  (x ?? "").localeCompare(y ?? "", undefined, { sensitivity: "base", numeric: true, ignorePunctuation: true });
+/** "The Beatles" sorts under B. */
+const artistKey = (a: string | null) => (a ?? "").replace(/^the\s+/i, "");
+
+function sortAlbums(list: LibAlbum[], key: SortKey): LibAlbum[] {
+  const byArtist = (a: LibAlbum, b: LibAlbum) =>
+    byText(artistKey(a.artist), artistKey(b.artist)) || (a.year ?? 9999) - (b.year ?? 9999) || byText(a.title, b.title);
+  const cmp: Record<SortKey, (a: LibAlbum, b: LibAlbum) => number> = {
+    artist: byArtist,
+    title: (a, b) => byText(a.title, b.title) || byArtist(a, b),
+    // Albums without a year go last either way.
+    newest: (a, b) => (b.year ?? -1) - (a.year ?? -1) || byArtist(a, b),
+    oldest: (a, b) => (a.year ?? 9999) - (b.year ?? 9999) || byArtist(a, b),
+    added: (a, b) => (b.added_at ?? "").localeCompare(a.added_at ?? "") || byArtist(a, b),
+    rating: (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || byArtist(a, b),
+    size: (a, b) => b.size_bytes - a.size_bytes || byArtist(a, b),
+  };
+  return [...list].sort(cmp[key]);
+}
 
 function fmtLen(s?: number | null) {
   if (!s) return "";
@@ -116,6 +151,10 @@ export default function MusicLibrary() {
   const [rating, setRating] = useState("");
   const [coll, setColl] = useState("");
   const [issue, setIssue] = useState("");
+  const [sort, setSortState] = useState<SortKey>(() => {
+    try { const v = localStorage.getItem(SORT_KEY); return v && v in SORTS ? (v as SortKey) : "artist"; } catch { return "artist"; }
+  });
+  const setSort = (v: SortKey) => { setSortState(v); try { localStorage.setItem(SORT_KEY, v); } catch { /* not remembered */ } };
   const [open, setOpen] = useState<number | null>(() => Number(new URLSearchParams(window.location.search).get("album") || 0) || null);
   const [toast, setToast] = useState<string | null>(null);
   const say = (m: string) => { setToast(m); window.setTimeout(() => setToast(null), 5000); };
@@ -180,7 +219,7 @@ export default function MusicLibrary() {
 
   const formats = useMemo(() => [...new Set((albums ?? []).map((a) => a.format ?? "").filter(Boolean))].sort(), [albums]);
   const colls = useMemo(() => [...new Set((albums ?? []).flatMap((a) => a.collections))].sort((x, y) => x.localeCompare(y)), [albums]);
-  const shown = (albums ?? []).filter((a) => {
+  const filtered = useMemo(() => (albums ?? []).filter((a) => {
     const t = q.trim().toLowerCase();
     if (t && !`${a.artist ?? ""} ${a.title ?? ""}`.toLowerCase().includes(t)) return false;
     if (fmt && a.format !== fmt) return false;
@@ -188,7 +227,8 @@ export default function MusicLibrary() {
     if (coll && !a.collections.includes(coll)) return false;
     if (issue === "any" ? !a.issues.length : issue && !a.issues.includes(issue as MusicIssue)) return false;
     return true;
-  });
+  }), [albums, q, fmt, rating, coll, issue]);
+  const shown = useMemo(() => sortAlbums(filtered, sort), [filtered, sort]);
   const needing = (albums ?? []).filter((a) => a.issues.length).length;
   const allShown = shown.length > 0 && shown.every((a) => picked.has(a.id));
   const pickShown = () => setPicked((s) => { const n = new Set(s); shown.forEach((a) => (allShown ? n.delete(a.id) : n.add(a.id))); return n; });
@@ -239,6 +279,9 @@ export default function MusicLibrary() {
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search artists and albums…" aria-label="Search artists and albums" className={`${sel} w-full pl-8`} />
         </div>
+        <select aria-label="Sort albums" className={sel} value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+          {(Object.keys(SORTS) as SortKey[]).map((k) => <option key={k} value={k}>{SORTS[k]}</option>)}
+        </select>
         <select aria-label="Format" className={sel} value={fmt} onChange={(e) => setFmt(e.target.value)}>
           <option value="">All formats</option>{formats.map((f) => <option key={f} value={f}>{f.toUpperCase()}</option>)}
         </select>
@@ -258,7 +301,8 @@ export default function MusicLibrary() {
         </select>
       </div>
       {picked.size > 0 && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900 dark:bg-blue-950/60">
+        // One row that scrolls sideways on phones, so the frozen header doesn't fill the screen.
+        <div className="mb-2 flex flex-nowrap items-center gap-2 overflow-x-auto rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-900 dark:bg-blue-950/60 sm:flex-wrap [&>*]:shrink-0">
           <span className="text-sm font-medium text-blue-800 dark:text-blue-200">{picked.size} selected</span>
           <button className={primary} disabled={batch?.running} onClick={() => runBulk("covers")} title="Use art inside the files, else look it up on MusicBrainz now"><ImageDown className="h-4 w-4" />Find artwork</button>
           <button className={ghost} disabled={batch?.running} onClick={() => runBulk("fix_tags")}><Wand2 className="h-4 w-4" />Fix tags</button>
@@ -398,6 +442,9 @@ export default function MusicLibrary() {
         </div>
       )}
 
+      {/* Pop-ups go on the page itself: inside this list's own layer the frozen
+          Library header (and its selection bar) would cover their top. */}
+      {createPortal(<>
       {doctor && <DoctorDialog title="Music doctor" kinds={DOCTOR_KINDS} source={api.music.doctor}
                                autoFixLabel="Fix leftover files, empty folders and albums whose folder is gone automatically (shared with the video Library doctor; files go to the 30-day trash)"
                                onClose={() => setDoctor(false)}
@@ -406,6 +453,7 @@ export default function MusicLibrary() {
       {toast && (
         <div role="status" className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-gray-900 px-4 py-2 text-sm text-white shadow-lg md:bottom-6 dark:bg-gray-100 dark:text-gray-900">{toast}</div>
       )}
+      </>, document.body)}
     </div>
   );
 }

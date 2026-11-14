@@ -1,3 +1,4 @@
+import threading
 import logging
 import os
 import pathlib
@@ -92,6 +93,19 @@ async def lifespan(app: FastAPI):
         logging.getLogger(__name__).exception("Journey backfill failed")
     finally:
         db.close()
+
+    def _music_added_backfill():
+        db = SessionLocal()
+        try:
+            from .services import music_library
+            n = music_library.backfill_added(db)
+            if n:
+                logging.getLogger(__name__).info("Set 'added' dates on %d music albums", n)
+        except Exception:
+            logging.getLogger(__name__).exception("Music 'added' dates backfill failed")
+        finally:
+            db.close()
+    threading.Thread(target=_music_added_backfill, name="music-added-backfill", daemon=True).start()
 
     # Once after upgrading: look for adult content that was moved into the Plex folders
     # before folders could be protected, so the Library can point it out straight away.

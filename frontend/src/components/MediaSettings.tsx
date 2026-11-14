@@ -251,10 +251,10 @@ export default function MediaSettings() {
           <p className="my-1 text-sm text-gray-600 dark:text-gray-300">
             {trash ? `${fmtSize(trash.size_bytes) === "—" ? "0 B" : fmtSize(trash.size_bytes)} in ${trash.file_count} file${trash.file_count === 1 ? "" : "s"}` : "…"}
           </p>
-          <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">Deleted files wait here 30 days, then go for good.</p>
+          <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">Deleted videos and music wait here 30 days, then go for good. Covers the .trash in every media and music folder.</p>
           <button className={`${btnGhost} text-red-600 dark:text-red-400`} disabled={!trash?.file_count}
                   onClick={async () => {
-                    if (!confirm("Permanently delete everything in the trash?")) return;
+                    if (!confirm("Permanently delete everything in the trash, videos and music?")) return;
                     const r = await api.media.emptyTrash();
                     setTrash({ size_bytes: 0, file_count: 0 });
                     setMsg(`Freed ${fmtSize(r.freed_bytes)}.`);

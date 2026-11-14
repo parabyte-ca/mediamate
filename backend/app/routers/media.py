@@ -3,6 +3,7 @@
 Response bodies keep FileSplitter's shapes ({"ok": ..., "msg": ...} and so on) so the
 Library page can be built against the same contract.
 """
+import logging
 import json
 import os
 import threading
@@ -602,14 +603,26 @@ def stats():
 
 # --- Trash ---
 
+def _music_roots() -> list[str]:
+    """The music library and music download folders: their .trash is emptied too."""
+    from ..database import SessionLocal
+    from ..services import music_library
+    try:
+        with SessionLocal() as db:
+            return music_library.roots(db)
+    except Exception:
+        logging.getLogger(__name__).warning("Couldn't list the music folders for the trash", exc_info=True)
+        return []
+
+
 @router.get("/trash")
 def trash_stats():
-    return trash.trash_stats()
+    return trash.trash_stats(_music_roots())
 
 
 @router.post("/trash/empty")
 def empty_trash():
-    result = trash.empty_trash()
+    result = trash.empty_trash(_music_roots())
     return {"ok": True, "freed_bytes": result["size_bytes"], "removed_files": result["file_count"]}
 
 

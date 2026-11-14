@@ -75,3 +75,17 @@ def test_empty_trash_one_bad_entry_does_not_abort_the_rest(tmp_media_roots, monk
     # the one that failed is still there; the other media root's trash was still cleared
     assert os.path.isdir(os.path.join(root1, ".trash", "2026-01-01"))
     assert trash.trash_stats() == {"size_bytes": 5, "file_count": 1}
+
+
+def test_empty_trash_also_empties_the_music_folders(tmp_media_roots, tmp_path):
+    """Empty trash covers the music folders' .trash too (music doctor and upgrades put files there)."""
+    root1, _ = tmp_media_roots
+    music = tmp_path / "music"
+    music.mkdir()
+    _put(root1, "2026-01-01", "a.mp4", b"12345")
+    os.makedirs(music / ".trash" / "2026-01-02" / "Artist", exist_ok=True)
+    (music / ".trash" / "2026-01-02" / "Artist" / "01.flac").write_bytes(b"123")
+    assert trash.trash_stats() == {"size_bytes": 5, "file_count": 1}
+    assert trash.trash_stats([str(music), root1]) == {"size_bytes": 8, "file_count": 2}   # root1 counted once
+    assert trash.empty_trash([str(music)]) == {"size_bytes": 8, "file_count": 2}
+    assert os.listdir(music / ".trash") == [] and os.listdir(os.path.join(root1, ".trash")) == []

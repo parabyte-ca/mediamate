@@ -534,6 +534,7 @@ export default function Library() {
                 onClick={() => run(() => makeThumbs())}>
           <ImageIcon className="h-4 w-4" />Make thumbnails
         </button>
+        <EmptyVideoTrash onDone={(m) => run(async () => m)} />
         <button className={btnGhost} title="Remove records for files that no longer exist on disk"
                 onClick={() => run(async () => `Removed ${(await api.media.purge()).removed} missing file record(s)`)}>
           <Trash2 className="h-4 w-4" />Purge missing
@@ -1034,5 +1035,31 @@ function RenameDialog({ file, onClose, onDone }: { file: MediaFile; onClose: () 
         <button className={btnPrimary} onClick={save} disabled={!name.trim()}>Rename</button>
       </div>
     </Modal>
+  );
+}
+
+
+/** Empty the video trash (deleted, replaced and encoded-away originals wait there 30 days). */
+function EmptyVideoTrash({ onDone }: { onDone: (msg: string) => void }) {
+  const [t, setT] = useState<{ size_bytes: number; file_count: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => api.media.trash().then((r) => setT(r.video)).catch(() => setT(null));
+  useEffect(() => { load(); }, []);
+  const size = t ? fmtSize(t.size_bytes) : "";
+  return (
+    <button className={btnGhost} disabled={busy || !t?.file_count}
+            title={t?.file_count ? `${t.file_count} file${t.file_count === 1 ? "" : "s"} in the video trash; they'd go for good after 30 days anyway` : "The video trash is empty"}
+            onClick={async () => {
+              if (!t || !confirm(`Permanently delete everything in the video trash (${size}, ${t.file_count} file${t.file_count === 1 ? "" : "s"})? This can't be undone. The music trash is left alone.`)) return;
+              setBusy(true);
+              try {
+                const r = await api.media.emptyTrash("video");
+                onDone(`Emptied the video trash: freed ${fmtSize(r.freed_bytes)}`);
+              } catch (e) { onDone(e instanceof Error ? e.message : "Couldn't empty the trash"); }
+              finally { setBusy(false); load(); }
+            }}>
+      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+      Empty trash{t?.file_count ? ` (${size})` : ""}
+    </button>
   );
 }

@@ -148,18 +148,27 @@ def test_scan_runs_and_rejects_overlap(api, monkeypatch):
 
 # --- trash (FileSplitter's test_trash_routes.py) ---
 
+def _total(api):
+    t = api.get("/api/media/trash").json()
+    return {"size_bytes": t["size_bytes"], "file_count": t["file_count"]}
+
+
 def test_get_trash_empty(api):
-    assert api.get("/api/media/trash").json() == {"size_bytes": 0, "file_count": 0}
+    t = api.get("/api/media/trash").json()
+    assert _total(api) == {"size_bytes": 0, "file_count": 0}
+    assert t["video"] == {"size_bytes": 0, "file_count": 0} and t["music"] == {"size_bytes": 0, "file_count": 0}
 
 
 def test_empty_trash_route_clears_and_reports_freed(api, tmp_media_roots):
     root1, root2 = tmp_media_roots
     _put_trash(root1, "2026-01-01", "a.mp4", b"12345")
     _put_trash(root2, "2026-10-21", "b.mp4", b"12")
-    assert api.get("/api/media/trash").json() == {"size_bytes": 7, "file_count": 2}
-    body = api.post("/api/media/trash/empty").json()
+    assert _total(api) == {"size_bytes": 7, "file_count": 2}
+    assert api.get("/api/media/trash").json()["video"]["size_bytes"] == 7
+    assert api.post("/api/media/trash/empty?kind=bogus").status_code == 422
+    body = api.post("/api/media/trash/empty?kind=video").json()
     assert body == {"ok": True, "freed_bytes": 7, "removed_files": 2}
-    assert api.get("/api/media/trash").json() == {"size_bytes": 0, "file_count": 0}
+    assert _total(api) == {"size_bytes": 0, "file_count": 0}
 
 
 # --- settings ---

@@ -62,11 +62,32 @@ def _roots(extra=()) -> list[str]:
     return out
 
 
-def trash_stats(extra_roots=()) -> dict:
+def _video_roots(music_roots=()) -> list[str]:
+    """Media roots that aren't music folders."""
+    music = {os.path.normpath(r) for r in music_roots}
+    return [r for r in _roots() if r not in music]
+
+
+def music_trash_roots(music_roots=()) -> list[str]:
+    video = _video_roots(music_roots)
+    return [r for r in _roots(music_roots) if r not in video]
+
+
+def trash_breakdown(music_roots=()) -> dict:
+    """Trash size for videos and for music separately, plus the total."""
+    video = _video_roots(music_roots)
+    music = [r for r in _roots(music_roots) if r not in video]
+    v = trash_stats(only=video)
+    m = trash_stats(only=music)
+    return {"size_bytes": v["size_bytes"] + m["size_bytes"], "file_count": v["file_count"] + m["file_count"],
+            "video": v, "music": m}
+
+
+def trash_stats(extra_roots=(), only=None) -> dict:
     """Sum size and count of everything in every media root's .trash (and extra_roots')."""
     size_bytes = 0
     file_count = 0
-    for root in _roots(extra_roots):
+    for root in (only if only is not None else _roots(extra_roots)):
         trash_dir = os.path.join(root.rstrip("/"), TRASH_DIRNAME)
         if not os.path.isdir(trash_dir):
             continue
@@ -80,13 +101,13 @@ def trash_stats(extra_roots=()) -> dict:
     return {"size_bytes": size_bytes, "file_count": file_count}
 
 
-def empty_trash(extra_roots=()) -> dict:
+def empty_trash(extra_roots=(), only=None) -> dict:
     """
     Permanently delete everything in every media root's .trash (and extra_roots'),
     regardless of age. Returns the size/count that was freed (computed before deletion).
     """
-    stats = trash_stats(extra_roots)
-    for root in _roots(extra_roots):
+    stats = trash_stats(extra_roots, only=only)
+    for root in (only if only is not None else _roots(extra_roots)):
         trash_dir = os.path.join(root.rstrip("/"), TRASH_DIRNAME)
         if not os.path.isdir(trash_dir):
             continue

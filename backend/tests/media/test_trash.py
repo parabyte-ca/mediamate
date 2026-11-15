@@ -89,3 +89,25 @@ def test_empty_trash_also_empties_the_music_folders(tmp_media_roots, tmp_path):
     assert trash.trash_stats([str(music), root1]) == {"size_bytes": 8, "file_count": 2}   # root1 counted once
     assert trash.empty_trash([str(music)]) == {"size_bytes": 8, "file_count": 2}
     assert os.listdir(music / ".trash") == [] and os.listdir(os.path.join(root1, ".trash")) == []
+
+
+def test_videos_and_music_can_be_emptied_separately(tmp_media_roots, tmp_path):
+    """Library → Videos empties only the video trash; Settings shows each one's size."""
+    root1, _ = tmp_media_roots
+    music = tmp_path / "music"
+    os.makedirs(music / ".trash" / "2026-01-02", exist_ok=True)
+    (music / ".trash" / "2026-01-02" / "01.flac").write_bytes(b"123")
+    _put(root1, "2026-01-01", "a.mp4", b"12345")
+    b = trash.trash_breakdown([str(music)])
+    assert b["video"] == {"size_bytes": 5, "file_count": 1} and b["music"] == {"size_bytes": 3, "file_count": 1}
+    assert b["size_bytes"] == 8
+    trash.empty_trash(only=trash._video_roots([str(music)]))
+    assert os.listdir(os.path.join(root1, ".trash")) == [] and os.listdir(music / ".trash") == ["2026-01-02"]
+
+
+def test_a_music_folder_that_is_also_a_media_root_counts_as_music(tmp_media_roots):
+    root1, root2 = tmp_media_roots
+    _put(root1, "2026-01-01", "a.mp4", b"12345")
+    _put(root2, "2026-01-01", "01.flac", b"12")
+    b = trash.trash_breakdown([root2])
+    assert b["video"]["size_bytes"] == 5 and b["music"]["size_bytes"] == 2

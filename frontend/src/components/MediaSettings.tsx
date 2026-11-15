@@ -54,7 +54,8 @@ export default function MediaSettings() {
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [rechecking, setRechecking] = useState(false);
-  const [trash, setTrash] = useState<{ size_bytes: number; file_count: number } | null>(null);
+  type Bin = { size_bytes: number; file_count: number };
+  const [trash, setTrash] = useState<(Bin & { video?: Bin; music?: Bin }) | null>(null);
   const [saved, setSaved] = useState<number | null>(null);
   const [savedInput, setSavedInput] = useState("");
 
@@ -251,12 +252,18 @@ export default function MediaSettings() {
           <p className="my-1 text-sm text-gray-600 dark:text-gray-300">
             {trash ? `${fmtSize(trash.size_bytes) === "—" ? "0 B" : fmtSize(trash.size_bytes)} in ${trash.file_count} file${trash.file_count === 1 ? "" : "s"}` : "…"}
           </p>
+          {trash?.video && trash.music && trash.file_count > 0 && (
+            <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">
+              Videos {fmtSize(trash.video.size_bytes) === "—" ? "0 B" : fmtSize(trash.video.size_bytes)} · Music {fmtSize(trash.music.size_bytes) === "—" ? "0 B" : fmtSize(trash.music.size_bytes)}
+              {" "}(Library → Videos can empty just the video trash)
+            </p>
+          )}
           <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">Deleted videos and music wait here 30 days, then go for good. Covers the .trash in every media and music folder.</p>
           <button className={`${btnGhost} text-red-600 dark:text-red-400`} disabled={!trash?.file_count}
                   onClick={async () => {
                     if (!confirm("Permanently delete everything in the trash, videos and music?")) return;
-                    const r = await api.media.emptyTrash();
-                    setTrash({ size_bytes: 0, file_count: 0 });
+                    const r = await api.media.emptyTrash("all");
+                    setTrash({ size_bytes: 0, file_count: 0, video: { size_bytes: 0, file_count: 0 }, music: { size_bytes: 0, file_count: 0 } });
                     setMsg(`Freed ${fmtSize(r.freed_bytes)}.`);
                   }}>
             <Trash2 className="h-4 w-4" />Empty trash

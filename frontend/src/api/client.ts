@@ -1227,8 +1227,11 @@ export const api = {
     recheckGpu: () => req<{ nvenc_available: boolean; nvenc_last_error: string | null }>("/media/encoder/recheck-gpu", { method: "POST" }),
     setSavedBytes: (value: number) =>
       req<{ ok: boolean; total_saved_bytes: number }>("/media/settings/saved-bytes", { method: "POST", body: JSON.stringify({ value }) }),
-    trash: () => req<{ size_bytes: number; file_count: number }>("/media/trash"),
-    emptyTrash: () => req<{ ok: boolean; freed_bytes: number; removed_files: number }>("/media/trash/empty", { method: "POST" }),
+    trash: () => req<{ size_bytes: number; file_count: number;
+                       video: { size_bytes: number; file_count: number }; music: { size_bytes: number; file_count: number } }>("/media/trash"),
+    /** kind: "all" (videos and music), "video" or "music". */
+    emptyTrash: (kind: "all" | "video" | "music" = "all") =>
+      req<{ ok: boolean; freed_bytes: number; removed_files: number }>(`/media/trash/empty?kind=${kind}`, { method: "POST" }),
   },
 
   insights: (days = 30) => req<Insights>(`/insights?days=${days}`),

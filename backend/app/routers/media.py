@@ -8,7 +8,7 @@ import json
 import os
 import threading
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.concurrency import iterate_in_threadpool
@@ -617,12 +617,22 @@ def _music_roots() -> list[str]:
 
 @router.get("/trash")
 def trash_stats():
-    return trash.trash_stats(_music_roots())
+    """The trash total, with videos and music separately."""
+    return trash.trash_breakdown(_music_roots())
 
 
 @router.post("/trash/empty")
-def empty_trash():
-    result = trash.empty_trash(_music_roots())
+def empty_trash(kind: str = "all"):
+    """Empty the trash: kind = all (videos and music), video or music."""
+    if kind not in ("all", "video", "music"):
+        raise HTTPException(status_code=422, detail="kind must be all, video or music")
+    music = _music_roots()
+    if kind == "video":
+        result = trash.empty_trash(only=trash._video_roots(music))
+    elif kind == "music":
+        result = trash.empty_trash(only=trash.music_trash_roots(music))
+    else:
+        result = trash.empty_trash(music)
     return {"ok": True, "freed_bytes": result["size_bytes"], "removed_files": result["file_count"]}
 
 

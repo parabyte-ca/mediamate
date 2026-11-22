@@ -48,9 +48,9 @@ jobs:
         working-directory: frontend
         run: npm ci && npm run build
 
-      - name: Service worker tests
+      - name: Frontend unit tests (service worker, library search)
         working-directory: frontend
-        run: node --test tests/push-sw.test.mjs
+        run: node --test tests/push-sw.test.mjs tests/search.test.mjs
 
       - name: Secret scan (production bundle)
         run: scripts/scan-secrets.sh frontend/dist

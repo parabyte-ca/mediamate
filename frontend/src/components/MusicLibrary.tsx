@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { SEARCH_TIP, makeMatcher } from "../lib/search";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { AlertTriangle, Stethoscope, Disc3, FileText, LayoutGrid, List as ListIcon, Star, FolderSearch, ImageDown, ImagePlus, Loader2, Pause, PencilLine, Play, Search, Share2, Tags, Upload, Wand2, X, UserPlus, UserCheck, ArrowUpCircle } from "lucide-react";
@@ -219,15 +220,17 @@ export default function MusicLibrary() {
 
   const formats = useMemo(() => [...new Set((albums ?? []).map((a) => a.format ?? "").filter(Boolean))].sort(), [albums]);
   const colls = useMemo(() => [...new Set((albums ?? []).flatMap((a) => a.collections))].sort((x, y) => x.localeCompare(y)), [albums]);
-  const filtered = useMemo(() => (albums ?? []).filter((a) => {
-    const t = q.trim().toLowerCase();
-    if (t && !`${a.artist ?? ""} ${a.title ?? ""}`.toLowerCase().includes(t)) return false;
+  const filtered = useMemo(() => {
+    const test = makeMatcher(q);
+    return (albums ?? []).filter((a) => {
+    if (q.trim() && !test(a.artist, a.title, a.year ? String(a.year) : null)) return false;
     if (fmt && a.format !== fmt) return false;
     if (rating === "unrated" ? !!a.rating : rating && (a.rating ?? 0) < Number(rating)) return false;
     if (coll && !a.collections.includes(coll)) return false;
     if (issue === "any" ? !a.issues.length : issue && !a.issues.includes(issue as MusicIssue)) return false;
     return true;
-  }), [albums, q, fmt, rating, coll, issue]);
+  });
+  }, [albums, q, fmt, rating, coll, issue]);
   const shown = useMemo(() => sortAlbums(filtered, sort), [filtered, sort]);
   const needing = (albums ?? []).filter((a) => a.issues.length).length;
   const allShown = shown.length > 0 && shown.every((a) => picked.has(a.id));
@@ -277,7 +280,7 @@ export default function MusicLibrary() {
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search artists and albums…" aria-label="Search artists and albums" className={`${sel} w-full pl-8`} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search artists and albums… (* and ? work)" title={SEARCH_TIP} aria-label="Search artists and albums" className={`${sel} w-full pl-8`} />
         </div>
         <select aria-label="Sort albums" className={sel} value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
           {(Object.keys(SORTS) as SortKey[]).map((k) => <option key={k} value={k}>{SORTS[k]}</option>)}

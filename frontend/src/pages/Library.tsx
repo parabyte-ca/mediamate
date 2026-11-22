@@ -14,6 +14,7 @@ import MusicLibrary from "../components/MusicLibrary";
 import { InLibraryHeader, LibraryHeader, STICKY_TH } from "../components/LibraryHeader";
 import DoctorDialog, { type DoctorKindInfo } from "../components/DoctorDialog";
 import { fmtSize } from "../utils";
+import { SEARCH_TIP, makeMatcher } from "../lib/search";
 
 // The media library (FileSplitter's Files tab): everything under the media
 // paths, with filters, per-file and bulk encode / split / trim, preview,
@@ -54,8 +55,15 @@ function resBucket(h?: number | null) {
   return "other";
 }
 
-function matches(f: MediaFile, fl: Filters) {
-  if (fl.q && !f.filename.toLowerCase().includes(fl.q.toLowerCase())) return false;
+/** The show and season folders a file sits in ("The Simpsons/Season 11"), so a search
+ *  finds episodes whose file name is only "S11E01.mkv". */
+function folderHint(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  return parts.slice(-3, -1).join(" ");
+}
+
+function matches(f: MediaFile, fl: Filters, test: (...fields: (string | null | undefined)[]) => boolean) {
+  if (fl.q && !test(f.filename, folderHint(f.path))) return false;
   if (fl.category && f.category !== fl.category) return false;
   if (fl.status && f.status !== fl.status) return false;
   if (fl.codec && (f.codec ?? "") !== fl.codec) return false;
@@ -330,7 +338,10 @@ export default function Library() {
   const categories = useMemo(() => [...new Set(files.map((f) => f.category))].sort(), [files]);
   const collections = useMemo(() => [...new Set(files.flatMap((f) => f.collections ?? []))].sort((a, b) => a.localeCompare(b)), [files]);
   const codecs = useMemo(() => [...new Set(files.map((f) => f.codec ?? "").filter(Boolean))].sort(), [files]);
-  const filtered = useMemo(() => files.filter((f) => matches(f, filters)), [files, params]); // eslint-disable-line react-hooks/exhaustive-deps
+  const filtered = useMemo(() => {
+    const test = makeMatcher(filters.q);
+    return files.filter((f) => matches(f, filters, test));
+  }, [files, params]); // eslint-disable-line react-hooks/exhaustive-deps
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const rows = filtered.slice((Math.min(page, pages) - 1) * PAGE_SIZE, Math.min(page, pages) * PAGE_SIZE);
   const pickedFiles = files.filter((f) => picked.has(f.id));
@@ -439,7 +450,7 @@ export default function Library() {
       <LibraryHeader title={<><h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Library</h1>{libTabs}</>}>
       <InLibraryHeader>
         <div className="mb-2 flex items-center gap-2">
-        <input value={filters.q} onChange={(e) => setFilter("q", e.target.value)} placeholder="Search file names…"
+        <input value={filters.q} onChange={(e) => setFilter("q", e.target.value)} placeholder="Search file names… (* and ? work)" title={SEARCH_TIP}
                aria-label="Search file names" className={`${sel} min-w-0 flex-1`} />
           <button type="button" className={`${btnGhost} md:hidden`} aria-expanded={filtersOpen} aria-controls="video-filters"
                   onClick={() => setFiltersOpen((v) => !v)}>

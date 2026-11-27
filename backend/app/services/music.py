@@ -556,3 +556,23 @@ def on_download_complete(bind, download_id: int) -> bool:
         db.commit()
         logger.info("Album finished: %s", album.title)
         return True
+
+
+def repair_artist_show_matches(db) -> int:
+    """Undo an old bug: the daily show-status check also looked up music artists on TVMaze,
+    gave "Sloan" or "Beck" a TV show's id (so the calendar and digest listed episodes) and
+    paused the artist when that show had ended. Clears those matches and turns those
+    artists back on. Returns how many artists were fixed."""
+    from ..models import WatchlistItem
+    n = 0
+    for w in db.query(WatchlistItem).filter(WatchlistItem.kind == "artist"):
+        if not (w.tvmaze_id or w.show_status):
+            continue
+        if w.show_status == "Ended" and not w.enabled and not w.show_status_override:
+            w.enabled = True
+        w.tvmaze_id = None
+        w.show_status = None
+        w.show_status_checked_at = None
+        n += 1
+    db.commit()
+    return n

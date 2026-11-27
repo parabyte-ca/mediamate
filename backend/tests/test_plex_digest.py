@@ -53,7 +53,7 @@ def test_the_email_lists_every_title_and_escapes_html(monkeypatch):
     d["sections"]["mature_movies"][0]["title"] = "Tom & <Jerry>"
     html, images = pd.render_html(d, "Week of Oct 27")
     assert "Tom &amp; &lt;Jerry&gt;" in html and "<Jerry>" not in html
-    for title in ("Family Film", "Kids Show", "Grown Show", "Week of Oct 27", "This week on Plex"):
+    for title in ("Family Film", "Kids Show", "Grown Show", "Week of Oct 27", "This week from MediaMate"):
         assert title in html
 
 
@@ -123,7 +123,7 @@ def test_sending_uses_starttls_and_logs_in(monkeypatch):
     assert (sender, to) == ("f@x", ["a@x", "b@x"])
     msg = message_from_string(body)
     subject = str(make_header(decode_header(msg["Subject"])))
-    assert subject == "MediaMate Weekly Digest — Week 1"
+    assert subject == "This week from MediaMate — Week 1"
     kinds = [p.get_content_type() for p in msg.walk()]
     assert kinds[:3] == ["multipart/alternative", "text/plain", "multipart/related"]
     assert "text/html" in kinds and "image/jpeg" in kinds
@@ -147,3 +147,42 @@ def test_preview_and_view_routes(monkeypatch, tmp_path):
     r = c.get(f"/api/public/digest/{token}")
     assert r.status_code == 200 and "digest" in r.text and r.headers["content-type"].startswith("text/html")
     assert c.get("/api/public/digest/notarealtoken_notarealtoken").status_code == 404
+
+
+def test_highlight_prefers_new_releases_over_old_films():
+    old = {"title": "Casablanca", "year": "1942", "rating": "9.9", "added_at": 5}
+    new = {"title": "New Film", "year": "2026", "rating": "7.0", "added_at": 1}
+    newer_better = {"title": "Better New", "year": "2025", "rating": "8.0", "added_at": 1}
+    pick = lambda movies, tv=(): pd.pick_highlight({"movies": list(movies), "tv": list(tv),
+                                                    "mature_movies": [], "mature_tv": []}, this_year=2026)["item"]["title"]
+    assert pick([old, new]) == "New Film"
+    assert pick([old, new, newer_better]) == "Better New"            # among new releases, the best rated
+    assert pick([{"title": "Older", "year": "2010", "rating": "9"}, {"title": "Newer", "year": "2019", "rating": "6"}]) == "Newer"
+    show = {"title": "New Show", "release_year": 2026, "rating": "8.5", "episodes": ["S01E01"]}
+    assert pick([old], [show]) == "New Show"
+
+
+def test_unmatched_files_are_left_out():
+    assert pd.is_vague({"title": "Some.Movie.2019.1080p.mkv"})
+    assert pd.is_vague({"title": "clip_0042", "summary": ""})
+    assert pd.is_vague({"title": "Mystery thing", "summary": "", "year": ""})
+    assert pd.is_vague({"title": "_Unsorted"})
+    assert not pd.is_vague({"title": "Dune", "year": "2021", "summary": ""})
+    assert not pd.is_vague({"title": "Dune", "summary": "Spice."})
+    assert pd.is_vague_show("_Unsorted", {}) and pd.is_vague_show("Show.Name.S01E02.720p", {})
+    assert not pd.is_vague_show("The Simpsons", {})
+
+
+def test_vague_items_never_reach_the_digest(monkeypatch):
+    libs = {"movie": ["1"], "show": ["2"]}
+    recent = {"1": [_movie("Good Film", "PG"), {"title": "VID_2031.mp4", "content_rating": "", "thumb": "", "summary": "",
+                                                  "year": "", "rating_key": "9", "added_at": 1}],
+              "2": [_episode("_Unsorted", "", 1, 1), _episode("Real Show", "TV-PG", 1, 1)]}
+    monkeypatch.setattr(pd, "_fetch_machine_identifier", lambda u, t: "MID")
+    monkeypatch.setattr(pd, "_get_library_ids_by_type", lambda u, t, kind, ex: libs[kind])
+    monkeypatch.setattr(pd, "_fetch_recently_added", lambda u, t, lib, days: [dict(x) for x in recent[lib]])
+    monkeypatch.setattr(pd, "_fetch_image", lambda *a, **k: None)
+    monkeypatch.setattr(pd, "_fetch_show_summary", lambda u, t, k: "")
+    s = pd.fetch_digest_sections("http://plex", "tok")
+    titles = [i["title"] for k in s for i in s[k]]
+    assert titles == ["Good Film", "Real Show"]

@@ -301,3 +301,27 @@ def test_failed_send_is_recorded(monkeypatch, digest_db):
     h = pd.history(db)
     db.close()
     assert h[0]["kind"] == "scheduled" and h[0]["error"] and "hunter2secret" not in h[0]["error"]
+
+
+def test_mature_pick_is_the_newest_most_popular_mature_movie():
+    m = lambda t, y, aud, added=0: {"title": t, "year": str(y), "audience_rating": str(aud),
+                                    "rating": "", "added_at": added}
+    pick = lambda movies, hl=None: pd.pick_mature_movie({"mature_movies": list(movies)}, hl, this_year=2026)
+    old_hit, new_ok, new_hit = m("Old Classic", 1994, 9.6), m("New OK", 2026, 6.1), m("New Hit", 2025, 8.2)
+    assert pick([old_hit, new_ok, new_hit])["item"]["title"] == "New Hit"   # recent first, then popular
+    assert pick([old_hit, m("Older", 1990, 9.9)])["item"]["title"] == "Old Classic"   # none recent: newest
+    assert pick([]) is None
+    # already the main highlight (no family titles this week): not shown twice
+    assert pick([new_hit], {"kind": "movie", "item": new_hit}) is None
+    assert pick([new_hit, new_ok], {"kind": "movie", "item": new_hit})["item"]["title"] == "New OK"
+
+
+def test_mature_pick_card_in_the_email(monkeypatch):
+    d = _digest(monkeypatch)
+    d["mature_pick"] = pd.pick_mature_movie(d["sections"], d["highlight"])
+    title = d["mature_pick"]["item"]["title"]
+    html, _ = pd.render_html(d, "W")
+    assert "Mature pick of the week" in html and "This week’s highlight" in html
+    assert html.count(f">{title}<") == 1                 # not repeated in the mature grid
+    assert html.index("Mature pick of the week") > html.index("This week’s highlight")
+    assert f"Mature pick of the week: {title}" in pd.render_text(d, "W")

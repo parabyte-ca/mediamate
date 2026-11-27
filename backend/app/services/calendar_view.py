@@ -68,7 +68,9 @@ async def build_calendar(db, now: datetime | None = None, days_back: int = 7,
     start = now - timedelta(days=days_back)
     end = now + timedelta(days=days_ahead)
 
-    items = [i for i in db.query(WatchlistItem).all() if only is None or i.id in only]
+    # Shows only: artists and movies have no episodes (an artist could carry a stray TV match).
+    items = [i for i in db.query(WatchlistItem).all()
+             if (i.kind or "tv") not in ("movie", "artist") and (only is None or i.id in only)]
     have: dict[int, set[tuple[int, int]]] = defaultdict(set)
     for e in db.query(WatchlistEpisode).all():
         have[e.watchlist_id].add((e.season, e.episode))

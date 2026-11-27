@@ -94,6 +94,20 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    db = SessionLocal()
+    try:
+        if not db.query(Setting).filter(Setting.key == "artist_tvmaze_repair_v1").first():
+            from .services import music as _music
+            fixed = _music.repair_artist_show_matches(db)
+            db.add(Setting(key="artist_tvmaze_repair_v1", value="1"))
+            db.commit()
+            if fixed:
+                logging.getLogger(__name__).info("Cleared stray TV matches from %d music artist(s)", fixed)
+    except Exception:
+        logging.getLogger(__name__).exception("Artist TV-match repair failed")
+    finally:
+        db.close()
+
     def _music_added_backfill():
         db = SessionLocal()
         try:

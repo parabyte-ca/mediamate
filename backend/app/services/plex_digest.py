@@ -1,6 +1,6 @@
 """Weekly Plex digest: what was added this week, emailed to the household.
 
-The email has a highlight (the best-rated new title), new movies as a poster grid,
+"This week from MediaMate". The email has a highlight (the best-rated new release), new movies as a poster grid,
 TV grouped by show ("3 new episodes · S01E04–06"), albums added to the music library,
 and what's coming next week from the Watchlist. Posters are attached to the email
 (cid: images) because Gmail and others block data: images; the browser preview and the
@@ -109,6 +109,7 @@ def _fetch_recently_added(plex_url: str, token: str, library_id: str, days: int 
             "season_num":        elem.get("parentIndex", ""),
             "episode_num":       elem.get("index", ""),
             "added_at":          added_at,
+            "released":          elem.get("originallyAvailableAt", ""),
         })
     return items
 
@@ -153,6 +154,37 @@ def _fetch_thumb_b64(plex_url: str, token: str, thumb_path: str) -> str:
     """Older callers: the poster as a data: URI (small)."""
     data = _fetch_image(plex_url, token, thumb_path, 80, 120)
     return f"data:image/jpeg;base64,{base64.b64encode(data).decode()}" if data else ""
+
+
+_FILEISH = re.compile(r"(?i)(\.(mkv|mp4|avi|m4v|mov|wmv|ts)$|\b(2160p|1080p|720p|480p|x26[45]|h\.?26[45]|hevc|web-?dl|webrip|bluray|hdtv)\b|\bS\d{1,2}E\d{1,3}\b)")
+
+
+def release_year(item: dict) -> int:
+    """The year a title (or episode) came out, from its air date or year; 0 when unknown."""
+    for v in (item.get("released") or "", str(item.get("year") or "")):
+        m = re.match(r"(\d{4})", v)
+        if m:
+            return int(m[1])
+    return 0
+
+
+def is_vague(item: dict) -> bool:
+    """A file Plex couldn't match (often in an _Unsorted folder): no year and no summary,
+    or a title that is really a file name. Left out of the digest."""
+    title = (item.get("title") or "").strip()
+    if not title or title.startswith("_") or title.lower() in ("unsorted", "unknown"):
+        return True
+    if _FILEISH.search(title) or ("." in title and " " not in title):
+        return True
+    return not release_year(item) and not (item.get("summary") or "").strip()
+
+
+def is_vague_show(show_title: str, ep: dict) -> bool:
+    """An episode whose show is unknown (an _Unsorted folder, a file-name title)."""
+    t = (show_title or "").strip()
+    if not t or t.startswith("_") or t.lower() in ("unsorted", "unknown"):
+        return True
+    return bool(_FILEISH.search(t)) or ("." in t and " " not in t)
 
 
 def episode_ranges(codes: list[str]) -> str:
@@ -203,6 +235,8 @@ def fetch_digest_sections(
     # ── Movies ────────────────────────────────────────────────────────────────
     for lib_id in _get_library_ids_by_type(plex_url, token, "movie", excluded_libs):
         for item in _fetch_recently_added(plex_url, token, lib_id, days):
+            if is_vague(item):
+                continue
             item["image"] = _fetch_image(plex_url, token, item["thumb"])
             item["plex_link"] = _plex_link(item.get("rating_key", ""))
             cr = (item["content_rating"] or "").upper().strip()
@@ -214,6 +248,8 @@ def fetch_digest_sections(
     for lib_id in _get_library_ids_by_type(plex_url, token, "show", excluded_libs):
         for ep in _fetch_recently_added(plex_url, token, lib_id, days):
             show_title = ep["grandparent_title"] or ep["title"]
+            if is_vague_show(show_title, ep):
+                continue
             if show_title not in shows:
                 cr = (ep["content_rating"] or "").upper().strip()
                 gp_key = ep["grandparent_key"]  # "/library/metadata/{id}"
@@ -230,6 +266,7 @@ def fetch_digest_sections(
                     "image":          None,
                     "rating":         ep.get("rating", ""),
                 }
+            shows[show_title]["release_year"] = max(shows[show_title].get("release_year", 0), release_year(ep))
             s_num = ep.get("season_num", "")
             e_num = ep.get("episode_num", "")
             if s_num and e_num:
@@ -263,13 +300,25 @@ def _score(item: dict) -> float:
         return 0.0
 
 
-def pick_highlight(sections: dict[str, list]) -> dict | None:
-    """The best-rated new title, family-friendly first (the digest goes to the whole household)."""
+def pick_highlight(sections: dict[str, list], this_year: int | None = None) -> dict | None:
+    """This week's highlight: a new release, not an old film that happened to be added.
+    Among titles out this year or last, the best rated; failing that, the newest (then best
+    rated). Family-friendly titles first, since the digest goes to the whole household."""
+    this_year = this_year or datetime.now(timezone.utc).year
+
+    def year_of(kind: str, it: dict) -> int:
+        return it.get("release_year", 0) if "tv" in kind else release_year(it)
+
     for keys in (("movies", "tv"), ("mature_movies", "mature_tv")):
         pool = [(k, i) for k in keys for i in sections.get(k, [])]
-        if pool:
-            kind, item = max(pool, key=lambda p: (_score(p[1]), p[1].get("added_at", 0)))
-            return {"kind": "movie" if "movies" in kind else "tv", "item": item}
+        if not pool:
+            continue
+        fresh = [p for p in pool if year_of(*p) >= this_year - 1]
+        if fresh:
+            kind, item = max(fresh, key=lambda p: (_score(p[1]), year_of(*p), p[1].get("added_at", 0)))
+        else:
+            kind, item = max(pool, key=lambda p: (year_of(*p), _score(p[1]), p[1].get("added_at", 0)))
+        return {"kind": "movie" if "movies" in kind else "tv", "item": item}
     return None
 
 
@@ -532,20 +581,20 @@ def render_html(d: dict, week_label: str, inline_images: bool = False, view_url:
         "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
         "<meta name=\"color-scheme\" content=\"light dark\">\n<meta name=\"supported-color-schemes\" content=\"light dark\">\n"
-        f"<title>{_esc('This week on Plex · ' + week_label)}</title>\n"
+        f"<title>{_esc('This week from MediaMate · ' + week_label)}</title>\n"
         "<style>\n"
         "@media (max-width:480px){ .mm-wrap{padding:12px 8px!important} .mm-hl td{display:block!important;width:100%!important;box-sizing:border-box!important} .mm-hl td:first-child{padding-bottom:0!important} }\n"
         "@media (prefers-color-scheme:dark){ body,.mm-bg{background:#0b0f19!important} .mm-card{background:#151b28!important}"
         " .mm-ink{color:#f3f4f6!important} .mm-muted{color:#cbd5e1!important} .mm-faint{color:#94a3b8!important} }\n"
         "</style>\n</head>\n"
         f'<body class="mm-bg" style="margin:0;padding:0;background:{_BG};font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif">\n'
-        f'<div style="display:none;max-height:0;overflow:hidden">{_esc(summary)} added to Plex this week.</div>\n'
+        f'<div style="display:none;max-height:0;overflow:hidden">{_esc(summary)} new this week.</div>\n'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="mm-bg" '
         f'style="background:{_BG}"><tr><td align="center" class="mm-wrap" style="padding:24px 16px">\n'
         '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px">\n'
         '<tr><td style="background:linear-gradient(135deg,#1e3a8a,#2563eb);background-color:#1e3a8a;border-radius:16px;padding:24px 24px 22px">'
-        '<div style="font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#bfdbfe">MediaMate</div>'
-        '<div style="font-size:26px;font-weight:800;color:#ffffff;margin-top:4px">This week on Plex</div>'
+        '<div style="font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#bfdbfe">Your weekly digest</div>'
+        '<div style="font-size:26px;font-weight:800;color:#ffffff;margin-top:4px">This week from MediaMate</div>'
         f'<div style="font-size:14px;color:#dbeafe;margin-top:6px">{_esc(week_label)} · {_esc(summary)}</div>'
         "</td></tr>\n"
         + "".join(parts) +
@@ -559,7 +608,7 @@ def render_html(d: dict, week_label: str, inline_images: bool = False, view_url:
 def render_text(d: dict, week_label: str, view_url: str = "") -> str:
     """The plain-text part of the email."""
     c = counts(d)
-    lines = [f"This week on Plex · {week_label}", ""]
+    lines = [f"This week from MediaMate · {week_label}", ""]
     hl = d.get("highlight")
     if hl:
         it = hl["item"]
@@ -612,7 +661,7 @@ def send_email(smtp_cfg: dict, recipients: list[str], html: str, week_label: str
     from_addr = smtp_cfg.get("from_email", "") or user
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"MediaMate Weekly Digest — {week_label}"
+    msg["Subject"] = f"This week from MediaMate — {week_label}"
     msg["From"]    = from_addr
     msg["To"]      = ", ".join(recipients)
     msg.attach(MIMEText(text or "Open this email in an HTML-capable mail app to see the digest.", "plain", "utf-8"))

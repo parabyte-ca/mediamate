@@ -308,8 +308,12 @@ async def _check_statuses_async(db, *, item_id: int | None = None) -> None:
     settings = {s.key: s.value for s in db.query(Setting).all()}
     apprise_url = settings.get("apprise_url", "")
 
+    from sqlalchemy import or_
+    # TV shows only: a movie or a music artist ("Sloan", "Beck") must never be matched to
+    # a TV show of the same name, nor paused because that show has ended.
     query = db.query(WatchlistItem).filter(WatchlistItem.enabled == True,
-                                           WatchlistItem.kind != "movie")
+                                           or_(WatchlistItem.kind.is_(None),
+                                               WatchlistItem.kind.notin_(["movie", "artist"])))
     if item_id is not None:
         query = query.filter(WatchlistItem.id == item_id)
     items = query.all()

@@ -720,6 +720,9 @@ export default function Settings() {
   const [testingJellyfin,  setTestingJellyfin]  = useState(false);
   const [testingDigest,    setTestingDigest]    = useState(false);
   const [digestTestResult, setDigestTestResult] = useState<{ ok: boolean; message?: string; error?: string } | null>(null);
+  const [digestPreview, setDigestPreview] = useState<string | null>(null);
+  const [previewingDigest, setPreviewingDigest] = useState(false);
+  const [testTo, setTestTo] = useState("");
   const [health,           setHealth]           = useState<HealthStatus>(null);
   const [exportingBackup,  setExportingBackup]  = useState(false);
   const [exportError,      setExportError]      = useState<string | null>(null);
@@ -889,21 +892,34 @@ export default function Settings() {
     } finally { setTestingJellyfin(false); }
   };
 
-  const handleTestDigest = async () => {
+  const digestForm = () => ({
+    digest_smtp_host:     settings.digest_smtp_host ?? "",
+    digest_smtp_port:     settings.digest_smtp_port ?? "587",
+    digest_smtp_user:     settings.digest_smtp_user ?? "",
+    digest_smtp_password: settings.digest_smtp_password ?? "",
+    digest_from_email:    settings.digest_from_email ?? "",
+    digest_recipients:    settings.digest_recipients ?? "",
+    plex_url:             settings.plex_url ?? "",
+    plex_token:           settings.plex_token ?? "",
+    digest_excluded_libs: settings.digest_excluded_libs ?? "",
+  });
+
+  const handleTestDigest = async (sendTo = "") => {
     setTestingDigest(true); setDigestTestResult(null);
     try {
-      setDigestTestResult(await api.settings.testDigest({
-        digest_smtp_host:     settings.digest_smtp_host ?? "",
-        digest_smtp_port:     settings.digest_smtp_port ?? "587",
-        digest_smtp_user:     settings.digest_smtp_user ?? "",
-        digest_smtp_password: settings.digest_smtp_password ?? "",
-        digest_from_email:    settings.digest_from_email ?? "",
-        digest_recipients:    settings.digest_recipients ?? "",
-        plex_url:             settings.plex_url ?? "",
-        plex_token:           settings.plex_token ?? "",
-        digest_excluded_libs: settings.digest_excluded_libs ?? "",
-      }));
+      setDigestTestResult(await api.settings.testDigest({ ...digestForm(), send_to: sendTo }));
     } finally { setTestingDigest(false); }
+  };
+
+  const handlePreviewDigest = async () => {
+    setPreviewingDigest(true); setDigestTestResult(null);
+    try {
+      const r = await api.settings.previewDigest(digestForm());
+      if (r.ok && r.html) setDigestPreview(r.html);
+      else setDigestTestResult({ ok: false, error: r.error ?? "Couldn't build the preview" });
+    } catch (e) {
+      setDigestTestResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    } finally { setPreviewingDigest(false); }
   };
 
   const handleExportBackup = async () => {
@@ -1691,16 +1707,30 @@ export default function Settings() {
               />
             </div>
 
-            {/* Test button */}
-            <div className="flex items-center gap-3 border-t border-gray-100 dark:border-gray-800 pt-4">
-              <button
-                onClick={handleTestDigest}
-                disabled={testingDigest}
-                className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
-              >
-                {testingDigest && <Loader2 className="h-4 w-4 animate-spin" />}
-                Send test digest now
-              </button>
+            {/* Preview and test */}
+            <div className="space-y-3 border-t border-gray-100 dark:border-gray-800 pt-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <button onClick={handlePreviewDigest} disabled={previewingDigest}
+                  className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                  {previewingDigest && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Preview
+                </button>
+                <input type="email" value={testTo} onChange={(e) => setTestTo(e.target.value)}
+                  placeholder={(settings.digest_recipients ?? "").split(/[\s,]+/).filter(Boolean)[0] || "you@example.com"}
+                  aria-label="Send a test to this address"
+                  className="min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 sm:max-w-xs" />
+                <button
+                  onClick={() => handleTestDigest(testTo.trim() || (settings.digest_recipients ?? "").split(/[\s,]+/).filter(Boolean)[0] || "")}
+                  disabled={testingDigest}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+                >
+                  {testingDigest && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Send me a test
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Preview shows this week's digest as it would look now. A test goes only to the address above (or the first recipient), and doesn't count as this week's digest.
+              </p>
               {digestTestResult && (
                 <span className={`flex items-center gap-1.5 text-sm font-medium ${digestTestResult.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
                   {digestTestResult.ok ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
@@ -1710,6 +1740,19 @@ export default function Settings() {
             </div>
           </div>
         </Section>
+
+        {digestPreview && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="Digest preview"
+               onClick={() => setDigestPreview(null)}>
+            <div className="flex h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl dark:bg-gray-900 sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+                <h2 className="flex-1 text-sm font-semibold text-gray-900 dark:text-gray-100">Digest preview</h2>
+                <button onClick={() => setDigestPreview(null)} className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">Close</button>
+              </div>
+              <iframe title="Digest preview" srcDoc={digestPreview} sandbox="" className="min-h-0 w-full flex-1 bg-white" />
+            </div>
+          </div>
+        )}
 
         {/* Data management */}
         <Section title="Data management">

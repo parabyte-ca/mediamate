@@ -39,6 +39,14 @@ MediaMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search, 
 - **Target formats per folder:** each folder in Settings → Folders has a target, all H.265: TV shows 720p–1080p, Movies 1080p–4K, Custom (e.g. Bellesa: 720p, shrinking bigger files when they're encoded), or Auto (by file name). Files already H.265 show as **on target** instead of pending, so "Encode all pending" leaves them alone. H.265 files bigger than the target are never shrunk without asking: the Library doctor lists them ("Larger than target", with a Shrink button), along with files "Lower than preferred". New TV shows download 1080p (720p fallback) and new movies 4K (1080p fallback) by default (Settings → Quality Profiles).
 - **Movies on the Watchlist:** TV shows and movies have their own tabs and badges. Add a movie from Browse (Coming soon, In theatres, Popular) or with **Add → Movie**: it waits for the digital release date from TMDB (or the disc date, or about 90 days after cinemas), downloads the best release once, and leaves the Watchlist 30 days after the download finishes (Settings → Auto-scanner; pin a movie to keep it). The file stays in the Library.
 - **Better show matching:** an exact name wins over TVMaze's fuzzy guess (so "Gone" no longer becomes "I'll Be Gone in the Dark"). When you add a show, pick it from the suggestions so nothing is guessed. If a show is still wrong, click **Wrong show?** on its Watchlist card and choose the right one; the poster, episode guide and status follow it.
+- **Weekly digest email** (Settings → Weekly Digest Email): "This week on Plex". It has:
+  - a highlight with **Watch in Plex**: the best-rated new title, family-friendly first
+  - new movies as a poster grid
+  - TV grouped by show ("3 new episodes · S01E04–06")
+  - albums added to the music library
+  - **Coming next week**: Watchlist episodes airing and movies coming out
+
+  Posters are attached to the email, so Gmail shows them, and a plain-text version goes with it. It reads well on a phone and in dark mode. With a public address set (Settings → Sharing), a **View in browser** link opens the latest digest. **Preview** shows it in the app, and **Send me a test** mails it to one address.
 - **Guided tour** for new users: a short walk through who you are on this device, Search, the Watchlist (Mine or Everyone, who follows what), Browse, Calendar, Activity, Library and alerts. It starts once on each new device, after it has said who is using it (and once more on every device when the tour changes), and you can replay it from Settings → Appearance or by searching "tour" with Ctrl+K. With only one person set up it points to Settings → People instead.
 
 ---

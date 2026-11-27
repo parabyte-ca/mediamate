@@ -284,6 +284,7 @@ class JellyfinTestRequest(BaseModel):
 
 
 class DigestTestRequest(BaseModel):
+    send_to: str = ""                     # one address for "Send me a test"; else the recipients
     digest_smtp_host: str = ""
     digest_smtp_port: str = "587"
     digest_smtp_user: str = ""

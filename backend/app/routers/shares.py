@@ -224,6 +224,18 @@ def _limit(request: Request) -> None:
     q.append(now)
 
 
+@router.get("/public/digest/{token}")
+def public_digest(token: str):
+    """The browser copy of the latest weekly digest ("View in browser"). Only the newest
+    one is kept; its link is a long random token."""
+    from fastapi.responses import HTMLResponse
+    from ..services.plex_digest import view_copy
+    html = view_copy(token)
+    if html is None:
+        raise HTTPException(status_code=404, detail="This digest is no longer available")
+    return HTMLResponse(html, headers={"Cache-Control": "private, max-age=3600", "X-Robots-Tag": "noindex"})
+
+
 @router.get("/public/s/{token}")
 def public_meta(token: str, request: Request, db: Session = Depends(get_db)):
     _limit(request)

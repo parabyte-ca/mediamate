@@ -571,6 +571,13 @@ export interface UpgradeProgressInfo {
   started_at: string | null; finished_at: string | null; version: string | null; action: "update" | "rollback";
 }
 
+/** The digest settings as they are in the form (not necessarily saved yet). */
+export interface DigestForm {
+  digest_smtp_host: string; digest_smtp_port: string; digest_smtp_user: string;
+  digest_smtp_password: string; digest_from_email: string; digest_recipients: string;
+  plex_url: string; plex_token: string; digest_excluded_libs: string;
+}
+
 export interface UpdateStatus {
   current_version: string;
   latest_release: LatestRelease | null;
@@ -1483,11 +1490,12 @@ export const api = {
       req<JackettTestResult>("/settings/test-jackett", { method: "POST", body: JSON.stringify(data) }),
     testJellyfin: (data: { url: string; api_key: string }) =>
       req<JellyfinTestResult>("/settings/test-jellyfin", { method: "POST", body: JSON.stringify(data) }),
-    testDigest: (data: {
-      digest_smtp_host: string; digest_smtp_port: string; digest_smtp_user: string;
-      digest_smtp_password: string; digest_from_email: string; digest_recipients: string;
-      plex_url: string; plex_token: string; digest_excluded_libs: string;
-    }) =>
+    /** Send the digest now: to send_to ("Send me a test") or else to the recipients. */
+    testDigest: (data: DigestForm & { send_to?: string }) =>
       req<{ ok: boolean; message?: string; error?: string }>("/settings/test-digest", { method: "POST", body: JSON.stringify(data) }),
+    /** The digest as it would look now (pictures inline), for the preview. */
+    previewDigest: (data: DigestForm) =>
+      req<{ ok: boolean; html?: string; error?: string; counts?: { movies: number; episodes: number; shows: number; albums: number } }>(
+        "/settings/preview-digest", { method: "POST", body: JSON.stringify(data) }),
   },
 };

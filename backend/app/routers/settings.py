@@ -218,21 +218,45 @@ async def test_plex(body: PlexTestRequest, db: Session = Depends(get_db)):
         return {"ok": False, "error": scrub(str(e), token)}
 
 
+def _digest_inputs(body: DigestTestRequest, db: Session) -> tuple[str, str, frozenset[str]]:
+    s = _load_settings(db)
+    plex_url   = body.plex_url or s.get("plex_url", "")
+    plex_token = resolve(db, "plex_token", body.plex_token) or s.get("plex_token", "")
+    excluded_raw = body.digest_excluded_libs or ""
+    excluded = frozenset(x.strip().lower() for x in excluded_raw.replace("\n", ",").split(",") if x.strip())
+    return plex_url, plex_token, excluded
+
+
+@router.post("/settings/preview-digest")
+def preview_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
+    """The digest as it would look now (pictures inline), for the preview in Settings."""
+    from datetime import datetime, timezone
+    from ..services.plex_digest import compose
+    plex_url, plex_token, excluded = _digest_inputs(body, db)
+    if not plex_url or not plex_token:
+        return {"ok": False, "error": "Plex URL and token are required — fill in the Plex section above"}
+    try:
+        week_label = f"Week of {datetime.now(timezone.utc).strftime('%B %-d, %Y')}"
+        mail = compose(db, plex_url, plex_token, excluded, week_label, keep_view_copy=False)
+        return {"ok": True, "html": mail["preview"], "counts": mail["counts"]}
+    except Exception as e:
+        msg = scrub(str(e), plex_token)
+        logger.error("preview-digest failed: %s", msg)
+        return {"ok": False, "error": msg}
+
+
 @router.post("/settings/test-digest")
 def test_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
+    """Send the digest now: to send_to when given ("Send me a test"), else to the recipients."""
     from datetime import datetime, timezone
-    from ..services.plex_digest import fetch_digest_sections, render_html, send_email
+    from ..services.plex_digest import compose, send_email
 
-    s = _load_settings(db)
-
-    # Recipients come from the request body (current form state, not necessarily saved yet)
-    recipients_raw = body.digest_recipients or ""
+    recipients_raw = body.send_to.strip() or body.digest_recipients or ""
     recipients = [r.strip() for r in recipients_raw.replace("\n", ",").split(",") if r.strip()]
     if not recipients:
         return {"ok": False, "error": "No recipients configured"}
 
-    plex_url   = body.plex_url or s.get("plex_url", "")
-    plex_token = resolve(db, "plex_token", body.plex_token) or s.get("plex_token", "")
+    plex_url, plex_token, excluded_libs = _digest_inputs(body, db)
     if not plex_url or not plex_token:
         return {"ok": False, "error": "Plex URL and token are required — fill in the Plex section above"}
 
@@ -240,17 +264,10 @@ def test_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
     if not smtp_host:
         return {"ok": False, "error": "SMTP host not configured"}
 
-    excluded_raw = body.digest_excluded_libs or ""
-    excluded_libs = frozenset(
-        x.strip().lower() for x in excluded_raw.replace("\n", ",").split(",") if x.strip()
-    )
-
     smtp_password = resolve(db, "digest_smtp_password", body.digest_smtp_password)
     try:
-        sections = fetch_digest_sections(plex_url, plex_token, excluded_libs=excluded_libs)
-        now = datetime.now(timezone.utc)
-        week_label = f"Test — {now.strftime('%B %d, %Y')}"
-        html = render_html(sections, week_label)
+        week_label = f"Test — {datetime.now(timezone.utc).strftime('%B %-d, %Y')}"
+        mail = compose(db, plex_url, plex_token, excluded_libs, week_label)
         smtp_cfg = {
             "host":       smtp_host,
             "port":       body.digest_smtp_port or "587",
@@ -258,8 +275,9 @@ def test_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
             "password":   smtp_password,
             "from_email": body.digest_from_email,
         }
-        send_email(smtp_cfg, recipients, html, week_label)
-        return {"ok": True, "message": f"Digest sent to {len(recipients)} recipient(s)"}
+        send_email(smtp_cfg, recipients, mail["html"], week_label, text=mail["text"], images=mail["images"])
+        who = recipients[0] if len(recipients) == 1 else f"{len(recipients)} recipients"
+        return {"ok": True, "message": f"Test digest sent to {who}"}
     except Exception as e:
         msg = scrub(str(e), plex_token, smtp_password)
         logger.error("test-digest failed: %s", msg)

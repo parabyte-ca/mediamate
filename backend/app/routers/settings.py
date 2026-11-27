@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Setting, WatchlistItem
-from ..schemas import DigestTestRequest, TmdbTestRequest, JackettTestRequest, JellyfinTestRequest, PlexTestRequest
+from ..schemas import DigestSendNowRequest, DigestTestRequest, TmdbTestRequest, JackettTestRequest, JellyfinTestRequest, PlexTestRequest
 from ..services.indexers.jackett import probe_jackett
 from ..services import tmdb
 from ..services.secret_settings import SERVER_ONLY_KEYS, is_mask, redact, resolve, scrub
@@ -93,6 +93,7 @@ _PRIVATE_KEYS = set(SERVER_ONLY_KEYS) | {
     "session_secret",
     "rename_mediamate_v1",
     "last_digest_sent_at",
+    "digest_history",
     "update_release_cache",
     "update_notified_version",
     "update_previous_version",
@@ -249,10 +250,9 @@ def preview_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
 def test_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
     """Send the digest now: to send_to when given ("Send me a test"), else to the recipients."""
     from datetime import datetime, timezone
-    from ..services.plex_digest import compose, send_email
+    from ..services.plex_digest import compose, parse_recipients, record_send, send_email
 
-    recipients_raw = body.send_to.strip() or body.digest_recipients or ""
-    recipients = [r.strip() for r in recipients_raw.replace("\n", ",").split(",") if r.strip()]
+    recipients = parse_recipients(body.send_to.strip() or body.digest_recipients or "")
     if not recipients:
         return {"ok": False, "error": "No recipients configured"}
 
@@ -275,13 +275,33 @@ def test_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
             "password":   smtp_password,
             "from_email": body.digest_from_email,
         }
-        send_email(smtp_cfg, recipients, mail["html"], week_label, text=mail["text"], images=mail["images"])
-        who = recipients[0] if len(recipients) == 1 else f"{len(recipients)} recipients"
-        return {"ok": True, "message": f"Test digest sent to {who}"}
+        result = send_email(smtp_cfg, recipients, mail["html"], week_label, text=mail["text"], images=mail["images"])
+        record_send(db, "test", sent=len(result["sent"]), failed=result["failed"])
+        sent = result["sent"]
+        who = sent[0] if len(sent) == 1 else f"{len(sent)} recipients"
+        message = f"Test digest sent to {who}"
+        if result["failed"]:
+            message += f"; not delivered to {', '.join(result['failed'])}"
+        return {"ok": True, "message": message}
     except Exception as e:
         msg = scrub(str(e), plex_token, smtp_password)
         logger.error("test-digest failed: %s", msg)
+        record_send(db, "test", error=msg)
         return {"ok": False, "error": msg}
+
+
+@router.post("/settings/send-digest-now")
+def send_digest_now(body: DigestSendNowRequest):
+    """Send this week's digest to everyone now, from the saved settings. It counts
+    as the week's digest. Sent in the last 12 hours? Needs force."""
+    from ..services.scheduler import send_digest
+    return send_digest("manual", force=body.force)
+
+
+@router.get("/settings/digest-history")
+def digest_history(db: Session = Depends(get_db)):
+    from ..services.plex_digest import history
+    return history(db)
 
 
 @router.post("/settings/test-jellyfin")

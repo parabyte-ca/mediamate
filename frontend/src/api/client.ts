@@ -572,6 +572,11 @@ export interface UpgradeProgressInfo {
 }
 
 /** The digest settings as they are in the form (not necessarily saved yet). */
+export interface DigestSend {
+  at: string; kind: "scheduled" | "manual" | "test"; sent: number;
+  failed: Record<string, string>; error: string | null;
+}
+
 export interface DigestForm {
   digest_smtp_host: string; digest_smtp_port: string; digest_smtp_user: string;
   digest_smtp_password: string; digest_from_email: string; digest_recipients: string;
@@ -1493,6 +1498,10 @@ export const api = {
     /** Send the digest now: to send_to ("Send me a test") or else to the recipients. */
     testDigest: (data: DigestForm & { send_to?: string }) =>
       req<{ ok: boolean; message?: string; error?: string }>("/settings/test-digest", { method: "POST", body: JSON.stringify(data) }),
+    /** Send this week's digest to everyone now (saved settings); counts as the week's send. */
+    sendDigestNow: (force = false) =>
+      req<{ ok: boolean; message?: string; error?: string; code?: string }>("/settings/send-digest-now", { method: "POST", body: JSON.stringify({ force }) }),
+    digestHistory: () => req<DigestSend[]>("/settings/digest-history"),
     /** The digest as it would look now (pictures inline), for the preview. */
     previewDigest: (data: DigestForm) =>
       req<{ ok: boolean; html?: string; error?: string; counts?: { movies: number; episodes: number; shows: number; albums: number } }>(

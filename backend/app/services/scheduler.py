@@ -524,10 +524,28 @@ def _cleanup_completed() -> None:
 
 
 def run_weekly_digest() -> None:
-    """Send the weekly Plex content digest email."""
+    """The scheduled weekly send (only when the digest is switched on)."""
     from ..database import SessionLocal
     from ..models import Setting
-    from .plex_digest import compose, send_email
+
+    db = SessionLocal()
+    try:
+        row = db.query(Setting).filter(Setting.key == "digest_enabled").first()
+        enabled = (row.value if row else "false").lower() == "true"
+    finally:
+        db.close()
+    if enabled:
+        send_digest("scheduled")
+
+
+def send_digest(kind: str = "scheduled", force: bool = False) -> dict:
+    """Build and send this week's digest to every recipient, from the saved settings.
+    Returns {"ok", "message"} or {"ok": False, "error", "code"?}. Every attempt that
+    reaches the mail server is written to the send history."""
+    from ..database import SessionLocal
+    from ..models import Setting
+    from .plex_digest import compose, parse_recipients, record_send, send_email
+    from .secret_settings import scrub
 
     db = SessionLocal()
     try:
@@ -535,14 +553,11 @@ def run_weekly_digest() -> None:
     finally:
         db.close()
 
-    if s.get("digest_enabled", "false").lower() != "true":
-        return
-
     # Deduplication guard: skip if already sent within the past 12 hours.
     # This prevents double-sends if the scheduler fires twice (e.g. container
-    # restart at the scheduled hour, or two replicas running simultaneously).
+    # restart at the scheduled hour). A manual send can override it.
     last_sent_str = s.get("last_digest_sent_at", "")
-    if last_sent_str:
+    if last_sent_str and not force:
         try:
             last_sent = datetime.fromisoformat(last_sent_str)
             if (datetime.now(timezone.utc) - last_sent).total_seconds() < 12 * 3600:
@@ -550,26 +565,26 @@ def run_weekly_digest() -> None:
                     "Weekly digest skipped — already sent at %s (within 12 h window).",
                     last_sent_str,
                 )
-                return
+                return {"ok": False, "code": "recently_sent",
+                        "error": f"The digest was already sent at {last_sent_str[:16].replace('T', ' ')} UTC."}
         except Exception:
             pass
 
-    recipients_raw = s.get("digest_recipients", "") or ""
-    recipients = [r.strip() for r in recipients_raw.replace("\n", ",").split(",") if r.strip()]
+    recipients = parse_recipients(s.get("digest_recipients", ""))
     if not recipients:
         logger.info("Weekly digest skipped — no recipients configured.")
-        return
+        return {"ok": False, "error": "No recipients configured"}
 
     plex_url   = s.get("plex_url", "")
     plex_token = s.get("plex_token", "")
     if not plex_url or not plex_token:
         logger.warning("Weekly digest skipped — Plex not configured.")
-        return
+        return {"ok": False, "error": "Plex isn't configured"}
 
     smtp_host = s.get("digest_smtp_host", "")
     if not smtp_host:
         logger.warning("Weekly digest skipped — SMTP host not configured.")
-        return
+        return {"ok": False, "error": "SMTP host not configured"}
 
     excluded_raw = s.get("digest_excluded_libs", "") or ""
     excluded_libs = frozenset(
@@ -578,28 +593,41 @@ def run_weekly_digest() -> None:
 
     now = datetime.now(timezone.utc)
     week_label = f"Week of {now.strftime('%B %-d, %Y')}"
+    password = s.get("digest_smtp_password", "")
     db = SessionLocal()
     try:
-        mail = compose(db, plex_url, plex_token, excluded_libs, week_label)
-    except Exception as e:
-        logger.error("Digest: failed to build: %s", e)
-        return
-    finally:
-        db.close()
+        try:
+            mail = compose(db, plex_url, plex_token, excluded_libs, week_label)
+        except Exception as e:
+            msg = scrub(str(e), plex_token, password)
+            logger.error("Digest: failed to build: %s", msg)
+            record_send(db, kind, error=f"Couldn't build the digest: {msg}")
+            return {"ok": False, "error": f"Couldn't build the digest: {msg}"}
 
-    smtp_cfg = {
-        "host":       smtp_host,
-        "port":       s.get("digest_smtp_port", "587"),
-        "user":       s.get("digest_smtp_user", ""),
-        "password":   s.get("digest_smtp_password", ""),
-        "from_email": s.get("digest_from_email", ""),
-    }
-    try:
-        send_email(smtp_cfg, recipients, mail["html"], week_label, text=mail["text"], images=mail["images"])
+        smtp_cfg = {
+            "host":       smtp_host,
+            "port":       s.get("digest_smtp_port", "587"),
+            "user":       s.get("digest_smtp_user", ""),
+            "password":   password,
+            "from_email": s.get("digest_from_email", ""),
+        }
+        try:
+            result = send_email(smtp_cfg, recipients, mail["html"], week_label,
+                                text=mail["text"], images=mail["images"])
+        except Exception as e:
+            msg = scrub(str(e), plex_token, password)
+            logger.error("Digest send failed: %s", msg)
+            record_send(db, kind, error=msg)
+            return {"ok": False, "error": msg}
         # Record send time so the deduplication guard above works correctly.
         _record_digest_sent()
-    except Exception as e:
-        logger.error("Digest send failed: %s", e)
+        record_send(db, kind, sent=len(result["sent"]), failed=result["failed"])
+    finally:
+        db.close()
+    message = f"Digest sent to {len(result['sent'])} recipient(s)"
+    if result["failed"]:
+        message += f"; not delivered to {', '.join(result['failed'])}"
+    return {"ok": True, "message": message, "sent": len(result["sent"]), "failed": result["failed"]}
 
 
 def _record_digest_sent() -> None:

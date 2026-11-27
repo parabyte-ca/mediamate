@@ -283,6 +283,10 @@ class JellyfinTestRequest(BaseModel):
     api_key: str
 
 
+class DigestSendNowRequest(BaseModel):
+    force: bool = False                   # send even if one went out in the last 12 hours
+
+
 class DigestTestRequest(BaseModel):
     send_to: str = ""                     # one address for "Send me a test"; else the recipients
     digest_smtp_host: str = ""

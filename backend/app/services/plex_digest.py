@@ -19,6 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formatdate, make_msgid
 from pathlib import Path
 
 import httpx
@@ -650,20 +651,32 @@ def render_text(d: dict, week_label: str, view_url: str = "") -> str:
 
 # ── sending, and the "View in browser" copy ─────────────────────────────────
 
-def send_email(smtp_cfg: dict, recipients: list[str], html: str, week_label: str,
-               text: str = "", images: dict | None = None) -> None:
-    """Send the digest: multipart/related (HTML + attached posters) inside
-    multipart/alternative (plain text first)."""
-    host      = smtp_cfg.get("host", "")
-    port      = int(smtp_cfg.get("port") or 587)
-    user      = smtp_cfg.get("user", "")
-    password  = smtp_cfg.get("password", "")
-    from_addr = smtp_cfg.get("from_email", "") or user
+_SPLIT = re.compile(r"[\s,;]+")
 
+
+def parse_recipients(raw: str | None) -> list[str]:
+    """The recipient list as typed (commas, semicolons, spaces or new lines), each
+    address once: duplicates are dropped ignoring upper and lower case."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for addr in _SPLIT.split(raw or ""):
+        addr = addr.strip()
+        if addr and addr.lower() not in seen:
+            seen.add(addr.lower())
+            out.append(addr)
+    return out
+
+
+def _message(from_addr: str, to: str, html: str, week_label: str, text: str,
+             images: dict | None) -> str:
+    """One recipient's copy: multipart/related (HTML + attached posters) inside
+    multipart/alternative (plain text first), addressed to that person only."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"This week from MediaMate — {week_label}"
     msg["From"]    = from_addr
-    msg["To"]      = ", ".join(recipients)
+    msg["To"]      = to
+    msg["Date"]    = formatdate(localtime=False)
+    msg["Message-ID"] = make_msgid(domain="mediamate.local")
     msg.attach(MIMEText(text or "Open this email in an HTML-capable mail app to see the digest.", "plain", "utf-8"))
     if images:
         related = MIMEMultipart("related")
@@ -676,23 +689,87 @@ def send_email(smtp_cfg: dict, recipients: list[str], html: str, week_label: str
         msg.attach(related)
     else:
         msg.attach(MIMEText(html, "html", "utf-8"))
+    return msg.as_string()
+
+
+def send_email(smtp_cfg: dict, recipients: list[str], html: str, week_label: str,
+               text: str = "", images: dict | None = None) -> dict:
+    """Send each recipient their own copy over one SMTP connection, so nobody sees
+    anyone else's address. Returns {"sent": [...], "failed": {address: reason}}.
+    Raises when the server can't be reached or every recipient was refused."""
+    host      = smtp_cfg.get("host", "")
+    port      = int(smtp_cfg.get("port") or 587)
+    user      = smtp_cfg.get("user", "")
+    password  = smtp_cfg.get("password", "")
+    from_addr = smtp_cfg.get("from_email", "") or user
+    recipients = parse_recipients(",".join(recipients))
+    sent: list[str] = []
+    failed: dict[str, str] = {}
 
     ctx = ssl.create_default_context()
     if port == 465:
-        with smtplib.SMTP_SSL(host, port, context=ctx, timeout=30) as server:
-            if user and password:
-                server.login(user, password)
-            server.sendmail(from_addr, recipients, msg.as_string())
+        server_cm = smtplib.SMTP_SSL(host, port, context=ctx, timeout=30)
     else:
-        with smtplib.SMTP(host, port, timeout=30) as server:
+        server_cm = smtplib.SMTP(host, port, timeout=30)
+    with server_cm as server:
+        if port != 465:
             server.ehlo()
             server.starttls(context=ctx)
             server.ehlo()
-            if user and password:
-                server.login(user, password)
-            server.sendmail(from_addr, recipients, msg.as_string())
+        if user and password:
+            server.login(user, password)
+        for to in recipients:
+            try:
+                server.sendmail(from_addr, [to], _message(from_addr, to, html, week_label, text, images))
+                sent.append(to)
+            except smtplib.SMTPServerDisconnected:
+                raise
+            except (smtplib.SMTPException, OSError) as e:
+                failed[to] = str(e)[:200]
+                logger.warning("Digest to %s failed: %s", to, failed[to])
 
-    logger.info("Weekly digest sent to %d recipient(s)", len(recipients))
+    if recipients and not sent:
+        raise RuntimeError(f"Every recipient was refused: {next(iter(failed.values()))}")
+    logger.info("Weekly digest sent to %d recipient(s)%s", len(sent),
+                f", {len(failed)} failed" if failed else "")
+    return {"sent": sent, "failed": failed}
+
+
+# ── send history (kept in the settings table, so it survives upgrades) ──────
+
+HISTORY_KEY = "digest_history"
+HISTORY_KEEP = 20
+
+
+def record_send(db, kind: str, sent: int = 0, failed: dict | None = None,
+                error: str | None = None) -> None:
+    """Remember one send attempt: when, what kind (scheduled / manual / test),
+    how many it reached, who it didn't, and any error."""
+    import json
+    from ..models import Setting
+    entry = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "kind": kind,
+             "sent": sent, "failed": failed or {}, "error": error}
+    row = db.query(Setting).filter(Setting.key == HISTORY_KEY).first()
+    try:
+        items = json.loads(row.value) if row and row.value else []
+    except ValueError:
+        items = []
+    items = ([entry] + items)[:HISTORY_KEEP]
+    if row:
+        row.value = json.dumps(items)
+    else:
+        db.add(Setting(key=HISTORY_KEY, value=json.dumps(items)))
+    db.commit()
+
+
+def history(db) -> list[dict]:
+    import json
+    from ..models import Setting
+    row = db.query(Setting).filter(Setting.key == HISTORY_KEY).first()
+    try:
+        return json.loads(row.value) if row and row.value else []
+    except ValueError:
+        return []
 
 
 def _view_dir() -> Path:

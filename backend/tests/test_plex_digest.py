@@ -3,6 +3,8 @@ from email import message_from_string
 from email.header import decode_header, make_header
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.services import plex_digest as pd
 
 
@@ -119,9 +121,12 @@ def test_sending_uses_starttls_and_logs_in(monkeypatch):
     smtp.assert_called_once_with("mail", 587, timeout=30)
     server.starttls.assert_called_once()
     server.login.assert_called_once_with("u", "p")
-    sender, to, body = server.sendmail.call_args.args
-    assert (sender, to) == ("f@x", ["a@x", "b@x"])
+    assert server.sendmail.call_count == 2                 # one copy each
+    (s1, to1, _), (s2, to2, body) = [c.args for c in server.sendmail.call_args_list]
+    assert (s1, to1, s2, to2) == ("f@x", ["a@x"], "f@x", ["b@x"])
     msg = message_from_string(body)
+    assert msg["To"] == "b@x" and "a@x" not in body          # nobody sees the others
+    assert msg["Message-ID"]
     subject = str(make_header(decode_header(msg["Subject"])))
     assert subject == "This week from MediaMate — Week 1"
     kinds = [p.get_content_type() for p in msg.walk()]
@@ -186,3 +191,113 @@ def test_vague_items_never_reach_the_digest(monkeypatch):
     s = pd.fetch_digest_sections("http://plex", "tok")
     titles = [i["title"] for k in s for i in s[k]]
     assert titles == ["Good Film", "Real Show"]
+
+
+def test_recipients_are_deduplicated():
+    assert pd.parse_recipients("A@x.com\nb@y.com, a@X.com; c@z.com  b@y.com") == ["A@x.com", "b@y.com", "c@z.com"]
+    assert pd.parse_recipients("") == [] and pd.parse_recipients(None) == []
+
+
+def test_one_refused_recipient_does_not_stop_the_rest():
+    import smtplib
+    server = MagicMock()
+    def send(frm, to, body):
+        if to == ["bad@x"]:
+            raise smtplib.SMTPRecipientsRefused({"bad@x": (550, b"no such user")})
+    server.sendmail.side_effect = send
+    with patch("smtplib.SMTP") as smtp:
+        smtp.return_value.__enter__.return_value = server
+        r = pd.send_email({"host": "mail"}, ["a@x", "bad@x", "A@x", "c@x"], "<p/>", "W")
+    assert r["sent"] == ["a@x", "c@x"] and list(r["failed"]) == ["bad@x"]
+    assert server.sendmail.call_count == 3                 # duplicate "A@x" sent once
+
+
+def test_all_refused_raises():
+    import smtplib
+    server = MagicMock()
+    server.sendmail.side_effect = smtplib.SMTPRecipientsRefused({"x": (550, b"no")})
+    with patch("smtplib.SMTP") as smtp:
+        smtp.return_value.__enter__.return_value = server
+        with pytest.raises(RuntimeError):
+            pd.send_email({"host": "mail"}, ["a@x"], "<p/>", "W")
+
+
+@pytest.fixture
+def digest_db(tmp_path, monkeypatch):
+    """A throwaway database used by the app, the scheduler and the routes."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app import models  # noqa: F401
+    from app.database import Base, get_db
+    from app.main import app
+    engine = create_engine(f"sqlite:///{tmp_path / 'd.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setattr("app.database.SessionLocal", Session)
+
+    def _db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+    app.dependency_overrides[get_db] = _db
+    yield Session
+    app.dependency_overrides.pop(get_db, None)
+    engine.dispose()
+
+
+def _digest_settings(db, **extra):
+    from app.models import Setting
+    vals = {"digest_enabled": "true", "digest_recipients": "a@x\nb@x", "plex_url": "http://plex",
+            "plex_token": "tok", "digest_smtp_host": "mail", **extra}
+    for k, v in vals.items():
+        row = db.query(Setting).filter(Setting.key == k).first()
+        if row:
+            row.value = v
+        else:
+            db.add(Setting(key=k, value=v))
+    db.commit()
+
+
+def test_send_now_records_history_and_guards_repeat(monkeypatch, digest_db):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.models import Setting
+    from app.services import scheduler
+    db = digest_db()
+    _digest_settings(db)
+    db.close()
+    monkeypatch.setattr(pd, "compose", lambda *a, **k: {"html": "<p/>", "text": "t", "images": {}})
+    sent = []
+    monkeypatch.setattr(pd, "send_email", lambda cfg, rcpt, *a, **k: sent.append(list(rcpt)) or {"sent": list(rcpt), "failed": {}})
+    c = TestClient(app)
+    r = c.post("/api/settings/send-digest-now", json={}).json()
+    assert r["ok"] and r["sent"] == 2 and sent == [["a@x", "b@x"]]
+    r = c.post("/api/settings/send-digest-now", json={}).json()   # within 12 h
+    assert not r["ok"] and r["code"] == "recently_sent" and len(sent) == 1
+    scheduler.run_weekly_digest()                                   # the schedule is guarded too
+    assert len(sent) == 1
+    r = c.post("/api/settings/send-digest-now", json={"force": True}).json()
+    assert r["ok"] and len(sent) == 2
+    h = c.get("/api/settings/digest-history").json()
+    assert [x["kind"] for x in h[:2]] == ["manual", "manual"] and h[0]["sent"] == 2
+    assert "digest_history" not in c.get("/api/settings").json()
+
+
+def test_failed_send_is_recorded(monkeypatch, digest_db):
+    from app.models import Setting
+    from app.services import scheduler
+    db = digest_db()
+    _digest_settings(db, digest_smtp_password="hunter2secret")
+    db.close()
+    monkeypatch.setattr(pd, "compose", lambda *a, **k: {"html": "<p/>", "text": "t", "images": {}})
+    def boom(*a, **k):
+        raise OSError("login failed for hunter2secret")
+    monkeypatch.setattr(pd, "send_email", boom)
+    r = scheduler.send_digest("scheduled")
+    assert not r["ok"] and "hunter2secret" not in r["error"]
+    db = digest_db()
+    h = pd.history(db)
+    db.close()
+    assert h[0]["kind"] == "scheduled" and h[0]["error"] and "hunter2secret" not in h[0]["error"]

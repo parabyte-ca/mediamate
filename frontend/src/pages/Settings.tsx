@@ -4,7 +4,7 @@ import { api, SECRET_MASK, type DownloadPath, type FolderRole, type FolderTarget
 import { authStore } from "../auth";
 import { PALETTES, useTheme, type Theme } from "../ThemeContext";
 import { Avatar, usePeople } from "../people";
-import type { ShareLink } from "../api/client";
+import type { DigestSend, ShareLink } from "../api/client";
 import ImportPanel from "../components/ImportPanel";
 import { startTour } from "../components/Tour";
 import MediaSettings from "../components/MediaSettings";
@@ -723,6 +723,10 @@ export default function Settings() {
   const [digestPreview, setDigestPreview] = useState<string | null>(null);
   const [previewingDigest, setPreviewingDigest] = useState(false);
   const [testTo, setTestTo] = useState("");
+  const [sendingDigest, setSendingDigest] = useState(false);
+  const [digestSends, setDigestSends] = useState<DigestSend[]>([]);
+  const loadDigestSends = () => api.settings.digestHistory().then(setDigestSends).catch(() => {});
+  useEffect(() => { loadDigestSends(); }, []);
   const [health,           setHealth]           = useState<HealthStatus>(null);
   const [exportingBackup,  setExportingBackup]  = useState(false);
   const [exportError,      setExportError]      = useState<string | null>(null);
@@ -908,7 +912,23 @@ export default function Settings() {
     setTestingDigest(true); setDigestTestResult(null);
     try {
       setDigestTestResult(await api.settings.testDigest({ ...digestForm(), send_to: sendTo }));
-    } finally { setTestingDigest(false); }
+    } finally { setTestingDigest(false); loadDigestSends(); }
+  };
+
+  const handleSendDigestNow = async () => {
+    const n = (settings.digest_recipients ?? "").split(/[\s,;]+/).filter(Boolean).length;
+    if (!window.confirm(`Send this week's digest to ${n} recipient${n === 1 ? "" : "s"} now? Each person gets their own copy.`)) return;
+    setSendingDigest(true); setDigestTestResult(null);
+    try {
+      await api.settings.update(settings);           // send what's on screen
+      let r = await api.settings.sendDigestNow();
+      if (!r.ok && r.code === "recently_sent" && window.confirm(`${r.error} Send it again anyway?`)) {
+        r = await api.settings.sendDigestNow(true);
+      }
+      setDigestTestResult(r);
+    } catch (e) {
+      setDigestTestResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    } finally { setSendingDigest(false); loadDigestSends(); }
   };
 
   const handlePreviewDigest = async () => {
@@ -1727,15 +1747,39 @@ export default function Settings() {
                   {testingDigest && <Loader2 className="h-4 w-4 animate-spin" />}
                   Send me a test
                 </button>
+                <button onClick={handleSendDigestNow} disabled={sendingDigest}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">
+                  {sendingDigest && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Send to everyone now
+                </button>
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Preview shows this week's digest as it would look now. A test goes only to the address above (or the first recipient), and doesn't count as this week's digest.
+                Preview shows this week's digest as it would look now. A test goes only to the address above (or the first recipient), and doesn't count as this week's digest. Send to everyone now saves these settings and counts as this week's digest. Each recipient gets their own copy, so nobody sees the other addresses.
               </p>
               {digestTestResult && (
                 <span className={`flex items-center gap-1.5 text-sm font-medium ${digestTestResult.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
                   {digestTestResult.ok ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
                   {digestTestResult.ok ? digestTestResult.message : digestTestResult.error}
                 </span>
+              )}
+              {digestSends.length > 0 && (
+                <div>
+                  <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Recent sends</h4>
+                  <ul className="divide-y divide-gray-100 text-xs dark:divide-gray-800">
+                    {digestSends.slice(0, 8).map((d) => (
+                      <li key={d.at + d.kind} className="flex flex-wrap items-baseline gap-x-2 py-1.5">
+                        <span className="tabular-nums text-gray-700 dark:text-gray-300">{new Date(d.at).toLocaleString()}</span>
+                        <span className="text-gray-500 dark:text-gray-400">{d.kind === "scheduled" ? "Weekly" : d.kind === "manual" ? "Sent now" : "Test"}</span>
+                        {d.error
+                          ? <span className="min-w-0 break-words text-red-600 dark:text-red-400">Failed: {d.error}</span>
+                          : <span className="text-green-700 dark:text-green-400">{d.sent} recipient{d.sent === 1 ? "" : "s"}</span>}
+                        {Object.keys(d.failed ?? {}).length > 0 && (
+                          <span className="min-w-0 break-words text-amber-700 dark:text-amber-300">not delivered: {Object.keys(d.failed).join(", ")}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </div>
           </div>

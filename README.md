@@ -46,7 +46,7 @@ MediaMate merges [AuTorrent](https://github.com/parabyte-ca/autorrent) (search, 
   - albums added to the music library
   - **Coming next week**: episodes airing for TV shows on your Watchlist and Watchlist movies coming out (music artists are never mistaken for shows)
 
-  Posters are attached to the email, so Gmail shows them, and a plain-text version goes with it. It reads well on a phone and in dark mode. With a public address set (Settings → Sharing), a **View in browser** link opens the latest digest. **Preview** shows it in the app, and **Send me a test** mails it to one address.
+  Posters are attached to the email, so Gmail shows them, and a plain-text version goes with it. It reads well on a phone and in dark mode. With a public address set (Settings → Sharing), a **View in browser** link opens the latest digest. **Preview** shows it in the app, **Send me a test** mails it to one address, and **Send to everyone now** sends this week's digest straight away. Each recipient gets their own copy (nobody sees the other addresses), duplicate addresses are sent once, and **Recent sends** lists the last sends with any failures.
 - **Guided tour** for new users: a short walk through who you are on this device, Search, the Watchlist (Mine or Everyone, who follows what), Browse, Calendar, Activity, Library and alerts. It starts once on each new device, after it has said who is using it (and once more on every device when the tour changes), and you can replay it from Settings → Appearance or by searching "tour" with Ctrl+K. With only one person set up it points to Settings → People instead.
 
 ---

@@ -1,13 +1,25 @@
-"""Weekly Plex digest: fetch recently-added content and email a summary."""
+"""Weekly Plex digest: what was added this week, emailed to the household.
+
+The email has a highlight (the best-rated new title), new movies as a poster grid,
+TV grouped by show ("3 new episodes · S01E04–06"), albums added to the music library,
+and what's coming next week from the Watchlist. Posters are attached to the email
+(cid: images) because Gmail and others block data: images; the browser preview and the
+"View in browser" copy use data: images instead. A plain-text part goes with the HTML.
+"""
 
 import base64
+import html as _html
 import logging
+import re
+import secrets
 import smtplib
 import ssl
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 
 import httpx
 
@@ -85,7 +97,7 @@ def _fetch_recently_added(plex_url: str, token: str, library_id: str, days: int 
             "title":             elem.get("title", ""),
             "year":              elem.get("year", ""),
             "summary":           (elem.get("summary") or "").strip(),
-            "rating":            elem.get("rating", ""),
+            "rating":            elem.get("rating", "") or elem.get("audienceRating", ""),
             "content_rating":    elem.get("contentRating", ""),
             "genres":            [g.get("tag") for g in elem.findall("Genre") if g.get("tag")],
             "item_type":         elem.get("type", ""),
@@ -118,24 +130,49 @@ def _fetch_show_summary(plex_url: str, token: str, show_key: str) -> str:
     return ""
 
 
-def _fetch_thumb_b64(plex_url: str, token: str, thumb_path: str) -> str:
-    """Download a Plex thumbnail (80×120) and return as a base64 data URI."""
+def _fetch_image(plex_url: str, token: str, thumb_path: str, width: int = 200, height: int = 300) -> bytes | None:
+    """Download a Plex poster at the given size; JPEG bytes, or None."""
     if not thumb_path:
-        return ""
+        return None
     url = f"{plex_url.rstrip('/')}/photo/:/transcode"
     try:
         resp = httpx.get(
             url,
-            params={"url": thumb_path, "width": "80", "height": "120",
+            params={"url": thumb_path, "width": str(width), "height": str(height),
                     "minSize": "1", "X-Plex-Token": token},
             timeout=8.0,
         )
         if resp.is_success and resp.content:
-            ct = resp.headers.get("content-type", "image/jpeg")
-            return f"data:{ct};base64,{base64.b64encode(resp.content).decode()}"
+            return resp.content
     except Exception as e:
         logger.warning("Thumbnail fetch failed for %s: %s", thumb_path, e)
-    return ""
+    return None
+
+
+def _fetch_thumb_b64(plex_url: str, token: str, thumb_path: str) -> str:
+    """Older callers: the poster as a data: URI (small)."""
+    data = _fetch_image(plex_url, token, thumb_path, 80, 120)
+    return f"data:image/jpeg;base64,{base64.b64encode(data).decode()}" if data else ""
+
+
+def episode_ranges(codes: list[str]) -> str:
+    """["S01E04","S01E05","S01E06","S02E01"] → "S01E04–06, S02E01"."""
+    eps = []
+    for c in sorted(set(codes)):
+        m = re.match(r"S(\d+)E(\d+)", c)
+        if m:
+            eps.append((int(m[1]), int(m[2])))
+    eps.sort()
+    out, i = [], 0
+    while i < len(eps):
+        s_, start = eps[i]
+        end = start
+        while i + 1 < len(eps) and eps[i + 1] == (s_, end + 1):
+            i += 1
+            end += 1
+        out.append(f"S{s_:02d}E{start:02d}" + (f"–{end:02d}" if end > start else ""))
+        i += 1
+    return ", ".join(out)
 
 
 def fetch_digest_sections(
@@ -166,7 +203,7 @@ def fetch_digest_sections(
     # ── Movies ────────────────────────────────────────────────────────────────
     for lib_id in _get_library_ids_by_type(plex_url, token, "movie", excluded_libs):
         for item in _fetch_recently_added(plex_url, token, lib_id, days):
-            item["thumb_b64"] = _fetch_thumb_b64(plex_url, token, item["thumb"])
+            item["image"] = _fetch_image(plex_url, token, item["thumb"])
             item["plex_link"] = _plex_link(item.get("rating_key", ""))
             cr = (item["content_rating"] or "").upper().strip()
             bucket = "movies" if cr in _NON_MATURE_MOVIE else "mature_movies"
@@ -190,7 +227,8 @@ def fetch_digest_sections(
                     "plex_link":      _plex_link(gp_rating_key),
                     "grandparent_key":   gp_key,
                     "grandparent_thumb": ep["grandparent_thumb"],
-                    "thumb_b64":      "",
+                    "image":          None,
+                    "rating":         ep.get("rating", ""),
                 }
             s_num = ep.get("season_num", "")
             e_num = ep.get("episode_num", "")
@@ -205,7 +243,8 @@ def fetch_digest_sections(
     # Fetch show summaries and thumbnails (one call per unique show)
     for show in shows.values():
         show["summary"]   = _fetch_show_summary(plex_url, token, show["grandparent_key"])
-        show["thumb_b64"] = _fetch_thumb_b64(plex_url, token, show["grandparent_thumb"])
+        show["image"] = _fetch_image(plex_url, token, show["grandparent_thumb"])
+        show["episode_ranges"] = episode_ranges(show["episodes"])
         cr = show["content_rating"]
         bucket = "tv" if cr in _NON_MATURE_TV else "mature_tv"
         sections[bucket].append(show)
@@ -213,155 +252,359 @@ def fetch_digest_sections(
     return sections
 
 
-def render_html(sections: dict[str, list], week_label: str) -> str:
-    """Render an inline-CSS HTML email with cover art and summaries."""
 
-    def _esc(s: str) -> str:
-        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    def _summary(text: str, link: str = "", limit: int = 300) -> str:
-        """Return escaped summary HTML, with a linked ellipsis if the text exceeds limit."""
-        s = (text or "").strip()
-        if not s:
+# ── the rest of the digest: highlight, music, coming next week ──────────────
+
+def _score(item: dict) -> float:
+    try:
+        return float(item.get("rating") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def pick_highlight(sections: dict[str, list]) -> dict | None:
+    """The best-rated new title, family-friendly first (the digest goes to the whole household)."""
+    for keys in (("movies", "tv"), ("mature_movies", "mature_tv")):
+        pool = [(k, i) for k in keys for i in sections.get(k, [])]
+        if pool:
+            kind, item = max(pool, key=lambda p: (_score(p[1]), p[1].get("added_at", 0)))
+            return {"kind": "movie" if "movies" in kind else "tv", "item": item}
+    return None
+
+
+def music_added(db, days: int = 7, limit: int = 12) -> list[dict]:
+    """Albums that arrived in the music library this week, newest first, with small covers."""
+    from ..models import MusicLibAlbum
+    from . import music_covers
+    import os
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    out = []
+    rows = (db.query(MusicLibAlbum).filter(MusicLibAlbum.added_at.isnot(None))
+            .order_by(MusicLibAlbum.added_at.desc()).limit(200).all())
+    for a in rows:
+        at = a.added_at if a.added_at.tzinfo else a.added_at.replace(tzinfo=timezone.utc)
+        if at < cutoff:
+            break
+        image = None
+        if a.cover:
+            try:
+                path = music_covers.thumb(a.id, os.path.join(a.folder, a.cover), 160)
+                image = Path(path).read_bytes()
+                if len(image) > 400_000:          # the original, too big for an email
+                    image = None
+            except Exception:
+                image = None
+        out.append({"title": a.title or "Untitled", "artist": a.artist or "", "year": a.year,
+                    "format": (a.format or "").upper(), "tracks": a.tracks, "image": image})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def coming_up(db, days: int = 7) -> dict:
+    """Next week: episodes airing for Watchlist shows, and Watchlist movies coming out."""
+    import asyncio
+    from ..models import WatchlistItem
+    from .calendar_view import build_calendar
+    shows: dict[str, dict] = {}
+    try:
+        cal = asyncio.run(build_calendar(db, days_back=0, days_ahead=days))
+        for e in cal.get("entries", []):
+            if not e.get("enabled", True):
+                continue
+            sh = shows.setdefault(e["title"], {"title": e["title"], "poster_url": e.get("poster_url"), "episodes": []})
+            sh["episodes"].append({"code": f"S{e['season']:02d}E{e['episode']:02d}", "name": e.get("name") or "",
+                                   "airs_at": e["airs_at"]})
+    except Exception as exc:
+        logger.warning("Digest: couldn't read the calendar: %s", exc)
+    today = date.today()
+    soon = (today + timedelta(days=days)).isoformat()
+    movies = []
+    for m in db.query(WatchlistItem).filter(WatchlistItem.kind == "movie"):
+        rd = m.release_date or ""
+        if rd and today.isoformat() <= rd <= soon and not m.completed_at:
+            movies.append({"title": m.title, "year": m.year, "release_date": rd, "poster_url": m.poster_url})
+    movies.sort(key=lambda m: m["release_date"])
+    show_list = sorted(shows.values(), key=lambda s: s["episodes"][0]["airs_at"])
+    return {"shows": show_list, "movies": movies}
+
+
+def build_digest(db, plex_url: str, token: str, excluded_libs: frozenset[str] = frozenset(),
+                 days: int = 7) -> dict:
+    """Everything the email shows. Plex, the music library and the Watchlist are each
+    optional: one failing leaves its section out."""
+    sections = fetch_digest_sections(plex_url, token, days=days, excluded_libs=excluded_libs)
+    hl = pick_highlight(sections)
+    if hl is not None:
+        it = hl["item"]
+        thumb = it.get("thumb") or it.get("grandparent_thumb")
+        big = _fetch_image(plex_url, token, thumb, 320, 480) if thumb else None
+        hl["image"] = big or it.get("image")
+    music = []
+    try:
+        music = music_added(db, days)
+    except Exception as exc:
+        logger.warning("Digest: couldn't list new albums: %s", exc)
+    return {"sections": sections, "highlight": hl, "music": music, "coming": coming_up(db, days)}
+
+
+# ── rendering ───────────────────────────────────────────────────────────────
+
+_SECTION_DEFS = (
+    ("movies", "New movies", "movie"),
+    ("mature_movies", "New movies · Mature", "movie"),
+    ("tv", "New episodes", "tv"),
+    ("mature_tv", "New episodes · Mature", "tv"),
+)
+
+# Colours: a light email that dark-mode clients can flip (classes below).
+_INK, _MUTED, _FAINT, _LINE, _CARD, _BG, _ACCENT = "#111827", "#4b5563", "#9ca3af", "#e5e7eb", "#ffffff", "#f3f4f6", "#2563eb"
+
+
+def _esc(s) -> str:
+    return _html.escape(str(s or ""), quote=True)
+
+
+def _clip(text: str, limit: int) -> str:
+    t = (text or "").strip()
+    return t if len(t) <= limit else t[:limit].rsplit(" ", 1)[0].rstrip(",.;:") + "…"
+
+
+def _day(iso: str) -> str:
+    try:
+        d = datetime.fromisoformat(iso.replace("Z", "+00:00")) if "T" in iso else datetime.fromisoformat(iso)
+        return d.strftime("%a %b %-d")
+    except Exception:
+        return iso[:10]
+
+
+def counts(d: dict) -> dict:
+    s = d["sections"]
+    return {"movies": len(s.get("movies", [])) + len(s.get("mature_movies", [])),
+            "episodes": sum(len(set(x.get("episodes", []))) for k in ("tv", "mature_tv") for x in s.get(k, [])),
+            "shows": len(s.get("tv", [])) + len(s.get("mature_tv", [])),
+            "albums": len(d.get("music", []))}
+
+
+def render_html(d: dict, week_label: str, inline_images: bool = False, view_url: str = "") -> tuple[str, dict]:
+    """(html, images). images = {cid: jpeg bytes} to attach; empty with inline_images
+    (preview and the browser copy), where pictures are data: URIs instead."""
+    images: dict[str, bytes] = {}
+
+    def src(data: bytes | None, name: str) -> str:
+        if not data:
             return ""
-        if len(s) <= limit:
-            return _esc(s)
-        clipped = _esc(s[:limit].rstrip())
-        if link:
-            return (
-                clipped
-                + f'<a href="{link}" style="color:#9ca3af;text-decoration:none" target="_blank">…</a>'
-            )
-        return clipped + "…"
+        if inline_images:
+            return f"data:image/jpeg;base64,{base64.b64encode(data).decode()}"
+        cid = f"{name}-{len(images)}@mediamate"
+        images[cid] = data
+        return f"cid:{cid}"
 
-    def _img(thumb_b64: str) -> str:
-        if not thumb_b64:
-            return (
-                '<td style="width:70px;padding-right:14px;vertical-align:top">'
-                '<div style="width:60px;height:90px;background:#e5e7eb;border-radius:4px"></div>'
-                "</td>"
-            )
-        return (
-            '<td style="width:70px;padding-right:14px;vertical-align:top">'
-            f'<img src="{thumb_b64}" width="60" height="90" '
-            'style="display:block;width:60px;height:90px;object-fit:cover;border-radius:4px" />'
-            "</td>"
-        )
+    def poster(data, name, w, h, link="", radius=8):
+        u = src(data, name)
+        box = (f'<img src="{u}" width="{w}" height="{h}" alt="" style="display:block;width:100%;max-width:{w}px;'
+               f'height:auto;border-radius:{radius}px;border:0">' if u else
+               f'<div style="width:100%;max-width:{w}px;height:{h}px;background:{_LINE};border-radius:{radius}px"></div>')
+        return f'<a href="{_esc(link)}" target="_blank" style="text-decoration:none">{box}</a>' if link and u else box
 
-    def _movie_cards(items: list) -> str:
-        rows = []
-        for m in items:
-            title   = _esc(m["title"])
-            year    = _esc(str(m.get("year") or ""))
-            cr      = _esc(m.get("content_rating") or "")
-            rating  = m.get("rating", "")
-            score   = f"{float(rating):.1f}/10" if rating else ""
-            genres  = ", ".join(_esc(g) for g in (m.get("genres") or [])[:3])
-            summary = _summary(m.get("summary") or "", m.get("plex_link") or "")
-            meta    = " · ".join(p for p in [cr, score, genres] if p)
-            img     = _img(m.get("thumb_b64", ""))
-            rows.append(
-                f'<tr><td style="padding:12px 0;border-bottom:1px solid #e5e7eb">'
-                f'<table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>'
-                f"{img}"
-                f'<td style="vertical-align:top">'
-                f'<div style="font-size:15px;font-weight:600;color:#111827">'
-                f'{title}{(" (" + year + ")") if year else ""}</div>'
-                + (f'<div style="font-size:12px;color:#6b7280;margin-top:3px">{meta}</div>' if meta else "")
-                + (f'<div style="font-size:13px;color:#374151;margin-top:6px;line-height:1.5">{summary}</div>' if summary else "")
-                + "</td></tr></table></td></tr>"
-            )
-        return "".join(rows)
+    def button(label, link):
+        if not link:
+            return ""
+        return (f'<a href="{_esc(link)}" target="_blank" style="display:inline-block;background:{_ACCENT};color:#ffffff;'
+                f'font-size:14px;font-weight:600;text-decoration:none;padding:10px 18px;border-radius:999px">{label}</a>')
 
-    def _tv_cards(items: list) -> str:
-        rows = []
-        for show in items:
-            title   = _esc(show["title"])
-            cr      = _esc(show.get("content_rating") or "")
-            summary = _summary(show.get("summary") or "", show.get("plex_link") or "")
-            eps     = sorted(set(show.get("episodes", [])))
-            ep_str  = ", ".join(eps[:12]) + ("…" if len(eps) > 12 else "")
-            count   = f"{len(eps)} new episode{'s' if len(eps) != 1 else ''}"
-            img     = _img(show.get("thumb_b64", ""))
-            rows.append(
-                f'<tr><td style="padding:12px 0;border-bottom:1px solid #e5e7eb">'
-                f'<table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>'
-                f"{img}"
-                f'<td style="vertical-align:top">'
-                f'<div style="font-size:15px;font-weight:600;color:#111827">{title}</div>'
-                f'<div style="font-size:12px;color:#6b7280;margin-top:3px">'
-                + (f"{cr} · " if cr else "")
-                + count
-                + "</div>"
-                + (f'<div style="font-size:13px;color:#374151;margin-top:6px;line-height:1.5">{summary}</div>' if summary else "")
-                + (f'<div style="font-size:12px;color:#9ca3af;margin-top:4px;font-family:monospace">{_esc(ep_str)}</div>' if ep_str else "")
-                + "</td></tr></table></td></tr>"
-            )
-        return "".join(rows)
+    def heading(text, n=None):
+        badge = f' <span style="color:{_FAINT};font-weight:400">({n})</span>' if n else ""
+        return (f'<tr><td class="mm-ink" style="padding:28px 0 10px;font-size:18px;font-weight:700;color:{_INK}">'
+                f'{text}{badge}</td></tr>')
 
-    SECTION_DEFS = [
-        ("movies",        "Movies",          _movie_cards),
-        ("mature_movies", "Mature Movies",   _movie_cards),
-        ("tv",            "TV Shows",        _tv_cards),
-        ("mature_tv",     "Mature TV Shows", _tv_cards),
-    ]
+    parts: list[str] = []
+    c = counts(d)
+    summary_bits = [f"{c['movies']} movie{'s' if c['movies'] != 1 else ''}" if c["movies"] else "",
+                    f"{c['episodes']} episode{'s' if c['episodes'] != 1 else ''}" if c["episodes"] else "",
+                    f"{c['albums']} album{'s' if c['albums'] != 1 else ''}" if c["albums"] else ""]
+    summary = " · ".join(b for b in summary_bits if b) or "A quiet week"
 
-    body_parts = []
-    for key, heading, renderer in SECTION_DEFS:
-        items = sections.get(key, [])
+    # Highlight
+    hl = d.get("highlight")
+    if hl:
+        it = hl["item"]
+        meta = []
+        if hl["kind"] == "movie":
+            meta = [str(it.get("year") or ""), it.get("content_rating") or "",
+                    f"★ {_score(it):.1f}" if _score(it) else "", ", ".join((it.get("genres") or [])[:2])]
+        else:
+            n = len(set(it.get("episodes", [])))
+            meta = [it.get("content_rating") or "", f"{n} new episode{'s' if n != 1 else ''}",
+                    it.get("episode_ranges") or ""]
+        parts.append(
+            f'<tr><td style="padding-top:20px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+            f'class="mm-card mm-hl" style="background:{_CARD};border-radius:14px"><tr>'
+            f'<td width="40%" style="padding:16px;vertical-align:top">{poster(hl.get("image"), "hl", 220, 330, it.get("plex_link") or "", 10)}</td>'
+            f'<td style="padding:16px 16px 16px 4px;vertical-align:top">'
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:{_ACCENT}">This week’s highlight</div>'
+            f'<div class="mm-ink" style="font-size:22px;font-weight:800;line-height:1.25;color:{_INK};margin-top:6px">{_esc(it["title"])}</div>'
+            f'<div class="mm-muted" style="font-size:13px;color:{_MUTED};margin-top:4px">{_esc(" · ".join(m for m in meta if m))}</div>'
+            f'<div class="mm-muted" style="font-size:14px;line-height:1.55;color:{_MUTED};margin-top:10px">{_esc(_clip(it.get("summary") or "", 320))}</div>'
+            f'<div style="margin-top:14px">{button("▶ Watch in Plex", it.get("plex_link") or "")}</div>'
+            f'</td></tr></table></td></tr>')
+
+    hl_item = hl["item"] if hl else None
+
+    # Movies (grid) and TV (grouped)
+    for key, title, kind in _SECTION_DEFS:
+        items = [i for i in d["sections"].get(key, []) if i is not hl_item]
         if not items:
             continue
-        body_parts.append(
-            f'<tr><td style="padding-top:24px;padding-bottom:4px">'
-            f'<div style="font-size:18px;font-weight:700;color:#1d4ed8;'
-            f'border-bottom:2px solid #1d4ed8;padding-bottom:6px">'
-            f'{heading} <span style="font-size:13px;font-weight:400;color:#6b7280">({len(items)})</span>'
-            f"</div></td></tr>"
-            f'<tr><td><table width="100%" cellpadding="0" cellspacing="0" '
-            f'border="0" style="border-collapse:collapse">'
-            f"{renderer(items)}"
-            f"</table></td></tr>"
-        )
+        parts.append(heading(title, len(items)))
+        if kind == "movie":
+            cells = []
+            for m in items:
+                meta = " · ".join(x for x in [str(m.get("year") or ""), f"★ {_score(m):.1f}" if _score(m) else ""] if x)
+                cells.append(
+                    f'<td width="33%" style="padding:0 4px 16px;vertical-align:top">'
+                    f'{poster(m.get("image"), "m", 180, 270, m.get("plex_link") or "")}'
+                    f'<div class="mm-ink" style="font-size:13px;font-weight:600;color:{_INK};margin-top:6px;line-height:1.3">{_esc(m["title"])}</div>'
+                    f'<div class="mm-faint" style="font-size:12px;color:{_FAINT}">{_esc(meta)}</div></td>')
+            rows = ["".join(cells[i:i + 3]) + ('<td width="33%"></td>' * (3 - len(cells[i:i + 3])))
+                    for i in range(0, len(cells), 3)]
+            parts.append('<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" >'
+                         + "".join(f"<tr>{r}</tr>" for r in rows) + "</table></td></tr>")
+        else:
+            for sh in items:
+                n = len(set(sh.get("episodes", [])))
+                line = f"{n} new episode{'s' if n != 1 else ''}" + (f" · {sh.get('episode_ranges')}" if sh.get("episode_ranges") else "")
+                link = sh.get("plex_link") or ""
+                parts.append(
+                    f'<tr><td style="padding:0 0 12px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+                    f'class="mm-card" style="background:{_CARD};border-radius:12px"><tr>'
+                    f'<td width="72" style="padding:12px;vertical-align:top">{poster(sh.get("image"), "tv", 60, 90, link, 6)}</td>'
+                    f'<td style="padding:12px 12px 12px 0;vertical-align:top">'
+                    f'<div class="mm-ink" style="font-size:15px;font-weight:700;color:{_INK}">{_esc(sh["title"])}</div>'
+                    f'<div style="font-size:13px;font-weight:600;color:{_ACCENT};margin-top:2px">{_esc(line)}</div>'
+                    + (f'<div class="mm-muted" style="font-size:13px;line-height:1.5;color:{_MUTED};margin-top:6px">{_esc(_clip(sh.get("summary") or "", 160))}</div>' if sh.get("summary") else "")
+                    + (f'<div style="margin-top:6px"><a href="{_esc(link)}" target="_blank" style="font-size:13px;color:{_ACCENT};text-decoration:none">Watch in Plex →</a></div>' if link else "")
+                    + "</td></tr></table></td></tr>")
 
-    total = sum(len(sections.get(k, [])) for k in ("movies", "mature_movies", "tv", "mature_tv"))
+    # Music
+    music = d.get("music") or []
+    if music:
+        parts.append(heading("New music", len(music)))
+        cells = [f'<td width="33%" style="padding:0 4px 16px;vertical-align:top">{poster(a.get("image"), "al", 160, 160, "", 8)}'
+                 f'<div class="mm-ink" style="font-size:13px;font-weight:600;color:{_INK};margin-top:6px;line-height:1.3">{_esc(a["title"])}</div>'
+                 f'<div class="mm-faint" style="font-size:12px;color:{_FAINT}">{_esc(" · ".join(x for x in [a["artist"], str(a["year"] or "")] if x))}</div></td>'
+                 for a in music]
+        rows = ["".join(cells[i:i + 3]) + ('<td width="33%"></td>' * (3 - len(cells[i:i + 3]))) for i in range(0, len(cells), 3)]
+        parts.append('<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="table-layout:fixed">'
+                     + "".join(f"<tr>{r}</tr>" for r in rows) + "</table></td></tr>")
 
-    if not body_parts:
-        body_parts.append(
-            '<tr><td style="padding:32px 0;text-align:center;color:#9ca3af;font-size:14px">'
-            "No new content was added to Plex this week."
-            "</td></tr>"
-        )
+    # Coming next week
+    coming = d.get("coming") or {}
+    if coming.get("shows") or coming.get("movies"):
+        parts.append(heading("Coming next week"))
+        rows = []
+        for sh in coming.get("shows", []):
+            eps = sh["episodes"]
+            first = eps[0]
+            more = f" + {len(eps) - 1} more" if len(eps) > 1 else ""
+            rows.append((first["airs_at"], sh["title"], f'{first["code"]}' + (f' “{first["name"]}”' if first["name"] else "") + more))
+        for m in coming.get("movies", []):
+            rows.append((m["release_date"], m["title"] + (f' ({m["year"]})' if m.get("year") else ""), "Movie · out digitally"))
+        rows.sort(key=lambda r: r[0])
+        parts.append('<tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="mm-card" '
+                     f'style="background:{_CARD};border-radius:12px">'
+                     + "".join(
+                         f'<tr><td width="92" class="mm-faint" style="padding:10px 0 10px 14px;font-size:13px;font-weight:600;color:{_FAINT};'
+                         f'vertical-align:top;border-top:{"0" if i == 0 else "1px solid " + _LINE}">{_esc(_day(when))}</td>'
+                         f'<td style="padding:10px 14px 10px 8px;vertical-align:top;border-top:{"0" if i == 0 else "1px solid " + _LINE}">'
+                         f'<div class="mm-ink" style="font-size:14px;font-weight:600;color:{_INK}">{_esc(t)}</div>'
+                         f'<div class="mm-muted" style="font-size:13px;color:{_MUTED}">{_esc(sub)}</div></td></tr>'
+                         for i, (when, t, sub) in enumerate(rows))
+                     + "</table></td></tr>")
 
-    return (
-        "<!DOCTYPE html>\n"
-        '<html lang="en">\n<head>\n'
-        '<meta charset="UTF-8">\n'
-        '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
-        "<title>MediaMate Weekly Digest</title>\n"
-        "</head>\n"
-        '<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'
-        "'Segoe UI',sans-serif;background:#f9fafb\">\n"
-        '<table width="100%" cellpadding="0" cellspacing="0" border="0">\n'
-        '<tr><td align="center" style="padding:32px 16px">\n'
-        '<table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%">\n'
-        '<tr><td style="background:#1d4ed8;border-radius:12px 12px 0 0;padding:24px 28px">'
-        '<div style="font-size:22px;font-weight:700;color:#ffffff">MediaMate Weekly Digest</div>'
-        f'<div style="font-size:13px;color:#bfdbfe;margin-top:4px">{_esc(week_label)} &middot; '
-        f"{total} new title{'s' if total != 1 else ''}</div>"
+    if len(parts) == 0:
+        parts.append(f'<tr><td class="mm-muted" style="padding:40px 0;text-align:center;color:{_MUTED};font-size:15px">'
+                     "Nothing new was added this week.</td></tr>")
+
+    view = (f'<a href="{_esc(view_url)}" target="_blank" style="color:{_FAINT}">View in browser</a> · ' if view_url else "")
+    html = (
+        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
+        "<meta name=\"color-scheme\" content=\"light dark\">\n<meta name=\"supported-color-schemes\" content=\"light dark\">\n"
+        f"<title>{_esc('This week on Plex · ' + week_label)}</title>\n"
+        "<style>\n"
+        "@media (max-width:480px){ .mm-wrap{padding:12px 8px!important} .mm-hl td{display:block!important;width:100%!important;box-sizing:border-box!important} .mm-hl td:first-child{padding-bottom:0!important} }\n"
+        "@media (prefers-color-scheme:dark){ body,.mm-bg{background:#0b0f19!important} .mm-card{background:#151b28!important}"
+        " .mm-ink{color:#f3f4f6!important} .mm-muted{color:#cbd5e1!important} .mm-faint{color:#94a3b8!important} }\n"
+        "</style>\n</head>\n"
+        f'<body class="mm-bg" style="margin:0;padding:0;background:{_BG};font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,sans-serif">\n'
+        f'<div style="display:none;max-height:0;overflow:hidden">{_esc(summary)} added to Plex this week.</div>\n'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="mm-bg" '
+        f'style="background:{_BG}"><tr><td align="center" class="mm-wrap" style="padding:24px 16px">\n'
+        '<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px">\n'
+        '<tr><td style="background:linear-gradient(135deg,#1e3a8a,#2563eb);background-color:#1e3a8a;border-radius:16px;padding:24px 24px 22px">'
+        '<div style="font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#bfdbfe">MediaMate</div>'
+        '<div style="font-size:26px;font-weight:800;color:#ffffff;margin-top:4px">This week on Plex</div>'
+        f'<div style="font-size:14px;color:#dbeafe;margin-top:6px">{_esc(week_label)} · {_esc(summary)}</div>'
         "</td></tr>\n"
-        '<tr><td style="background:#ffffff;border-radius:0 0 12px 12px;padding:0 28px 24px">'
-        '<table width="100%" cellpadding="0" cellspacing="0" border="0">'
-        + "".join(body_parts)
-        + "</table></td></tr>\n"
-        '<tr><td style="padding:20px 0;text-align:center;font-size:11px;color:#9ca3af">'
-        "Sent by MediaMate &middot; Manage digest settings in your MediaMate configuration"
-        "</td></tr>\n"
-        "</table>\n</td></tr>\n</table>\n</body>\n</html>"
+        + "".join(parts) +
+        f'\n<tr><td class="mm-faint" style="padding:28px 0 8px;text-align:center;font-size:12px;color:{_FAINT}">'
+        f"{view}Sent by MediaMate · change or turn off the digest in Settings → Weekly Digest Email</td></tr>\n"
+        "</table>\n</td></tr></table>\n</body>\n</html>"
     )
+    return html, images
 
 
-def send_email(smtp_cfg: dict, recipients: list[str], html: str, week_label: str) -> None:
-    """Send the digest HTML email via SMTP."""
+def render_text(d: dict, week_label: str, view_url: str = "") -> str:
+    """The plain-text part of the email."""
+    c = counts(d)
+    lines = [f"This week on Plex · {week_label}", ""]
+    hl = d.get("highlight")
+    if hl:
+        it = hl["item"]
+        lines += [f"Highlight: {it['title']}" + (f" ({it.get('year')})" if it.get("year") else ""),
+                  _clip(it.get("summary") or "", 240), it.get("plex_link") or "", ""]
+    for key, title, kind in _SECTION_DEFS:
+        items = d["sections"].get(key, [])
+        if not items:
+            continue
+        lines.append(f"{title} ({len(items)})")
+        for i in items:
+            if kind == "movie":
+                lines.append(f"  • {i['title']}" + (f" ({i.get('year')})" if i.get("year") else ""))
+            else:
+                n = len(set(i.get("episodes", [])))
+                lines.append(f"  • {i['title']}: {n} new episode{'s' if n != 1 else ''}"
+                             + (f" ({i.get('episode_ranges')})" if i.get("episode_ranges") else ""))
+        lines.append("")
+    if d.get("music"):
+        lines.append(f"New music ({len(d['music'])})")
+        lines += [f"  • {a['artist']} – {a['title']}" for a in d["music"]]
+        lines.append("")
+    coming = d.get("coming") or {}
+    if coming.get("shows") or coming.get("movies"):
+        lines.append("Coming next week")
+        for sh in coming.get("shows", []):
+            e = sh["episodes"][0]
+            lines.append(f"  • {_day(e['airs_at'])}: {sh['title']} {e['code']}" + (f" (+{len(sh['episodes']) - 1} more)" if len(sh["episodes"]) > 1 else ""))
+        for m in coming.get("movies", []):
+            lines.append(f"  • {_day(m['release_date'])}: {m['title']} (movie)")
+        lines.append("")
+    if not any([c["movies"], c["episodes"], c["albums"]]):
+        lines += ["Nothing new was added this week.", ""]
+    if view_url:
+        lines.append(f"View in browser: {view_url}")
+    lines.append("Sent by MediaMate")
+    return "\n".join(lines)
+
+
+# ── sending, and the "View in browser" copy ─────────────────────────────────
+
+def send_email(smtp_cfg: dict, recipients: list[str], html: str, week_label: str,
+               text: str = "", images: dict | None = None) -> None:
+    """Send the digest: multipart/related (HTML + attached posters) inside
+    multipart/alternative (plain text first)."""
     host      = smtp_cfg.get("host", "")
     port      = int(smtp_cfg.get("port") or 587)
     user      = smtp_cfg.get("user", "")
@@ -372,16 +615,27 @@ def send_email(smtp_cfg: dict, recipients: list[str], html: str, week_label: str
     msg["Subject"] = f"MediaMate Weekly Digest — {week_label}"
     msg["From"]    = from_addr
     msg["To"]      = ", ".join(recipients)
-    msg.attach(MIMEText(html, "html"))
+    msg.attach(MIMEText(text or "Open this email in an HTML-capable mail app to see the digest.", "plain", "utf-8"))
+    if images:
+        related = MIMEMultipart("related")
+        related.attach(MIMEText(html, "html", "utf-8"))
+        for cid, data in images.items():
+            img = MIMEImage(data, "jpeg")
+            img.add_header("Content-ID", f"<{cid}>")
+            img.add_header("Content-Disposition", "inline", filename=cid.split("@")[0] + ".jpg")
+            related.attach(img)
+        msg.attach(related)
+    else:
+        msg.attach(MIMEText(html, "html", "utf-8"))
 
     ctx = ssl.create_default_context()
     if port == 465:
-        with smtplib.SMTP_SSL(host, port, context=ctx, timeout=15) as server:
+        with smtplib.SMTP_SSL(host, port, context=ctx, timeout=30) as server:
             if user and password:
                 server.login(user, password)
             server.sendmail(from_addr, recipients, msg.as_string())
     else:
-        with smtplib.SMTP(host, port, timeout=15) as server:
+        with smtplib.SMTP(host, port, timeout=30) as server:
             server.ehlo()
             server.starttls(context=ctx)
             server.ehlo()
@@ -390,3 +644,50 @@ def send_email(smtp_cfg: dict, recipients: list[str], html: str, week_label: str
             server.sendmail(from_addr, recipients, msg.as_string())
 
     logger.info("Weekly digest sent to %d recipient(s)", len(recipients))
+
+
+def _view_dir() -> Path:
+    from .media import preview
+    return preview.cache_dir().parent / "digest"
+
+
+def save_view_copy(html_inline: str) -> str:
+    """Keep the browser copy of the latest digest; returns its secret token (one at a time)."""
+    folder = _view_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    for old in folder.glob("*.html"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    token = secrets.token_urlsafe(24)
+    (folder / f"{token}.html").write_text(html_inline, encoding="utf-8")
+    return token
+
+
+def view_copy(token: str) -> str | None:
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{20,64}", token or ""):
+        return None
+    p = _view_dir() / f"{token}.html"
+    return p.read_text(encoding="utf-8") if p.is_file() else None
+
+
+def public_base(db) -> str:
+    from ..models import Setting
+    row = db.get(Setting, "public_url")
+    return (row.value if row and row.value else "").strip().rstrip("/")
+
+
+def compose(db, plex_url: str, token: str, excluded_libs: frozenset[str], week_label: str,
+            keep_view_copy: bool = True) -> dict:
+    """Build and render the digest. Returns {html, text, images, preview} where preview
+    is the same email with pictures inline (for the app and the browser copy)."""
+    d = build_digest(db, plex_url, token, excluded_libs)
+    preview, _ = render_html(d, week_label, inline_images=True)
+    view_url = ""
+    base = public_base(db)
+    if keep_view_copy and base:
+        view_url = f"{base}/api/public/digest/{save_view_copy(preview)}"
+    html, images = render_html(d, week_label, view_url=view_url)
+    return {"html": html, "text": render_text(d, week_label, view_url), "images": images,
+            "preview": preview, "counts": counts(d)}

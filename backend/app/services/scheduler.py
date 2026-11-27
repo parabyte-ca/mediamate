@@ -523,7 +523,7 @@ def run_weekly_digest() -> None:
     """Send the weekly Plex content digest email."""
     from ..database import SessionLocal
     from ..models import Setting
-    from .plex_digest import fetch_digest_sections, render_html, send_email
+    from .plex_digest import compose, send_email
 
     db = SessionLocal()
     try:
@@ -572,15 +572,16 @@ def run_weekly_digest() -> None:
         x.strip().lower() for x in excluded_raw.replace("\n", ",").split(",") if x.strip()
     )
 
-    try:
-        sections = fetch_digest_sections(plex_url, plex_token, excluded_libs=excluded_libs)
-    except Exception as e:
-        logger.error("Digest: failed to fetch Plex data: %s", e)
-        return
-
     now = datetime.now(timezone.utc)
-    week_label = f"Week of {now.strftime('%B %d, %Y')}"
-    html = render_html(sections, week_label)
+    week_label = f"Week of {now.strftime('%B %-d, %Y')}"
+    db = SessionLocal()
+    try:
+        mail = compose(db, plex_url, plex_token, excluded_libs, week_label)
+    except Exception as e:
+        logger.error("Digest: failed to build: %s", e)
+        return
+    finally:
+        db.close()
 
     smtp_cfg = {
         "host":       smtp_host,
@@ -590,7 +591,7 @@ def run_weekly_digest() -> None:
         "from_email": s.get("digest_from_email", ""),
     }
     try:
-        send_email(smtp_cfg, recipients, html, week_label)
+        send_email(smtp_cfg, recipients, mail["html"], week_label, text=mail["text"], images=mail["images"])
         # Record send time so the deduplication guard above works correctly.
         _record_digest_sent()
     except Exception as e:

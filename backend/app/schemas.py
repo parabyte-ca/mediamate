@@ -226,12 +226,14 @@ class AddFromTmdbRequest(BaseModel):
     tmdb_id: int
     profile_id: Optional[int] = None
     audience: Optional[Literal["auto", "general", "mature"]] = None
+    download_path_id: Optional[int] = None    # a folder you picked; None = Automatic
 
 
 class AddFromTvmazeRequest(BaseModel):
     tvmaze_id: int
     start: Optional[Literal["next", "beginning"]] = None
     profile_id: Optional[int] = None
+    download_path_id: Optional[int] = None    # a folder you picked; None = Automatic
 
 
 class TraktTestRequest(BaseModel):

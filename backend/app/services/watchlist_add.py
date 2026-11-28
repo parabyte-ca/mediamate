@@ -59,7 +59,8 @@ def default_profile_id(db, kind: str = "tv") -> int | None:
 
 
 async def create_from_tvmaze(db, tvmaze_id: int, start: str | None = None,
-                             profile_id: int | None = None, show: dict | None = None):
+                             profile_id: int | None = None, show: dict | None = None,
+                             download_path_id: int | None = None):
     """Add a show, starting at its next new episode or the beginning.
 
     ``start`` is "next", "beginning" or None (None: next for running shows,
@@ -88,6 +89,7 @@ async def create_from_tvmaze(db, tvmaze_id: int, start: str | None = None,
         season=season,
         episode=episode,
         profile_id=profile_id,
+        download_path_id=download_path_id,
     )
     show_metadata.apply_show(item, show)
     item.metadata_checked_at = datetime.now(timezone.utc)
@@ -108,7 +110,8 @@ def _country(db) -> str:
     return valid_country(row.value if row else None)
 
 
-async def create_from_tmdb(db, tmdb_id: int, profile_id: int | None = None, audience: str | None = None):
+async def create_from_tmdb(db, tmdb_id: int, profile_id: int | None = None, audience: str | None = None,
+                           download_path_id: int | None = None):
     """Add a movie: it waits for its digital release, then downloads once.
 
     Raises :class:`NoTmdbKey`, :class:`AlreadyOnWatchlist`, or tmdb.TMDBUnavailable.
@@ -137,6 +140,7 @@ async def create_from_tmdb(db, tmdb_id: int, profile_id: int | None = None, audi
         episode=1,
         profile_id=profile_id if profile_id is not None else default_profile_id(db, "movie"),
         audience=None if audience in (None, "auto") else audience,
+        download_path_id=download_path_id,
     )
     show_metadata.apply_movie(item, movie)
     item.metadata_checked_at = datetime.now(timezone.utc)

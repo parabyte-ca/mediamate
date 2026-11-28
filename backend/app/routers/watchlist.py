@@ -89,6 +89,30 @@ def _save_to(db: Session, item) -> dict:
             "folder": dp.name if dp else None, "folder_id": dp.id if dp else None, "reason": why}
 
 
+def _require_download_folder(db: Session, path_id: int | None) -> None:
+    """A folder picked when adding must exist and take downloads."""
+    if path_id is None:
+        return
+    from ..models import DownloadPath
+    dp = db.query(DownloadPath).filter(DownloadPath.id == path_id).first()
+    if dp is None or not dp.downloads:
+        raise HTTPException(status_code=400, detail="Pick a folder that takes downloads, or Automatic.")
+
+
+@router.get("/watchlist/route-preview")
+def route_preview(kind: str = "tv", title: str = "", year: int | None = None, db: Session = Depends(get_db)):
+    """Where Automatic would send a show or movie that isn't on the Watchlist yet."""
+    from ..services.folders import route_for
+    probe = WatchlistItem(kind="movie" if kind == "movie" else "tv", title=title.strip() or "Untitled", year=year)
+    try:
+        dp, why = route_for(db, probe, lookup=True)
+    except Exception as exc:                                # a rating lookup failed: use what's cached
+        logger.info("Route preview lookup for %r failed: %s", title, exc)
+        dp, why = route_for(db, probe, lookup=False)
+    db.rollback()                                           # the probe is never saved
+    return {"folder": dp.name if dp else None, "folder_id": dp.id if dp else None, "reason": why}
+
+
 @router.get("/watchlist/folder-review")
 def folder_review(db: Session = Depends(get_db)):
     """Each TV show and movie: where its downloads go now, and where Automatic would send them."""
@@ -163,10 +187,12 @@ async def add_from_tvmaze(body: AddFromTvmazeRequest, request: Request, db: Sess
     """Add a show picked from Browse, starting at its next new episode or the beginning."""
     if body.profile_id is not None:
         _require_profile(db, body.profile_id)  # an explicit choice must exist
+    _require_download_folder(db, body.download_path_id)
     me = people.acting(db, request)
     try:
         item = await watchlist_add.create_from_tvmaze(
             db, body.tvmaze_id, start=body.start, profile_id=body.profile_id,
+            download_path_id=body.download_path_id,
         )
     except watchlist_add.AlreadyOnWatchlist:
         existing = db.query(WatchlistItem).filter(WatchlistItem.tvmaze_id == body.tvmaze_id).first()
@@ -185,9 +211,11 @@ async def add_from_tmdb(body: AddFromTmdbRequest, request: Request, db: Session 
     from ..services import tmdb
     if body.profile_id is not None:
         _require_profile(db, body.profile_id)
+    _require_download_folder(db, body.download_path_id)
     me = people.acting(db, request)
     try:
-        item = await watchlist_add.create_from_tmdb(db, body.tmdb_id, body.profile_id, body.audience)
+        item = await watchlist_add.create_from_tmdb(db, body.tmdb_id, body.profile_id, body.audience,
+                                                    download_path_id=body.download_path_id)
     except watchlist_add.NoTmdbKey:
         raise HTTPException(status_code=400, detail="Add your TMDB API key in Settings → Integrations to add movies.")
     except watchlist_add.AlreadyOnWatchlist:

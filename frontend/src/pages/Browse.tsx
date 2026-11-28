@@ -26,7 +26,7 @@ function MovieBrowse() {
   }, [list]);
 
   const find = (m: BrowseMovie) => navigate(`/search?q=${encodeURIComponent(`${m.title}${m.year ? ` ${m.year}` : ""}`)}`);
-  const { adding, error: addError, add } = useAddMovie((tmdbId, wid) =>
+  const { adding, error: addError, add, dialog: addDialog } = useAddMovie((tmdbId, wid) =>
     setMovies((ms) => ms && ms.map((x) => x.tmdb_id === tmdbId ? { ...x, on_watchlist: true, watchlist_id: wid } : x)));
   // Coming soon and in cinemas: nothing good to download yet, so only offer the watchlist,
   // which waits for the digital release. Older movies can be searched for right away too.
@@ -77,6 +77,7 @@ function MovieBrowse() {
         ))}
       </div>
       <p className="mt-4 text-xs text-gray-400 dark:text-gray-600">Movie data from TMDB.</p>
+      {addDialog}
     </>
   );
 }

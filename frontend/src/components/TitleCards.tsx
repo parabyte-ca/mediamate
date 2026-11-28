@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { CheckCircle2, Disc3, Download, Loader2, Plus, Search, Star } from "lucide-react";
-import { api, type BrowseMovie, type BrowseRelease, type BrowseShow } from "../api/client";
+import { api, type BrowseMovie, type BrowseRelease, type BrowseShow, type DownloadPath } from "../api/client";
 import Poster from "./Poster";
 import { fmtDate, fmtDay } from "../utils";
 
@@ -17,10 +17,48 @@ export const STATUS_TEXT: Record<string, string> = {
   wanted: "Wanted", grabbed: "Downloading", have: "Downloaded", ignored: "Skipped",
 };
 
-/** Add a TVMaze show: start from the next episode or from the beginning. */
+const FIELD = "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100";
+
+/** Where a new show or movie downloads to: Automatic (by type and who it's for), with
+ *  the folder that works out to, or a download folder you pick. null = Automatic. */
+export function SaveToField({ kind, title, year, value, onChange }: {
+  kind: "tv" | "movie"; title: string; year?: number | null;
+  value: number | null; onChange: (id: number | null) => void;
+}) {
+  const [paths, setPaths] = useState<DownloadPath[]>([]);
+  const [auto, setAuto] = useState<{ folder: string | null; reason: string } | null>(null);
+  useEffect(() => {
+    api.paths.list().then((p) => setPaths(p.filter((x) => x.downloads !== false))).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!title.trim()) { setAuto(null); return; }
+    let live = true;
+    const t = setTimeout(() => {
+      api.watchlist.routePreview(kind, title, year).then((a) => live && setAuto(a)).catch(() => live && setAuto(null));
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [kind, title, year]);
+  return (
+    <div>
+      <label htmlFor="save-to" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Download into</label>
+      <select id="save-to" value={value ?? ""} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)} className={FIELD}>
+        <option value="">Automatic{auto?.folder ? ` → ${auto.folder}` : " (by type and who it's for)"}</option>
+        {paths.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+        {value == null
+          ? (auto?.reason ? `Automatic: ${auto.reason}.` : "Automatic picks the TV or Movies library that fits who it's for.")
+          : "Always downloads here. Change it later from the Watchlist."}
+      </p>
+    </div>
+  );
+}
+
+/** Add a TVMaze show: start from the next episode or from the beginning, and pick where it downloads. */
 export function AddShowDialog({ show, onClose, onAdded }: { show: BrowseShow; onClose: () => void; onAdded: () => void }) {
   const running = show.status === "Running";
   const [start, setStart] = useState<"next" | "beginning">(running ? "next" : "beginning");
+  const [pathId, setPathId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,7 +66,7 @@ export function AddShowDialog({ show, onClose, onAdded }: { show: BrowseShow; on
     setSaving(true);
     setError(null);
     try {
-      await api.watchlist.addFromTvmaze({ tvmaze_id: show.tvmaze_id, start });
+      await api.watchlist.addFromTvmaze({ tvmaze_id: show.tvmaze_id, start, download_path_id: pathId });
       onAdded();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add the show.");
@@ -62,6 +100,10 @@ export function AddShowDialog({ show, onClose, onAdded }: { show: BrowseShow; on
         <div className="space-y-2">
           {option("next", "Next new episode", "Only download episodes from now on.")}
           {option("beginning", "From the beginning", "Download every episode, starting with season 1.")}
+        </div>
+        <div className="mt-4">
+          <SaveToField kind="tv" title={show.name} year={Number(show.premiered?.slice(0, 4)) || null}
+            value={pathId} onChange={setPathId} />
         </div>
         <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
           Uses your default quality profile if you've set one. Change anything later from the Watchlist.
@@ -163,23 +205,62 @@ export function MovieCard({ movie: m, adding, onAdd, onFind, dateAsDay = false }
   );
 }
 
-/** Add a movie to the watchlist; returns a function and the id being added. */
+/** Add a movie: a short dialog asks where it downloads, then adds it.
+ *  Returns add (opens the dialog), the id being added, any error, and the dialog to render. */
 export function useAddMovie(update: (tmdbId: number, watchlistId: number) => void) {
+  const [target, setTarget] = useState<BrowseMovie | null>(null);
   const [adding, setAdding] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const add = async (m: BrowseMovie) => {
+  const confirm = async (m: BrowseMovie, pathId: number | null) => {
     setAdding(m.tmdb_id);
     setError(null);
     try {
-      const w = await api.watchlist.addFromTmdb({ tmdb_id: m.tmdb_id });
+      const w = await api.watchlist.addFromTmdb({ tmdb_id: m.tmdb_id, download_path_id: pathId });
       update(m.tmdb_id, w.id);
+      setTarget(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't add the movie.");
     } finally {
       setAdding(null);
     }
   };
-  return { adding, error, add };
+  const add = (m: BrowseMovie) => { setError(null); setTarget(m); };
+  const dialog = target ? (
+    <AddMovieDialog movie={target} busy={adding === target.tmdb_id} error={error}
+      onClose={() => { setTarget(null); setError(null); }} onAdd={(pathId) => confirm(target, pathId)} />
+  ) : null;
+  return { adding, error: target ? null : error, add, dialog };
+}
+
+function AddMovieDialog({ movie: m, busy, error, onClose, onAdd }: {
+  movie: BrowseMovie; busy: boolean; error: string | null; onClose: () => void; onAdd: (pathId: number | null) => void;
+}) {
+  const [pathId, setPathId] = useState<number | null>(null);
+  const year = Number(m.year) || Number(m.release_date?.slice(0, 4)) || null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label={`Add ${m.title}`}>
+      <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-700 dark:bg-gray-900">
+        <div className="mb-4 flex gap-3">
+          <Poster url={m.poster_url} title={m.title} className="h-24 w-16" />
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{m.title}</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{[year, m.certification].filter(Boolean).join(" · ")}</p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Downloads automatically once it's out digitally.</p>
+          </div>
+        </div>
+        <SaveToField kind="movie" title={m.title} year={year} value={pathId} onChange={setPathId} />
+        {error && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        <div className="mt-5 flex gap-3">
+          <button onClick={onClose} className="flex-1 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800">
+            Cancel
+          </button>
+          <button onClick={() => onAdd(pathId)} disabled={busy} className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            {busy ? "Adding…" : "Add to watchlist"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** An album (MusicBrainz release group): Add follows the artist and wants this album. */

@@ -141,6 +141,36 @@ class TestAddFromTmdb:
         listed = api.get("/api/watchlist").json()[0]
         assert listed["movie_state"] == "waiting" and listed["removes_at"] is None
 
+    def test_a_folder_picked_when_adding_is_kept(self, api, db):
+        from app.models import DownloadPath
+        _key(db)
+        mine = DownloadPath(name="Mature Movies", path="/m/mature", downloads=True, scan=False)
+        lib_only = DownloadPath(name="Library only", path="/m/lib", downloads=False, scan=True)
+        db.add_all([mine, lib_only])
+        db.commit()
+        with patch("app.services.tmdb.movie", new=AsyncMock(return_value=MOVIE)), \
+             patch("app.services.tmdb.release_info", new=AsyncMock(return_value=("2027-03-02", "digital"))):
+            bad = api.post("/api/watchlist/from-tmdb", json={"tmdb_id": 99, "download_path_id": lib_only.id})
+            assert bad.status_code == 400                     # a folder that takes no downloads
+            assert api.post("/api/watchlist/from-tmdb", json={"tmdb_id": 99, "download_path_id": 9999}).status_code == 400
+            r = api.post("/api/watchlist/from-tmdb", json={"tmdb_id": 99, "download_path_id": mine.id})
+        assert r.status_code == 201
+        row = db.get(WatchlistItem, r.json()["id"])
+        assert row.download_path_id == mine.id
+        listed = api.get("/api/watchlist").json()[0]
+        assert listed["save_to"]["auto"] is False and listed["save_to"]["folder"] == "Mature Movies"
+
+    def test_route_preview_says_where_automatic_sends_a_title(self, api, db):
+        from app.models import DownloadPath
+        db.add_all([DownloadPath(name="Movies", path="/m/movies", downloads=True, scan=False, role="movies"),
+                    DownloadPath(name="TV", path="/m/tv", downloads=True, scan=False, role="tv", is_default=True)])
+        db.commit()
+        r = api.get("/api/watchlist/route-preview", params={"kind": "movie", "title": "Paddington", "year": 2014})
+        assert r.status_code == 200 and r.json()["folder"] == "Movies"
+        r = api.get("/api/watchlist/route-preview", params={"kind": "tv", "title": "Bluey"})
+        assert r.json()["folder"] == "TV"
+        assert db.query(WatchlistItem).count() == 0               # nothing was saved
+
     def test_duplicate_and_no_key(self, api, db):
         assert api.post("/api/watchlist/from-tmdb", json={"tmdb_id": 99}).status_code == 400
         _key(db)

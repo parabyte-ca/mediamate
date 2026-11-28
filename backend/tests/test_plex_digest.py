@@ -46,7 +46,7 @@ def test_items_are_sorted_into_family_and_mature_buckets(monkeypatch):
 def _digest(monkeypatch, music=None, coming=None):
     secs = _sections(monkeypatch)
     secs["movies"][0]["rating"] = "8.4"
-    return {"sections": secs, "highlight": pd.pick_highlight(secs), "music": music or [],
+    return {"sections": secs, "highlight": pd.pick_feature(secs), "music": music or [],
             "coming": coming or {"shows": [], "movies": []}}
 
 
@@ -59,12 +59,15 @@ def test_the_email_lists_every_title_and_escapes_html(monkeypatch):
         assert title in html
 
 
-def test_highlight_is_the_best_rated_family_title(monkeypatch):
-    d = _digest(monkeypatch)
-    assert d["highlight"]["item"]["title"] == "Family Film"
+def test_feature_is_the_mature_movie_not_the_family_film(monkeypatch):
+    d = _digest(monkeypatch)                              # Family Film is rated higher
+    assert d["highlight"]["item"]["title"] == "Late Film"
     html, _ = pd.render_html(d, "W")
-    assert "This week’s highlight" in html and "Watch in Plex" in html
-    assert html.count(">Family Film<") == 1               # not repeated in the grid
+    assert html.count("Feature of the week") == 1 and "Watch in Plex" in html
+    assert "highlight" not in html.lower() and "Mature pick" not in html
+    assert html.count(">Late Film<") == 1                 # not repeated in the grid
+    assert ">Family Film<" in html                        # still listed in its section
+    assert "Feature of the week: Late Film" in pd.render_text(d, "W")
 
 
 def test_posters_are_attached_not_data_uris(monkeypatch):
@@ -154,17 +157,18 @@ def test_preview_and_view_routes(monkeypatch, tmp_path):
     assert c.get("/api/public/digest/notarealtoken_notarealtoken").status_code == 404
 
 
-def test_highlight_prefers_new_releases_over_old_films():
+def test_feature_falls_back_to_the_best_new_title_without_mature_movies():
     old = {"title": "Casablanca", "year": "1942", "rating": "9.9", "added_at": 5}
     new = {"title": "New Film", "year": "2026", "rating": "7.0", "added_at": 1}
     newer_better = {"title": "Better New", "year": "2025", "rating": "8.0", "added_at": 1}
-    pick = lambda movies, tv=(): pd.pick_highlight({"movies": list(movies), "tv": list(tv),
-                                                    "mature_movies": [], "mature_tv": []}, this_year=2026)["item"]["title"]
+    pick = lambda movies, tv=(): pd.pick_feature({"movies": list(movies), "tv": list(tv),
+                                                  "mature_movies": [], "mature_tv": []}, this_year=2026)["item"]["title"]
     assert pick([old, new]) == "New Film"
     assert pick([old, new, newer_better]) == "Better New"            # among new releases, the best rated
     assert pick([{"title": "Older", "year": "2010", "rating": "9"}, {"title": "Newer", "year": "2019", "rating": "6"}]) == "Newer"
     show = {"title": "New Show", "release_year": 2026, "rating": "8.5", "episodes": ["S01E01"]}
     assert pick([old], [show]) == "New Show"
+    assert pd.pick_feature({"movies": [], "tv": [], "mature_movies": [], "mature_tv": []}) is None
 
 
 def test_unmatched_files_are_left_out():
@@ -303,25 +307,12 @@ def test_failed_send_is_recorded(monkeypatch, digest_db):
     assert h[0]["kind"] == "scheduled" and h[0]["error"] and "hunter2secret" not in h[0]["error"]
 
 
-def test_mature_pick_is_the_newest_most_popular_mature_movie():
+def test_feature_is_the_newest_most_popular_mature_movie():
     m = lambda t, y, aud, added=0: {"title": t, "year": str(y), "audience_rating": str(aud),
                                     "rating": "", "added_at": added}
-    pick = lambda movies, hl=None: pd.pick_mature_movie({"mature_movies": list(movies)}, hl, this_year=2026)
+    family = {"title": "Family Hit", "year": "2026", "rating": "9.9", "added_at": 9}
+    pick = lambda movies: pd.pick_feature({"movies": [family], "mature_movies": list(movies),
+                                           "tv": [], "mature_tv": []}, this_year=2026)["item"]["title"]
     old_hit, new_ok, new_hit = m("Old Classic", 1994, 9.6), m("New OK", 2026, 6.1), m("New Hit", 2025, 8.2)
-    assert pick([old_hit, new_ok, new_hit])["item"]["title"] == "New Hit"   # recent first, then popular
-    assert pick([old_hit, m("Older", 1990, 9.9)])["item"]["title"] == "Old Classic"   # none recent: newest
-    assert pick([]) is None
-    # already the main highlight (no family titles this week): not shown twice
-    assert pick([new_hit], {"kind": "movie", "item": new_hit}) is None
-    assert pick([new_hit, new_ok], {"kind": "movie", "item": new_hit})["item"]["title"] == "New OK"
-
-
-def test_mature_pick_card_in_the_email(monkeypatch):
-    d = _digest(monkeypatch)
-    d["mature_pick"] = pd.pick_mature_movie(d["sections"], d["highlight"])
-    title = d["mature_pick"]["item"]["title"]
-    html, _ = pd.render_html(d, "W")
-    assert "Mature pick of the week" in html and "This week’s highlight" in html
-    assert html.count(f">{title}<") == 1                 # not repeated in the mature grid
-    assert html.index("Mature pick of the week") > html.index("This week’s highlight")
-    assert f"Mature pick of the week: {title}" in pd.render_text(d, "W")
+    assert pick([old_hit, new_ok, new_hit]) == "New Hit"           # recent first, then popular; never the family film
+    assert pick([old_hit, m("Older", 1990, 9.9)]) == "Old Classic"  # none recent: newest

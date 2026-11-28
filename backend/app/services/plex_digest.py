@@ -1,6 +1,6 @@
 """Weekly Plex digest: what was added this week, emailed to the household.
 
-"This week from MediaMate". The email has a highlight (the best-rated new release), new movies as a poster grid,
+"This week from MediaMate". The email has a feature of the week (the newest, most popular mature movie), new movies as a poster grid,
 TV grouped by show ("3 new episodes · S01E04–06"), albums added to the music library,
 and what's coming next week from the Watchlist. Posters are attached to the email
 (cid: images) because Gmail and others block data: images; the browser preview and the
@@ -323,30 +323,20 @@ def _best(pool: list[tuple[str, dict]], this_year: int, score=_score) -> tuple[s
     return max(pool, key=lambda p: (_year_of(*p), score(p[1]), p[1].get("added_at", 0)))
 
 
-def pick_highlight(sections: dict[str, list], this_year: int | None = None) -> dict | None:
-    """This week's highlight: the best new release. Family-friendly titles first, since
-    the digest goes to the whole household."""
+def pick_feature(sections: dict[str, list], this_year: int | None = None) -> dict | None:
+    """The feature of the week. The readers are adults, so it's the most recent, most
+    popular (audience rating) mature movie added this week. With no mature movies,
+    the best new release of anything else."""
     this_year = this_year or datetime.now(timezone.utc).year
-    for keys in (("movies", "tv"), ("mature_movies", "mature_tv")):
-        pool = [(k, i) for k in keys for i in sections.get(k, [])]
-        if pool:
-            kind, item = _best(pool, this_year)
-            return {"kind": "movie" if "movies" in kind else "tv", "item": item}
-    return None
-
-
-def pick_mature_movie(sections: dict[str, list], highlight: dict | None = None,
-                      this_year: int | None = None) -> dict | None:
-    """The mature movie of the week: the most recent release that's also the most
-    popular (audience rating), among mature movies added this week. None when there
-    are none, or when it's already the main highlight."""
-    this_year = this_year or datetime.now(timezone.utc).year
-    taken = highlight["item"] if highlight else None
-    pool = [("mature_movies", i) for i in sections.get("mature_movies", []) if i is not taken]
+    mature = [("mature_movies", i) for i in sections.get("mature_movies", [])]
+    if mature:
+        _, item = _best(mature, this_year, score=_popularity)
+        return {"kind": "movie", "item": item}
+    pool = [(k, i) for k in ("movies", "mature_tv", "tv") for i in sections.get(k, [])]
     if not pool:
         return None
-    _, item = _best(pool, this_year, score=_popularity)
-    return {"kind": "movie", "item": item}
+    kind, item = _best(pool, this_year, score=_popularity)
+    return {"kind": "movie" if "movies" in kind else "tv", "item": item}
 
 
 def music_added(db, days: int = 7, limit: int = 12) -> list[dict]:
@@ -411,21 +401,18 @@ def build_digest(db, plex_url: str, token: str, excluded_libs: frozenset[str] = 
     """Everything the email shows. Plex, the music library and the Watchlist are each
     optional: one failing leaves its section out."""
     sections = fetch_digest_sections(plex_url, token, days=days, excluded_libs=excluded_libs)
-    hl = pick_highlight(sections)
-    mature = pick_mature_movie(sections, hl)
-    for pick in (hl, mature):
-        if pick is not None:
-            it = pick["item"]
-            thumb = it.get("thumb") or it.get("grandparent_thumb")
-            big = _fetch_image(plex_url, token, thumb, 320, 480) if thumb else None
-            pick["image"] = big or it.get("image")
+    hl = pick_feature(sections)
+    if hl is not None:
+        it = hl["item"]
+        thumb = it.get("thumb") or it.get("grandparent_thumb")
+        big = _fetch_image(plex_url, token, thumb, 320, 480) if thumb else None
+        hl["image"] = big or it.get("image")
     music = []
     try:
         music = music_added(db, days)
     except Exception as exc:
         logger.warning("Digest: couldn't list new albums: %s", exc)
-    return {"sections": sections, "highlight": hl, "mature_pick": mature, "music": music,
-            "coming": coming_up(db, days)}
+    return {"sections": sections, "highlight": hl, "music": music, "coming": coming_up(db, days)}
 
 
 # ── rendering ───────────────────────────────────────────────────────────────
@@ -506,7 +493,7 @@ def render_html(d: dict, week_label: str, inline_images: bool = False, view_url:
     summary = " · ".join(b for b in summary_bits if b) or "A quiet week"
 
     def feature(pick, label, name):
-        """A large card: the week's highlight, or the mature pick."""
+        """The large "Feature of the week" card."""
         it = pick["item"]
         if pick["kind"] == "movie":
             pop = _popularity(it)
@@ -531,15 +518,12 @@ def render_html(d: dict, week_label: str, inline_images: bool = False, view_url:
     # Highlight
     hl = d.get("highlight")
     if hl:
-        parts.append(feature(hl, "This week’s highlight", "hl"))
-    mature = d.get("mature_pick")
+        parts.append(feature(hl, "Feature of the week", "hl"))
 
-    featured = [p["item"] for p in (hl, mature) if p]
+    featured = [hl["item"]] if hl else []
 
     # Movies (grid) and TV (grouped)
     for key, title, kind in _SECTION_DEFS:
-        if key == "mature_movies" and mature:
-            parts.append(feature(mature, "Mature pick of the week", "mp"))
         items = [i for i in d["sections"].get(key, []) if not any(i is f for f in featured)]
         if not items:
             continue
@@ -649,12 +633,7 @@ def render_text(d: dict, week_label: str, view_url: str = "") -> str:
     hl = d.get("highlight")
     if hl:
         it = hl["item"]
-        lines += [f"Highlight: {it['title']}" + (f" ({it.get('year')})" if it.get("year") else ""),
-                  _clip(it.get("summary") or "", 240), it.get("plex_link") or "", ""]
-    mp = d.get("mature_pick")
-    if mp:
-        it = mp["item"]
-        lines += [f"Mature pick of the week: {it['title']}" + (f" ({it.get('year')})" if it.get("year") else ""),
+        lines += [f"Feature of the week: {it['title']}" + (f" ({it.get('year')})" if it.get("year") else ""),
                   _clip(it.get("summary") or "", 240), it.get("plex_link") or "", ""]
     for key, title, kind in _SECTION_DEFS:
         items = d["sections"].get(key, [])

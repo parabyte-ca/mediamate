@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { api, type BrowseMovie, type BrowseShow, type DownloadPath, type DuplicateCheckResult, type TorrentResult, type WatchlistCreate } from "../api/client";
 import MusicSearch from "../components/MusicSearch";
-import { AddShowDialog, MovieCard, ShowCard, useAddMovie } from "../components/TitleCards";
+import { AddShowDialog, MovieCard, SaveToField, ShowCard, useAddMovie } from "../components/TitleCards";
 
 // ── Search history ────────────────────────────────────────────────────────────
 
@@ -203,7 +203,6 @@ function WatchlistModal({
   onClose: () => void;
   onConfirm: (data: WatchlistCreate) => void;
 }) {
-  const defaultPath = paths.find((p) => p.is_default);
   const [form, setForm] = useState<WatchlistCreate>({
     title:            result.title.replace(/S\d+E\d+.*/i, "").trim(),
     search_query:     result.title.replace(/S\d+E\d+.*/i, "").trim(),
@@ -211,7 +210,7 @@ function WatchlistModal({
     codec:            defaultCodec !== "Any" ? defaultCodec : "x265",
     season:           1,
     episode:          1,
-    download_path_id: defaultPath?.id,
+    download_path_id: undefined,                      // Automatic: TV or Movies library, by who it's for
     enabled:          true,
   });
   const set = (k: keyof WatchlistCreate, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
@@ -259,13 +258,8 @@ function WatchlistModal({
             </div>
           </div>
           {paths.length > 0 && (
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Save to</label>
-              <select value={form.download_path_id ?? ""} onChange={(e) => set("download_path_id", e.target.value ? Number(e.target.value) : undefined)} className={FIELD}>
-                <option value="">Use default</option>
-                {paths.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
+            <SaveToField kind="tv" title={form.title} value={form.download_path_id ?? null}
+              onChange={(id) => set("download_path_id", id ?? undefined)} />
           )}
         </div>
 
@@ -705,6 +699,7 @@ function TorrentSearch() {
           }}
         />
       )}
+      {movieAdd.dialog}
       {showTarget && (
         <AddShowDialog show={showTarget} onClose={() => setShowTarget(null)}
           onAdded={() => {

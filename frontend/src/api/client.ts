@@ -1114,12 +1114,16 @@ export const api = {
         `/watchlist/${id}/matches${q ? `?q=${encodeURIComponent(q)}` : ""}`),
     setMatch: (id: number, tvmaze_id: number) =>
       req<WatchlistItem>(`/watchlist/${id}/match`, { method: "POST", body: JSON.stringify({ tvmaze_id }) }),
-    addFromTmdb: (data: { tmdb_id: number; profile_id?: number | null; audience?: "auto" | "general" | "mature" | null }) =>
+    addFromTmdb: (data: { tmdb_id: number; profile_id?: number | null; audience?: "auto" | "general" | "mature" | null; download_path_id?: number | null }) =>
       req<WatchlistItem>("/watchlist/from-tmdb", { method: "POST", body: JSON.stringify(data) }),
     searchMovie: (id: number) =>
       req<{ status: string; message: string; title?: string }>(`/watchlist/${id}/search-movie`, { method: "POST" }),
-    addFromTvmaze: (data: { tvmaze_id: number; start?: "next" | "beginning" }) =>
+    addFromTvmaze: (data: { tvmaze_id: number; start?: "next" | "beginning"; download_path_id?: number | null }) =>
       req<WatchlistItem>("/watchlist/from-tvmaze", { method: "POST", body: JSON.stringify(data) }),
+    /** Where Automatic would send a show or movie that isn't on the Watchlist yet. */
+    routePreview: (kind: "tv" | "movie", title: string, year?: number | null) =>
+      req<{ folder: string | null; folder_id: number | null; reason: string }>(
+        `/watchlist/route-preview?${new URLSearchParams({ kind, title, ...(year ? { year: String(year) } : {}) })}`),
     checkShowStatuses: () =>
       req<{ ok: boolean; message: string }>("/watchlist/check-show-statuses", { method: "POST" }),
     setOverride: (id: number) =>

@@ -1131,7 +1131,7 @@ export default function Watchlist() {
     if (modal === true) {
       try {
         if (data.kind === "movie" && data.tmdb_id) {
-          const w = await api.watchlist.addFromTmdb({ tmdb_id: data.tmdb_id, profile_id: data.profile_id, audience: data.audience });
+          const w = await api.watchlist.addFromTmdb({ tmdb_id: data.tmdb_id, profile_id: data.profile_id, audience: data.audience, download_path_id: data.download_path_id ?? null });
           if (!data.profile_id) {
             await api.watchlist.update(w.id, { quality: data.quality, codec: data.codec, download_path_id: data.download_path_id,
                                                max_size_mb: data.max_size_mb, preferred_groups: data.preferred_groups });

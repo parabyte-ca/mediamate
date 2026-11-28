@@ -528,6 +528,14 @@ class TestAddFromTvmaze:
         b = self._post(api, start="beginning").json()
         assert (b["season"], b["episode"]) == (1, 1)
 
+    def test_a_folder_picked_when_adding_is_kept(self, api, db):
+        from app.models import DownloadPath
+        dp = DownloadPath(name="Mature TV Shows", path="/m/mtv", downloads=True, scan=False)
+        db.add(dp)
+        db.commit()
+        r = self._post(api, download_path_id=dp.id)
+        assert r.status_code == 201 and r.json()["download_path_id"] == dp.id
+
     def test_invalid_start_rejected(self, api):
         assert self._post(api, start="whenever").status_code == 422
 

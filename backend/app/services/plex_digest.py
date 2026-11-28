@@ -99,6 +99,7 @@ def _fetch_recently_added(plex_url: str, token: str, library_id: str, days: int 
             "year":              elem.get("year", ""),
             "summary":           (elem.get("summary") or "").strip(),
             "rating":            elem.get("rating", "") or elem.get("audienceRating", ""),
+            "audience_rating":   elem.get("audienceRating", ""),
             "content_rating":    elem.get("contentRating", ""),
             "genres":            [g.get("tag") for g in elem.findall("Genre") if g.get("tag")],
             "item_type":         elem.get("type", ""),
@@ -301,26 +302,51 @@ def _score(item: dict) -> float:
         return 0.0
 
 
+def _popularity(item: dict) -> float:
+    """How well liked a title is: Plex's audience rating, else its critic rating."""
+    try:
+        return float(item.get("audience_rating") or 0) or _score(item)
+    except (TypeError, ValueError):
+        return _score(item)
+
+
+def _year_of(kind: str, it: dict) -> int:
+    return it.get("release_year", 0) if "tv" in kind else release_year(it)
+
+
+def _best(pool: list[tuple[str, dict]], this_year: int, score=_score) -> tuple[str, dict]:
+    """A new release, not an old film that happened to be added: among titles out this
+    year or last, the best scored; failing that, the newest (then best scored)."""
+    fresh = [p for p in pool if _year_of(*p) >= this_year - 1]
+    if fresh:
+        return max(fresh, key=lambda p: (score(p[1]), _year_of(*p), p[1].get("added_at", 0)))
+    return max(pool, key=lambda p: (_year_of(*p), score(p[1]), p[1].get("added_at", 0)))
+
+
 def pick_highlight(sections: dict[str, list], this_year: int | None = None) -> dict | None:
-    """This week's highlight: a new release, not an old film that happened to be added.
-    Among titles out this year or last, the best rated; failing that, the newest (then best
-    rated). Family-friendly titles first, since the digest goes to the whole household."""
+    """This week's highlight: the best new release. Family-friendly titles first, since
+    the digest goes to the whole household."""
     this_year = this_year or datetime.now(timezone.utc).year
-
-    def year_of(kind: str, it: dict) -> int:
-        return it.get("release_year", 0) if "tv" in kind else release_year(it)
-
     for keys in (("movies", "tv"), ("mature_movies", "mature_tv")):
         pool = [(k, i) for k in keys for i in sections.get(k, [])]
-        if not pool:
-            continue
-        fresh = [p for p in pool if year_of(*p) >= this_year - 1]
-        if fresh:
-            kind, item = max(fresh, key=lambda p: (_score(p[1]), year_of(*p), p[1].get("added_at", 0)))
-        else:
-            kind, item = max(pool, key=lambda p: (year_of(*p), _score(p[1]), p[1].get("added_at", 0)))
-        return {"kind": "movie" if "movies" in kind else "tv", "item": item}
+        if pool:
+            kind, item = _best(pool, this_year)
+            return {"kind": "movie" if "movies" in kind else "tv", "item": item}
     return None
+
+
+def pick_mature_movie(sections: dict[str, list], highlight: dict | None = None,
+                      this_year: int | None = None) -> dict | None:
+    """The mature movie of the week: the most recent release that's also the most
+    popular (audience rating), among mature movies added this week. None when there
+    are none, or when it's already the main highlight."""
+    this_year = this_year or datetime.now(timezone.utc).year
+    taken = highlight["item"] if highlight else None
+    pool = [("mature_movies", i) for i in sections.get("mature_movies", []) if i is not taken]
+    if not pool:
+        return None
+    _, item = _best(pool, this_year, score=_popularity)
+    return {"kind": "movie", "item": item}
 
 
 def music_added(db, days: int = 7, limit: int = 12) -> list[dict]:
@@ -386,17 +412,20 @@ def build_digest(db, plex_url: str, token: str, excluded_libs: frozenset[str] = 
     optional: one failing leaves its section out."""
     sections = fetch_digest_sections(plex_url, token, days=days, excluded_libs=excluded_libs)
     hl = pick_highlight(sections)
-    if hl is not None:
-        it = hl["item"]
-        thumb = it.get("thumb") or it.get("grandparent_thumb")
-        big = _fetch_image(plex_url, token, thumb, 320, 480) if thumb else None
-        hl["image"] = big or it.get("image")
+    mature = pick_mature_movie(sections, hl)
+    for pick in (hl, mature):
+        if pick is not None:
+            it = pick["item"]
+            thumb = it.get("thumb") or it.get("grandparent_thumb")
+            big = _fetch_image(plex_url, token, thumb, 320, 480) if thumb else None
+            pick["image"] = big or it.get("image")
     music = []
     try:
         music = music_added(db, days)
     except Exception as exc:
         logger.warning("Digest: couldn't list new albums: %s", exc)
-    return {"sections": sections, "highlight": hl, "music": music, "coming": coming_up(db, days)}
+    return {"sections": sections, "highlight": hl, "mature_pick": mature, "music": music,
+            "coming": coming_up(db, days)}
 
 
 # ── rendering ───────────────────────────────────────────────────────────────
@@ -476,35 +505,42 @@ def render_html(d: dict, week_label: str, inline_images: bool = False, view_url:
                     f"{c['albums']} album{'s' if c['albums'] != 1 else ''}" if c["albums"] else ""]
     summary = " · ".join(b for b in summary_bits if b) or "A quiet week"
 
-    # Highlight
-    hl = d.get("highlight")
-    if hl:
-        it = hl["item"]
-        meta = []
-        if hl["kind"] == "movie":
+    def feature(pick, label, name):
+        """A large card: the week's highlight, or the mature pick."""
+        it = pick["item"]
+        if pick["kind"] == "movie":
+            pop = _popularity(it)
             meta = [str(it.get("year") or ""), it.get("content_rating") or "",
-                    f"★ {_score(it):.1f}" if _score(it) else "", ", ".join((it.get("genres") or [])[:2])]
+                    f"★ {pop:.1f}" if pop else "", ", ".join((it.get("genres") or [])[:2])]
         else:
             n = len(set(it.get("episodes", [])))
             meta = [it.get("content_rating") or "", f"{n} new episode{'s' if n != 1 else ''}",
                     it.get("episode_ranges") or ""]
-        parts.append(
+        return (
             f'<tr><td style="padding-top:20px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
             f'class="mm-card mm-hl" style="background:{_CARD};border-radius:14px"><tr>'
-            f'<td width="40%" style="padding:16px;vertical-align:top">{poster(hl.get("image"), "hl", 220, 330, it.get("plex_link") or "", 10)}</td>'
+            f'<td width="40%" style="padding:16px;vertical-align:top">{poster(pick.get("image"), name, 220, 330, it.get("plex_link") or "", 10)}</td>'
             f'<td style="padding:16px 16px 16px 4px;vertical-align:top">'
-            f'<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:{_ACCENT}">This week’s highlight</div>'
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:{_ACCENT}">{label}</div>'
             f'<div class="mm-ink" style="font-size:22px;font-weight:800;line-height:1.25;color:{_INK};margin-top:6px">{_esc(it["title"])}</div>'
             f'<div class="mm-muted" style="font-size:13px;color:{_MUTED};margin-top:4px">{_esc(" · ".join(m for m in meta if m))}</div>'
             f'<div class="mm-muted" style="font-size:14px;line-height:1.55;color:{_MUTED};margin-top:10px">{_esc(_clip(it.get("summary") or "", 320))}</div>'
             f'<div style="margin-top:14px">{button("▶ Watch in Plex", it.get("plex_link") or "")}</div>'
             f'</td></tr></table></td></tr>')
 
-    hl_item = hl["item"] if hl else None
+    # Highlight
+    hl = d.get("highlight")
+    if hl:
+        parts.append(feature(hl, "This week’s highlight", "hl"))
+    mature = d.get("mature_pick")
+
+    featured = [p["item"] for p in (hl, mature) if p]
 
     # Movies (grid) and TV (grouped)
     for key, title, kind in _SECTION_DEFS:
-        items = [i for i in d["sections"].get(key, []) if i is not hl_item]
+        if key == "mature_movies" and mature:
+            parts.append(feature(mature, "Mature pick of the week", "mp"))
+        items = [i for i in d["sections"].get(key, []) if not any(i is f for f in featured)]
         if not items:
             continue
         parts.append(heading(title, len(items)))
@@ -614,6 +650,11 @@ def render_text(d: dict, week_label: str, view_url: str = "") -> str:
     if hl:
         it = hl["item"]
         lines += [f"Highlight: {it['title']}" + (f" ({it.get('year')})" if it.get("year") else ""),
+                  _clip(it.get("summary") or "", 240), it.get("plex_link") or "", ""]
+    mp = d.get("mature_pick")
+    if mp:
+        it = mp["item"]
+        lines += [f"Mature pick of the week: {it['title']}" + (f" ({it.get('year')})" if it.get("year") else ""),
                   _clip(it.get("summary") or "", 240), it.get("plex_link") or "", ""]
     for key, title, kind in _SECTION_DEFS:
         items = d["sections"].get(key, [])
